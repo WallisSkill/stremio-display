@@ -1,0 +1,104 @@
+name: iOS app
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "src-tauri/**"
+      - "plugins/**"
+      - "ui/**"
+      - ".github/workflows/ios.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios
+  cancel-in-progress: true
+
+jobs:
+  ipa:
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install tools
+        run: |
+          npm install -g @tauri-apps/cli@^2.11
+          brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
+          tauri --version
+
+      - name: Create Xcode project
+        working-directory: src-tauri
+        run: |
+          tauri ios init --ci
+          tauri icon icons/icon.png
+
+      - name: Add mpv and app settings
+        working-directory: src-tauri/gen/apple
+        run: |
+          ruby -ryaml -e '
+            f = "project.yml"
+            y = YAML.load_file(f)
+            y["packages"] ||= {}
+            y["packages"]["MPVKit"] = { "url" => "https://github.com/mpvkit/MPVKit", "exactVersion" => "1.0.0" }
+            t = y["targets"].keys.find { |k| k.end_with?("_iOS") }
+            (y["targets"][t]["dependencies"] ||= []) << { "package" => "MPVKit", "product" => "MPVKit" }
+            File.write(f, y.to_yaml)
+          '
+          plist=$(ls */Info.plist | head -1)
+          pb() { /usr/libexec/PlistBuddy -c "$1" "$plist" || true; }
+          pb "Delete :UIBackgroundModes"
+          pb "Add :UIBackgroundModes array"
+          pb "Add :UIBackgroundModes:0 string audio"
+          pb "Delete :NSAppTransportSecurity"
+          pb "Add :NSAppTransportSecurity dict"
+          pb "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool true"
+          pb "Delete :UISupportedInterfaceOrientations"
+          pb "Add :UISupportedInterfaceOrientations array"
+          pb "Add :UISupportedInterfaceOrientations:0 string UIInterfaceOrientationPortrait"
+          pb "Add :UISupportedInterfaceOrientations:1 string UIInterfaceOrientationLandscapeLeft"
+          pb "Add :UISupportedInterfaceOrientations:2 string UIInterfaceOrientationLandscapeRight"
+          pb "Delete :CFBundleDisplayName"
+          pb "Add :CFBundleDisplayName string WiS TV"
+          xcodegen generate
+          grep -q MPVKit *.xcodeproj/project.pbxproj
+          cat "$plist"
+
+      - name: Build IPA
+        working-directory: src-tauri
+        run: tauri ios build --no-sign
+
+      - name: Collect IPA
+        run: |
+          mkdir -p out
+          ipa=$(find src-tauri/gen/apple/build -name '*.ipa' | head -1)
+          if [ -z "$ipa" ]; then
+            app=$(find src-tauri/gen/apple/build -name '*.app' -type d | grep -i iphoneos | head -1)
+            [ -n "$app" ] || app=$(find src-tauri/gen/apple/build -name '*.app' -type d | head -1)
+            mkdir -p Payload && cp -R "$app" Payload/
+            zip -qry out/WiSTV.ipa Payload
+          else
+            cp "$ipa" out/WiSTV.ipa
+          fi
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WiSTV-ipa
+          path: out/WiSTV.ipa
+          retention-days: 14

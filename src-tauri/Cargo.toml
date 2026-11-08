@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 description = "WiS TV - a personal Stremio front end"
 
+[lib]
+name = "wistv_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -14,8 +18,15 @@ serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio = { version = "1", features = ["time"] }
 futures = "0.3"
-libloading = "0.8"
 urlencoding = "2"
+
+[target.'cfg(windows)'.dependencies]
+libloading = "0.8"
+
+[target.'cfg(target_os = "ios")'.dependencies]
+tauri-plugin-wistv-video = { path = "../plugins/video" }
+librqbit = { version = "9.1", default-features = false, features = ["rust-tls"] }
+tokio = { version = "1", features = ["time", "net", "io-util", "sync", "fs", "rt-multi-thread", "macros"] }
 
 [profile.dev]
 debug = 0

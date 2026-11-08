@@ -1,7 +1,10 @@
+#[cfg(windows)]
 use crate::server::stremio_dirs;
+#[cfg(windows)]
 use libloading::os::windows::{Library, LOAD_WITH_ALTERED_SEARCH_PATH};
 use serde_json::{json, Value};
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
+#[cfg(windows)]
 use std::path::PathBuf;
 use std::ptr;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -31,6 +34,7 @@ struct MpvEndFile {
 type Handle = *mut c_void;
 
 struct Mpv {
+    #[cfg(windows)]
     _lib: Library,
     create: unsafe extern "C" fn() -> Handle,
     initialize: unsafe extern "C" fn(Handle) -> c_int,
@@ -44,6 +48,7 @@ struct Mpv {
     terminate_destroy: unsafe extern "C" fn(Handle),
 }
 
+#[cfg(windows)]
 fn candidates() -> Vec<PathBuf> {
     let mut out = Vec::new();
     if let Ok(p) = std::env::var("WISTV_LIBMPV") {
@@ -56,7 +61,43 @@ fn candidates() -> Vec<PathBuf> {
     out
 }
 
+#[cfg(not(windows))]
+mod linked {
+    use super::{Handle, MpvEvent};
+    use std::ffi::{c_char, c_int, c_void};
+
+    extern "C" {
+        pub fn mpv_create() -> Handle;
+        pub fn mpv_initialize(ctx: Handle) -> c_int;
+        pub fn mpv_set_option_string(ctx: Handle, name: *const c_char, data: *const c_char) -> c_int;
+        pub fn mpv_set_property_string(ctx: Handle, name: *const c_char, data: *const c_char) -> c_int;
+        pub fn mpv_command(ctx: Handle, args: *mut *const c_char) -> c_int;
+        pub fn mpv_get_property_string(ctx: Handle, name: *const c_char) -> *mut c_char;
+        pub fn mpv_free(data: *mut c_void);
+        pub fn mpv_wait_event(ctx: Handle, timeout: f64) -> *mut MpvEvent;
+        pub fn mpv_error_string(error: c_int) -> *const c_char;
+        pub fn mpv_terminate_destroy(ctx: Handle);
+    }
+}
+
 impl Mpv {
+    #[cfg(not(windows))]
+    fn load() -> Result<Self, String> {
+        Ok(Self {
+            create: linked::mpv_create,
+            initialize: linked::mpv_initialize,
+            set_option_string: linked::mpv_set_option_string,
+            set_property_string: linked::mpv_set_property_string,
+            command: linked::mpv_command,
+            get_property_string: linked::mpv_get_property_string,
+            free: linked::mpv_free,
+            wait_event: linked::mpv_wait_event,
+            error_string: linked::mpv_error_string,
+            terminate_destroy: linked::mpv_terminate_destroy,
+        })
+    }
+
+    #[cfg(windows)]
     fn load() -> Result<Self, String> {
         let path = candidates()
             .into_iter()
@@ -153,6 +194,7 @@ fn mpv() -> Result<&'static Mpv, String> {
     LIB.get_or_init(Mpv::load).as_ref().map_err(Clone::clone)
 }
 
+#[cfg(windows)]
 mod win {
     type Hwnd = isize;
     type EnumProc = extern "system" fn(Hwnd, isize) -> i32;
@@ -185,12 +227,26 @@ mod win {
     }
 }
 
+#[cfg(windows)]
+const PLATFORM_OPTIONS: &[(&str, &str)] = &[("hwdec", "auto-safe"), ("sub-font", "Segoe UI Semibold")];
+
+#[cfg(not(windows))]
+const PLATFORM_OPTIONS: &[(&str, &str)] = &[
+    ("vo", "gpu-next"),
+    ("gpu-api", "vulkan"),
+    ("gpu-context", "moltenvk"),
+    ("hwdec", "videotoolbox"),
+    ("video-rotate", "no"),
+    ("sub-font", "Helvetica Neue"),
+    ("audio-exclusive", "no"),
+];
+
 pub struct Request {
     pub url: String,
     pub title: String,
     pub start_ms: u64,
     pub headers: Vec<String>,
-    pub hwnd: isize,
+    pub wid: i64,
 }
 
 pub struct Outcome {
@@ -258,7 +314,7 @@ impl Player {
         if ctx.is_null() {
             return Err("Không tạo được trình phát mpv".into());
         }
-        let wid = req.hwnd.to_string();
+        let wid = req.wid.to_string();
         unsafe {
             for (k, v) in [
                 ("wid", wid.as_str()),
@@ -270,7 +326,6 @@ impl Player {
                 ("input-vo-keyboard", "no"),
                 ("input-cursor", "no"),
                 ("cursor-autohide", "no"),
-                ("hwdec", "auto-safe"),
                 ("ytdl", "no"),
                 ("terminal", "no"),
                 ("idle", "yes"),
@@ -278,7 +333,6 @@ impl Player {
                 ("cache", "yes"),
                 ("demuxer-max-bytes", "400MiB"),
                 ("demuxer-max-back-bytes", "100MiB"),
-                ("sub-font", "Segoe UI Semibold"),
                 ("sub-font-size", "44"),
                 ("sub-border-size", "2.4"),
                 ("sub-shadow-offset", "1"),
@@ -287,6 +341,9 @@ impl Player {
                 ("alang", "vi,vie,ja,jpn,en,eng"),
                 ("volume-max", "150"),
             ] {
+                lib.set_option(ctx, k, v);
+            }
+            for (k, v) in PLATFORM_OPTIONS {
                 lib.set_option(ctx, k, v);
             }
             lib.set_option(ctx, "title", &req.title);
@@ -316,11 +373,11 @@ impl Player {
         });
         let ctx_addr = ctx as usize;
         let start_ms = req.start_ms;
-        let hwnd = req.hwnd;
+        let wid = req.wid;
         let shared = self.live.clone();
         std::thread::spawn(move || {
             let ctx = ctx_addr as Handle;
-            let out = unsafe { run(lib, ctx, start_ms, hwnd, &state) };
+            let out = unsafe { run(lib, ctx, start_ms, wid, &state) };
             {
                 let mut live = shared.lock().unwrap();
                 if live.as_ref().map(|l| l.generation) == Some(generation) {
@@ -353,7 +410,7 @@ unsafe fn tracks(lib: &Mpv, ctx: Handle) -> Vec<Value> {
         .collect()
 }
 
-unsafe fn run(lib: &Mpv, ctx: Handle, start_ms: u64, hwnd: isize, state: &dyn Fn(Value)) -> Outcome {
+unsafe fn run(lib: &Mpv, ctx: Handle, start_ms: u64, wid: i64, state: &dyn Fn(Value)) -> Outcome {
     let mut pos = start_ms as f64 / 1000.0;
     let mut dur = 0.0f64;
     let mut error = None;
@@ -363,7 +420,10 @@ unsafe fn run(lib: &Mpv, ctx: Handle, start_ms: u64, hwnd: isize, state: &dyn Fn
     let mut loaded = false;
     loop {
         let ev = (lib.wait_event)(ctx, 0.2);
-        win::video_below_ui(hwnd);
+        #[cfg(windows)]
+        win::video_below_ui(wid as isize);
+        #[cfg(not(windows))]
+        let _ = wid;
         if let Some(p) = lib.prop_f64(ctx, "time-pos") {
             pos = p;
         }

@@ -8,7 +8,9 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
+use tauri::{AppHandle, Emitter, Manager, State};
+#[cfg(not(target_os = "ios"))]
+use tauri::WebviewWindow;
 
 const SAVE_EVERY: Duration = Duration::from_secs(30);
 const MAX_STEP_MS: u64 = 5_000;
@@ -251,16 +253,46 @@ pub struct PlayCtx {
     pub session: u64,
 }
 
-fn open_external(url: &str) -> R<()> {
+fn open_external(app: &AppHandle, url: &str) -> R<()> {
     if !(url.starts_with("https://") || url.starts_with("http://")) {
         return Err("Liên kết ngoài không hợp lệ".into());
     }
-    std::process::Command::new("rundll32")
-        .args(["url.dll,FileProtocolHandler", url])
-        .spawn()
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+    #[cfg(target_os = "ios")]
+    {
+        use tauri_plugin_wistv_video::VideoExt;
+        app.video().open(url)
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        let _ = app;
+        std::process::Command::new("rundll32")
+            .args(["url.dll,FileProtocolHandler", url])
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
 }
+
+#[cfg(target_os = "ios")]
+fn video_target(app: &AppHandle) -> R<i64> {
+    use tauri_plugin_wistv_video::VideoExt;
+    app.video().layer()
+}
+
+#[cfg(windows)]
+fn video_target(app: &AppHandle) -> R<i64> {
+    let window = app.get_webview_window("main").ok_or("Không tìm thấy cửa sổ chính")?;
+    window.hwnd().map(|h| h.0 as i64).map_err(|e| e.to_string())
+}
+
+#[cfg(target_os = "ios")]
+fn keep_awake(app: &AppHandle, on: bool) {
+    use tauri_plugin_wistv_video::VideoExt;
+    let _ = app.video().awake(on);
+}
+
+#[cfg(not(target_os = "ios"))]
+fn keep_awake(_app: &AppHandle, _on: bool) {}
 
 async fn resolve(st: &AppState, stream: &Value) -> R<String> {
     if let Some(u) = stream["url"].as_str() {
@@ -271,7 +303,7 @@ async fn resolve(st: &AppState, stream: &Value) -> R<String> {
             .as_array()
             .map(|a| a.iter().filter_map(|s| s.as_str().map(str::to_string)).collect())
             .unwrap_or_default();
-        return server::torrent_url(&st.http, hash, stream["fileIdx"].as_i64(), sources).await;
+        return server::torrent_url(st, hash, stream["fileIdx"].as_i64(), sources).await;
     }
     if stream["ytId"].is_string() {
         return Err("Nguồn YouTube chưa được hỗ trợ".into());
@@ -282,13 +314,12 @@ async fn resolve(st: &AppState, stream: &Value) -> R<String> {
 #[tauri::command]
 pub async fn play(
     app: AppHandle,
-    window: WebviewWindow,
     st: State<'_, AppState>,
     stream: Value,
     ctx: PlayCtx,
 ) -> R<()> {
     if let Some(ext) = stream["externalUrl"].as_str() {
-        return open_external(ext);
+        return open_external(&app, ext);
     }
     let url = resolve(&st, &stream).await?;
     let headers: Vec<String> = stream["behaviorHints"]["proxyHeaders"]["request"]
@@ -304,8 +335,10 @@ pub async fn play(
         title: ctx.name.clone(),
         start_ms: ctx.start.unwrap_or(0),
         headers,
-        hwnd: window.hwnd().map(|h| h.0 as isize).map_err(|e| e.to_string())?,
+        wid: video_target(&app)?,
     };
+    keep_awake(&app, true);
+    let awake_app = app.clone();
     let state_app = app.clone();
     let session = ctx.session;
     let watch = Arc::new(Mutex::new(Watch::new()));
@@ -337,6 +370,7 @@ pub async fn play(
             }
         },
         move |out| {
+            keep_awake(&app, false);
             let _ = app.emit(
                 "player-ended",
                 json!({
@@ -367,6 +401,7 @@ pub async fn play(
             });
         },
     )
+    .inspect_err(|_| keep_awake(&awake_app, false))
 }
 
 #[tauri::command]
@@ -384,6 +419,13 @@ pub fn player_stop(st: State<'_, AppState>) {
     st.player.stop();
 }
 
+#[cfg(target_os = "ios")]
+#[tauri::command]
+pub fn player_fullscreen(on: Option<bool>) -> R<bool> {
+    Ok(on.unwrap_or(true))
+}
+
+#[cfg(not(target_os = "ios"))]
 #[tauri::command]
 pub fn player_fullscreen(window: WebviewWindow, on: Option<bool>) -> R<bool> {
     let cur = window.is_fullscreen().map_err(|e| e.to_string())?;
@@ -395,8 +437,8 @@ pub fn player_fullscreen(window: WebviewWindow, on: Option<bool>) -> R<bool> {
 }
 
 #[tauri::command]
-pub fn open_url(url: String) -> R<()> {
-    open_external(&url)
+pub fn open_url(app: AppHandle, url: String) -> R<()> {
+    open_external(&app, &url)
 }
 
 #[tauri::command]

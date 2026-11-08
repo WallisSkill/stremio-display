@@ -26,6 +26,8 @@ pub fn slim_user(user: &Value) -> Value {
 pub struct AppState {
     pub http: reqwest::Client,
     pub data_dir: PathBuf,
+    #[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+    pub cache_dir: PathBuf,
     pub session: Mutex<Option<Session>>,
     pub addons: Mutex<Vec<Addon>>,
     pub library: Mutex<Vec<Value>>,
@@ -36,6 +38,7 @@ impl AppState {
     pub fn load(app: &AppHandle) -> Result<Self, Box<dyn std::error::Error>> {
         let data_dir = app.path().app_data_dir()?;
         fs::create_dir_all(&data_dir)?;
+        let cache_dir = app.path().app_cache_dir().unwrap_or_else(|_| data_dir.join("cache"));
         let session = fs::read(data_dir.join("session.json"))
             .ok()
             .and_then(|b| serde_json::from_slice::<Session>(&b).ok())
@@ -55,6 +58,7 @@ impl AppState {
         Ok(Self {
             http,
             data_dir,
+            cache_dir,
             session: Mutex::new(session),
             addons: Mutex::new(Vec::new()),
             library: Mutex::new(Vec::new()),

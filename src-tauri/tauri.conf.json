@@ -26,6 +26,9 @@
   },
   "bundle": {
     "active": false,
+    "iOS": {
+      "minimumSystemVersion": "15.0"
+    },
     "icon": ["icons/icon.ico", "icons/icon.png"]
   }
 }

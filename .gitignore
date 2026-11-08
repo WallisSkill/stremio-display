@@ -2,3 +2,5 @@
 /src-tauri/gen/
 /worker/node_modules/
 /worker/.wrangler/
+/plugins/*/.tauri/
+/plugins/*/target/
