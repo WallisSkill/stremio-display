@@ -83,6 +83,7 @@ const app = {
 
 const isImdb = (id) => typeof id === "string" && /^tt\d+$/.test(id);
 const bgOf = (m) => m.background || (isImdb(m.id) ? `https://images.metahub.space/background/medium/${m.id}/img` : m.poster);
+const thumbOf = (m) => String(bgOf(m) || "").replace(/(images\.metahub\.space\/background\/)(medium|large)\//, "$1small/");
 const logoOf = (m) => m.logo || (isImdb(m.id) ? `https://images.metahub.space/logo/medium/${m.id}/img` : null);
 const yearOf = (m) => m.releaseInfo || (m.released ? String(m.released).slice(0, 4) : m.year || "");
 
@@ -181,14 +182,47 @@ const continueItems = () =>
 const libEntry = (id) => app.library.find((i) => i._id === id);
 const inLibrary = (id) => { const e = libEntry(id); return !!e && !e.removed && !e.temp; };
 
+const CACHE = "wistv.cache.";
+const cacheGet = (k) => { try { return JSON.parse(localStorage.getItem(CACHE + k)); } catch (e) { return null; } };
+function cacheSet(k, v) {
+  const value = JSON.stringify({ at: Date.now(), v });
+  try { localStorage.setItem(CACHE + k, value); return; } catch (e) {}
+  try {
+    for (const key of Object.keys(localStorage)) if (key.startsWith(CACHE + "cat:")) localStorage.removeItem(key);
+    localStorage.setItem(CACHE + k, value);
+  } catch (e) {}
+}
+function cacheClear() {
+  try { for (const key of Object.keys(localStorage)) if (key.startsWith(CACHE)) localStorage.removeItem(key); } catch (e) {}
+}
+
+const bootKey = () => `boot:${app.user?._id || app.user?.email || "guest"}`;
+const saveBoot = () => cacheSet(bootKey(), { addons: app.addons, library: app.library });
+
 async function refreshLibrary() {
-  try { app.library = await call("library"); } catch (e) { app.library = []; }
+  try { app.library = await call("library"); saveBoot(); } catch (e) { app.library = []; }
+}
+
+const LIGHT = ["id", "type", "name", "poster", "posterShape", "background", "logo", "description", "releaseInfo", "year", "imdbRating", "genres", "genre", "runtime", "released"];
+const light = (m) => Object.fromEntries(LIGHT.filter((k) => m[k] != null).map((k) => [k, m[k]]));
+const CATALOG_FRESH_MS = 30 * 60 * 1000;
+
+function cachedCatalog(addon, cat) {
+  const key = `cat:${addon.transportUrl}|${cat.type}|${cat.id}`;
+  const fresh = () => call("catalog", { url: addon.transportUrl, kind: cat.type, id: cat.id, extra: [] })
+    .then((list) => { const items = list.slice(0, 100).map(light); cacheSet(key, items); return items; });
+  const hit = cacheGet(key);
+  if (hit && Array.isArray(hit.v) && hit.v.length) {
+    if (Date.now() - hit.at > CATALOG_FRESH_MS) fresh().catch(() => {});
+    return Promise.resolve(hit.v);
+  }
+  return fresh();
 }
 
 function card(m, shape = "poster", opts = {}) {
   const art = h("div", { class: "art" });
   const fallback = h("div", { class: "fallback" }, m.name);
-  const src = shape === "wide" ? bgOf(m) : m.poster;
+  const src = shape === "wide" ? thumbOf(m) : m.poster;
   art.append(image(src, m.name, () => art.append(fallback)));
   if (shape === "wide") {
     const label = h("div", { class: "label" }, opts.label || m.name);
@@ -325,7 +359,7 @@ function renderBrowse(view, filterType) {
     const shape = i === 0 ? "wide" : "poster";
     const title = cat.name || cat.id;
     const sub = `${TYPE_LABEL[cat.type] || cat.type} · ${addon.manifest.name}`;
-    shelves.append(shelf(title, sub, shape, () => call("catalog", { url: addon.transportUrl, kind: cat.type, id: cat.id, extra: [] }), {
+    shelves.append(shelf(title, sub, shape, () => cachedCatalog(addon, cat), {
       eager: i < 2,
       onFocus: preview,
       onLoaded: i === 0 ? (items) => {
@@ -427,7 +461,7 @@ const epShort = (v) => `M${v.season ?? 0}:T${v.episode ?? v.number ?? "?"}`;
 const epName = (v) => `${epShort(v)} · ${v.title || v.name || "Tập " + (v.episode ?? "")}`;
 
 function episodeCard(m, v, entry) {
-  const thumb = v.thumbnail || bgOf(m);
+  const thumb = v.thumbnail || thumbOf(m);
   const art = h("div", { class: "art" }, image(thumb, v.title));
   if (entry?.state?.video_id === v.id && entry.state.timeOffset > 0 && entry.state.duration) {
     art.append(h("div", { class: "progress" }, h("i", { style: `width:${Math.min(100, (entry.state.timeOffset / entry.state.duration) * 100)}%` })));
@@ -1112,7 +1146,7 @@ async function renderSettings(view) {
       h("div", { class: "avatar" }, initial()),
       h("div", { class: "who" }, h("b", {}, name), h("span", {}, app.user ? "Đã đồng bộ với Stremio" : "Chế độ khách · chỉ có Cinemeta")),
       app.user
-        ? h("button", { class: "btn focusable", onclick: async () => { await call("logout"); app.user = null; app.library = []; app.addons = []; go("login", {}, true); } }, "Đăng xuất")
+        ? h("button", { class: "btn focusable", onclick: async () => { await call("logout"); cacheClear(); app.user = null; app.library = []; app.addons = []; go("login", {}, true); } }, "Đăng xuất")
         : h("button", { class: "btn primary focusable", onclick: () => go("login", {}, true) }, "Đăng nhập")));
   const list = h("div", { class: "panel" }, h("h3", {}, `Addon (${app.addons.length})`),
     h("div", { style: "display:flex;gap:12px;align-items:center;flex-wrap:wrap" },
@@ -1588,6 +1622,11 @@ document.addEventListener("mouseup", (e) => { if (e.button === 3) back(); });
 
 {
   listen("player-state", ({ payload }) => onPlayerState(payload));
+  listen("player-fullscreen", ({ payload }) => {
+    pl.fs = !!payload?.on;
+    if (pl.ui) pl.ui.fs.innerHTML = pl.fs ? ICON.unfull : ICON.full;
+    if (pl.open) wake();
+  });
   listen("player-ended", ({ payload }) => {
     if (!pl.open || payload.session !== pl.session) return;
     if (payload.error) toast(`Trình phát: ${payload.error}`, true);
@@ -1614,15 +1653,35 @@ async function startupOpen() {
   startPlayback({ id: "local:open", type: "movie", name: "Kiểm tra trình phát" }, "local:open", "", { url }, 0);
 }
 
+const homeSig = () => JSON.stringify([
+  app.addons.map((a) => a.transportUrl),
+  continueItems().slice(0, 20).map((i) => [i._id, i.state?.video_id, Math.round((i.state?.timeOffset || 0) / 60000)]),
+]);
+
 async function boot() {
-  try {
-    app.addons = await call("addons");
-  } catch (e) {
-    app.addons = [];
-    toast(`Không tải được addon: ${e}`, true);
-  }
-  await refreshLibrary();
+  const hit = cacheGet(bootKey());
+  const fresh = Promise.allSettled([call("addons"), call("library")]);
+  const apply = ([addons, library]) => {
+    if (addons.status === "fulfilled") app.addons = addons.value;
+    else { app.addons = app.addons || []; toast(`Không tải được addon: ${addons.reason}`, true); }
+    if (library.status === "fulfilled") app.library = library.value;
+    else app.library = app.library || [];
+    if (addons.status === "fulfilled") saveBoot();
+  };
   $("#avatar").textContent = initial();
+  if (hit && Array.isArray(hit.v?.addons) && hit.v.addons.length) {
+    app.addons = hit.v.addons;
+    app.library = Array.isArray(hit.v.library) ? hit.v.library : [];
+    go("home");
+    const before = homeSig();
+    apply(await fresh);
+    const cur = app.stack[app.stack.length - 1];
+    if (homeSig() !== before && cur?.route === "home" && !pl.open && $("#sheet").hidden && $("#view").scrollTop < 40) render();
+    return;
+  }
+  app.addons = [];
+  app.library = [];
+  apply(await fresh);
   go("home");
 }
 

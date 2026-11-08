@@ -246,6 +246,7 @@ function ensureDom() {
   P.root.append(P.video, P.subsEl);
   document.body.prepend(P.root);
   const v = P.video;
+  watchVideoFs(v);
   v.addEventListener("loadedmetadata", () => {
     if (P.finished) return;
     P.loaded = true;
@@ -612,19 +613,68 @@ function setProp({ name, value }) {
   throw `Không hỗ trợ ${name}`;
 }
 
-async function fullscreen({ on }) {
+const pageFs = () => document.fullscreenElement || document.webkitFullscreenElement || null;
+let videoFs = false;
+
+function pageFsRequest() {
   const el = document.documentElement;
-  const cur = !!document.fullscreenElement;
-  const next = on == null ? !cur : !!on;
-  if (next && !cur && el.requestFullscreen) {
-    const req = el.requestFullscreen({ navigationUI: "hide" });
-    try { await req; } catch (e) {}
-    try { await screen.orientation.lock("landscape"); } catch (e) {}
-  } else if (!next && cur) {
-    try { screen.orientation.unlock(); } catch (e) {}
-    try { await document.exitFullscreen(); } catch (e) {}
+  if (el.requestFullscreen) return () => el.requestFullscreen({ navigationUI: "hide" });
+  if (el.webkitRequestFullscreen) return () => el.webkitRequestFullscreen();
+  return null;
+}
+
+function fullscreenChanged() {
+  if (!pageFs()) { try { screen.orientation.unlock(); } catch (e) {} }
+  emit("player-fullscreen", { on: !!pageFs() || videoFs });
+}
+document.addEventListener("fullscreenchange", fullscreenChanged);
+document.addEventListener("webkitfullscreenchange", fullscreenChanged);
+
+function nativeSubs(show) {
+  const v = P.video;
+  if (!v || !v.addTextTrack || typeof VTTCue === "undefined") return;
+  if (!P.track) P.track = v.addTextTrack("subtitles", "Phụ đề", "vi");
+  const t = P.track;
+  for (const c of [...(t.cues || [])]) t.removeCue(c);
+  const list = show && P.sid ? P.ext[P.sid - 1]?.cues : null;
+  if (list) for (const c of list) {
+    const start = c.start + P.subDelay;
+    const end = c.end + P.subDelay;
+    if (end > 0) t.addCue(new VTTCue(Math.max(0, start), end, c.text));
   }
-  return !!document.fullscreenElement;
+  t.mode = list && list.length ? "showing" : "disabled";
+}
+
+function watchVideoFs(v) {
+  v.addEventListener("webkitbeginfullscreen", () => { videoFs = true; nativeSubs(true); fullscreenChanged(); });
+  v.addEventListener("webkitendfullscreen", () => { videoFs = false; nativeSubs(false); fullscreenChanged(); });
+}
+
+async function fullscreen({ on }) {
+  const cur = !!pageFs() || videoFs;
+  const next = on == null ? !cur : !!on;
+  if (next === cur) return cur;
+  if (next) {
+    const req = pageFsRequest();
+    if (req) {
+      try { await Promise.race([req(), new Promise((r) => setTimeout(r, 1500))]); } catch (e) {}
+      if (pageFs()) { try { await screen.orientation.lock("landscape"); } catch (e) {} }
+      return !!pageFs();
+    }
+    const v = P.video;
+    if (!v || !v.webkitEnterFullscreen) throw "Trình duyệt này không hỗ trợ toàn màn hình";
+    if (P.finished || v.readyState < 1) throw "Chờ phim tải xong rồi bấm toàn màn hình";
+    nativeSubs(true);
+    try { v.webkitEnterFullscreen(); } catch (e) { nativeSubs(false); throw "Không mở được toàn màn hình"; }
+    return true;
+  }
+  if (videoFs) {
+    try { P.video.webkitExitFullscreen(); } catch (e) {}
+    return false;
+  }
+  try { screen.orientation.unlock(); } catch (e) {}
+  try { await (document.exitFullscreen ? document.exitFullscreen() : document.webkitExitFullscreen()); } catch (e) {}
+  return !!pageFs();
 }
 
 export const web = {
