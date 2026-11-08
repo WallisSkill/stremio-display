@@ -605,7 +605,7 @@ function buildPlayer() {
   ui.menu = h("div", { class: "pl-menu", hidden: true });
   ui.menu.addEventListener("pointerdown", (e) => e.stopPropagation());
   ui.menu.addEventListener("click", (e) => e.stopPropagation());
-  ui.fill = iconBtn(fillMode ? "fit" : "fill", fillMode ? "Giữ đúng tỉ lệ (Z)" : "Dãn kín màn hình (Z)", () => setFill(!fillMode, true));
+  ui.stretch = iconBtn(fillMode ? "fit" : "fill", fillMode ? "Giữ đúng tỉ lệ (Z)" : "Dãn kín màn hình (Z)", () => setFill(!fillMode, true));
   ui.clock = h("span", { class: "pl-clock" });
   ui.batt = h("span", { class: "pl-batt", hidden: true });
   const top = h("div", { class: "pl-top" }, iconBtn("left", "Quay lại (Esc)", () => closePlayer()), h("div", { class: "pl-titles" }, ui.title, ui.sub), h("div", { class: "pl-status" }, ui.clock, ui.batt));
@@ -622,8 +622,8 @@ function buildPlayer() {
     ui.speed.classList.add("act");
     ui.fillIcon = h("span", { html: ICON[fillMode ? "fit" : "fill"] });
     ui.fillLabel = h("span", { class: "pl-label" }, fillMode ? "Vừa hình" : "Dãn hình");
-    ui.fill.classList.add("act");
-    ui.fill.replaceChildren(ui.fillIcon, ui.fillLabel);
+    ui.stretch.classList.add("act");
+    ui.stretch.replaceChildren(ui.fillIcon, ui.fillLabel);
     ui.lock = iconBtn("lock", "Khoá màn hình", () => setLock(true));
     ui.lock.classList.add("act");
     ui.lock.append(h("span", { class: "pl-label" }, "Khoá"));
@@ -632,13 +632,13 @@ function buildPlayer() {
     back10.classList.add("big");
     fwd10.classList.add("big");
     center = h("div", { class: "pl-center" }, back10, ui.play, fwd10);
-    bottom = h("div", { class: "pl-bottom" }, seekRow, h("div", { class: "pl-actions" }, ui.lock, ui.fill, ui.speed, ui.eps, ui.cc, ui.next));
+    bottom = h("div", { class: "pl-bottom" }, seekRow, h("div", { class: "pl-actions" }, ui.lock, ui.stretch, ui.speed, ui.eps, ui.cc, ui.next));
   } else {
     bottom = h("div", { class: "pl-bottom" },
       seekRow,
       h("div", { class: "pl-row" },
         h("div", { class: "pl-group" }, ui.play, back10, fwd10, ui.next, h("div", { class: "pl-volwrap" }, ui.volBtn, ui.vol)),
-        h("div", { class: "pl-group" }, ui.fill, ui.eps, ui.cc, ui.speed, ui.fs)));
+        h("div", { class: "pl-group" }, ui.stretch, ui.eps, ui.cc, ui.speed, ui.fs)));
   }
   for (const el of [bottom, center].filter(Boolean)) {
     el.addEventListener("click", (e) => e.stopPropagation());
@@ -828,9 +828,9 @@ function setFill(on, announce) {
   try { localStorage.setItem("wistv.fill", on ? "1" : "0"); } catch (e) {}
   if (pl.open) quietSet("keepaspect", on ? "no" : "yes");
   if (pl.ui) {
-    pl.ui.fill.title = on ? "Giữ đúng tỉ lệ (Z)" : "Dãn kín màn hình (Z)";
+    pl.ui.stretch.title = on ? "Giữ đúng tỉ lệ (Z)" : "Dãn kín màn hình (Z)";
     if (pl.ui.fillIcon) { pl.ui.fillIcon.innerHTML = ICON[on ? "fit" : "fill"]; pl.ui.fillLabel.textContent = on ? "Vừa hình" : "Dãn hình"; }
-    else pl.ui.fill.innerHTML = ICON[on ? "fit" : "fill"];
+    else pl.ui.stretch.innerHTML = ICON[on ? "fit" : "fill"];
   }
   if (announce) toast(on ? "Dãn kín màn hình" : "Giữ đúng tỉ lệ hình");
 }
