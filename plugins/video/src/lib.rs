@@ -31,6 +31,13 @@ impl<R: Runtime> Video<R> {
             .map_err(|e| e.to_string())
     }
 
+    pub fn landscape(&self, on: bool) -> Result<(), String> {
+        self.0
+            .run_mobile_plugin::<Value>("landscape", json!({ "on": on }))
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+
     pub fn fullscreen(&self, on: bool) -> Result<(), String> {
         self.0
             .run_mobile_plugin::<Value>("fullscreen", json!({ "on": on }))

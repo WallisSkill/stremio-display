@@ -609,6 +609,11 @@ body.web-playing #wv { display: block; }
   .pl-top, .pl-bottom { padding-left: max(18px, env(safe-area-inset-left)); padding-right: max(18px, env(safe-area-inset-right)); }
 }
 
+@media (hover: none) and (pointer: coarse) {
+  .pl-row .pl-group:first-child { flex: 1; min-width: 0; }
+  .pl-row .pl-group:first-child .pl-time { margin-left: auto; margin-right: 6px; }
+}
+
 @media (max-width: 420px) {
   .pl-row .pl-group:first-child .pl-btn:nth-child(2), .pl-row .pl-group:first-child .pl-btn:nth-child(3) { display: none; }
 }

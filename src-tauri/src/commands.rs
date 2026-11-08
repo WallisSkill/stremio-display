@@ -333,6 +333,7 @@ async fn video_target(_app: &AppHandle, st: &AppState) -> R<Target> {
 fn keep_awake(app: &AppHandle, on: bool) {
     use tauri_plugin_wistv_video::VideoExt;
     let _ = app.video().awake(on);
+    let _ = app.video().landscape(on);
 }
 
 #[cfg(desktop)]

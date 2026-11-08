@@ -1,7 +1,11 @@
 package tv.wis.video
 
 import android.app.Activity
+import android.app.UiModeManager
+import android.content.Context
 import android.content.Intent
+import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import android.graphics.Color
 import android.net.Uri
 import android.view.Surface
@@ -40,7 +44,20 @@ class VideoPlugin(private val activity: Activity) : Plugin(activity), SurfaceHol
     private val native = Native()
     private var video: SurfaceView? = null
 
+    private val television: Boolean
+        get() = (activity.getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager)?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
+
+    private fun orient(landscape: Boolean) {
+        if (television) return
+        activity.requestedOrientation = if (landscape) {
+            ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        } else {
+            ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+        }
+    }
+
     override fun load(webView: WebView) {
+        activity.runOnUiThread { orient(false) }
         webView.setBackgroundColor(Color.TRANSPARENT)
         attach(webView, 0)
         val owner = activity as? ComponentActivity ?: return
@@ -93,6 +110,13 @@ class VideoPlugin(private val activity: Activity) : Plugin(activity), SurfaceHol
                 activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             }
         }
+        invoke.resolve()
+    }
+
+    @Command
+    fun landscape(invoke: Invoke) {
+        val args = invoke.parseArgs(FlagArgs::class.java)
+        activity.runOnUiThread { orient(args.on) }
         invoke.resolve()
     }
 
