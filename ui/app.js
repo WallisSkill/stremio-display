@@ -89,6 +89,9 @@ const app = {
 
 const isImdb = (id) => typeof id === "string" && /^tt\d+$/.test(id);
 const bgOf = (m) => m.background || (isImdb(m.id) ? `https://images.metahub.space/background/medium/${m.id}/img` : m.poster);
+const PORTRAIT = window.matchMedia("(orientation: portrait) and (max-width: 760px)");
+const posterArt = (m) => (isImdb(m.id) ? `https://images.metahub.space/poster/large/${m.id}/img` : m.poster || bgOf(m));
+const artOf = (m) => (PORTRAIT.matches ? posterArt(m) : bgOf(m));
 const thumbOf = (m) => String(bgOf(m) || "").replace(/(images\.metahub\.space\/background\/)(medium|large)\//, "$1small/");
 const logoOf = (m) => m.logo || (isImdb(m.id) ? `https://images.metahub.space/logo/medium/${m.id}/img` : null);
 const yearOf = (m) => m.releaseInfo || (m.released ? String(m.released).slice(0, 4) : m.year || "");
@@ -112,7 +115,12 @@ function toast(msg, bad = false) {
   toastTimer = setTimeout(() => (t.hidden = true), bad ? 6000 : 3200);
 }
 
-const bd = { front: "a", url: null };
+const bd = { front: "a", url: null, item: null };
+function showArt(m) {
+  bd.item = m;
+  setBackdrop(artOf(m));
+}
+PORTRAIT.addEventListener?.("change", () => { if (bd.item) setBackdrop(artOf(bd.item)); });
 function setBackdrop(url) {
   if (!url || url === bd.url) return;
   bd.url = url;
@@ -282,7 +290,7 @@ function shelf(title, sub, shape, load, opts = {}) {
 }
 
 function setHero(m, info, dots, idx) {
-  setBackdrop(bgOf(m));
+  showArt(m);
   info.dataset.cur = m.id;
   if (!m.description && !m._rich && m.id && m.type) {
     m._rich = true;
@@ -394,7 +402,7 @@ async function renderDetail(view, { kind, id, video, autoplay }) {
   try { m = await call("meta", { kind, id }); }
   catch (e) { page.replaceChildren(h("div", { class: "empty", style: "padding-top:40vh" }, String(e))); return; }
   if (!view.contains(page)) return;
-  setBackdrop(bgOf(m));
+  showArt(m);
 
   const libBtn = h("button", { class: "btn focusable" });
   const syncLib = () => { libBtn.innerHTML = inLibrary(m.id) ? `${ICON.check}<span>Trong thư viện</span>` : `${ICON.plus}<span>Thư viện</span>`; };
