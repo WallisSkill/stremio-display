@@ -1,0 +1,22 @@
+{
+  "92f73b8": "Nút dãn hình không còn bị kéo rộng theo thanh tiến trình; nút toàn màn hình trên PC hiện lại",
+  "b6e4361": "Trình phát không còn đơ khi chọn nguồn phát hay đổi phụ đề",
+  "ade6a35": "Ô tìm kiếm nhớ 10 lần tìm gần nhất",
+  "3be393c": { "text": "Điện thoại dựng dọc dùng poster dọc làm hình nền ở mọi tab", "only": ["ios", "android"] },
+  "6e5ce93": "iPhone không còn đơ khi mở phim (đọc pin và mở liên kết không chặn giao diện)",
+  "942078e": "Thêm nút Dãn hình / Vừa hình trên điện thoại; máy tính giữ đúng tỉ lệ mặc định",
+  "d3865de": "Phim mặc định dãn kín màn hình",
+  "0a04508": "Chế độ dãn kéo hình cho kín màn hình, không cắt mất hình",
+  "46793ef": "Thêm chế độ dãn, đồng hồ, mức pin và nút khoá màn hình trong trình phát",
+  "36dd67d": "Tự cắt viền đen chạy được trên nhiều bản mpv hơn",
+  "7e6dc01": "Tự cắt viền đen có sẵn trong phim, hết màn hình đen khi quay lại app trên iPhone, nhớ phụ đề đã chọn",
+  "8c9ea71": "Nút quay lại và tên phim nằm góc trên bên trái, ẩn thanh trạng thái iPhone khi xem",
+  "b4252eb": "Android quay lại app không còn mất hình",
+  "5dbdd6a": "Android hiển thị đúng kích thước video khi bắt đầu phát",
+  "bdae3f4": { "text": "Giữ đúng tỉ lệ khung hình, ẩn thanh hệ thống Android khi xem", "only": ["android"] },
+  "d39af20": "Danh sách addon tự làm mới khi quay lại app và khi mở tìm kiếm",
+  "b715330": "Trình phát kiểu Netflix trên màn hình cảm ứng",
+  "36fa193": "Tự xoay ngang khi xem phim, thời gian nằm bên phải",
+  "4246550": "Phát torrent bằng engine có sẵn trên mọi máy, thêm Android và tự cập nhật cho Windows",
+  "ffdf765": "Bản iPhone đầu tiên với mpv và server torrent có sẵn"
+}
