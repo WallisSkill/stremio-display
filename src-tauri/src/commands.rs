@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
-#[cfg(not(target_os = "ios"))]
+#[cfg(desktop)]
 use tauri::WebviewWindow;
 
 const SAVE_EVERY: Duration = Duration::from_secs(30);
@@ -257,12 +257,12 @@ fn open_external(app: &AppHandle, url: &str) -> R<()> {
     if !(url.starts_with("https://") || url.starts_with("http://")) {
         return Err("Liên kết ngoài không hợp lệ".into());
     }
-    #[cfg(target_os = "ios")]
+    #[cfg(mobile)]
     {
         use tauri_plugin_wistv_video::VideoExt;
         app.video().open(url)
     }
-    #[cfg(not(target_os = "ios"))]
+    #[cfg(desktop)]
     {
         let _ = app;
         std::process::Command::new("rundll32")
@@ -273,25 +273,69 @@ fn open_external(app: &AppHandle, url: &str) -> R<()> {
     }
 }
 
+type Target = (i64, Vec<(String, String)>);
+
 #[cfg(target_os = "ios")]
-fn video_target(app: &AppHandle) -> R<i64> {
+async fn video_target(app: &AppHandle, _st: &AppState) -> R<Target> {
     use tauri_plugin_wistv_video::VideoExt;
-    app.video().layer()
+    Ok((app.video().layer()?, Vec::new()))
 }
 
 #[cfg(windows)]
-fn video_target(app: &AppHandle) -> R<i64> {
+async fn video_target(app: &AppHandle, _st: &AppState) -> R<Target> {
     let window = app.get_webview_window("main").ok_or("Không tìm thấy cửa sổ chính")?;
-    window.hwnd().map(|h| h.0 as i64).map_err(|e| e.to_string())
+    let hwnd = window.hwnd().map(|h| h.0 as i64).map_err(|e| e.to_string())?;
+    Ok((hwnd, Vec::new()))
 }
 
-#[cfg(target_os = "ios")]
+#[cfg(target_os = "android")]
+const SYSTEM_FONTS: &[&str] = &[
+    "/system/fonts/Roboto-Regular.ttf",
+    "/system/fonts/NotoSans-Regular.ttf",
+    "/system/fonts/DroidSans.ttf",
+];
+
+#[cfg(target_os = "android")]
+fn mpv_config_dir(st: &AppState) -> R<String> {
+    let dir = st.cache_dir.join("mpv");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let font = dir.join("subfont.ttf");
+    if !font.is_file() {
+        let src = SYSTEM_FONTS
+            .iter()
+            .find(|p| std::path::Path::new(p).is_file())
+            .ok_or("Không tìm thấy phông chữ hệ thống cho phụ đề")?;
+        std::fs::copy(src, &font).map_err(|e| e.to_string())?;
+    }
+    Ok(dir.to_string_lossy().into_owned())
+}
+
+#[cfg(target_os = "android")]
+async fn video_target(_app: &AppHandle, st: &AppState) -> R<Target> {
+    let until = Instant::now() + Duration::from_secs(5);
+    let surface = loop {
+        if let (_, Some(s)) = crate::android::state() {
+            break s;
+        }
+        if Instant::now() >= until {
+            return Err("Chưa có vùng hiển thị video".into());
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    let extra = vec![
+        ("android-surface-size".to_string(), format!("{}x{}", surface.width, surface.height)),
+        ("config-dir".to_string(), mpv_config_dir(st)?),
+    ];
+    Ok((surface.wid, extra))
+}
+
+#[cfg(mobile)]
 fn keep_awake(app: &AppHandle, on: bool) {
     use tauri_plugin_wistv_video::VideoExt;
     let _ = app.video().awake(on);
 }
 
-#[cfg(not(target_os = "ios"))]
+#[cfg(desktop)]
 fn keep_awake(_app: &AppHandle, _on: bool) {}
 
 async fn resolve(st: &AppState, stream: &Value) -> R<String> {
@@ -330,12 +374,14 @@ pub async fn play(
                 .collect()
         })
         .unwrap_or_default();
+    let (wid, extra) = video_target(&app, &st).await?;
     let req = player::Request {
         url,
         title: ctx.name.clone(),
         start_ms: ctx.start.unwrap_or(0),
         headers,
-        wid: video_target(&app)?,
+        wid,
+        extra,
     };
     keep_awake(&app, true);
     let awake_app = app.clone();
@@ -419,13 +465,21 @@ pub fn player_stop(st: State<'_, AppState>) {
     st.player.stop();
 }
 
-#[cfg(target_os = "ios")]
+#[cfg(mobile)]
 #[tauri::command]
-pub fn player_fullscreen(on: Option<bool>) -> R<bool> {
-    Ok(on.unwrap_or(true))
+pub fn player_fullscreen(app: AppHandle, on: Option<bool>) -> R<bool> {
+    let on = on.unwrap_or(true);
+    #[cfg(target_os = "android")]
+    {
+        use tauri_plugin_wistv_video::VideoExt;
+        app.video().fullscreen(on)?;
+    }
+    #[cfg(not(target_os = "android"))]
+    let _ = app;
+    Ok(on)
 }
 
-#[cfg(not(target_os = "ios"))]
+#[cfg(desktop)]
 #[tauri::command]
 pub fn player_fullscreen(window: WebviewWindow, on: Option<bool>) -> R<bool> {
     let cur = window.is_fullscreen().map_err(|e| e.to_string())?;

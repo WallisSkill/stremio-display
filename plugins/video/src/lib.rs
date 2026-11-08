@@ -8,12 +8,14 @@ tauri::ios_plugin_binding!(init_plugin_wistv_video);
 
 pub struct Video<R: Runtime>(PluginHandle<R>);
 
+#[cfg_attr(not(target_os = "ios"), allow(dead_code))]
 #[derive(Deserialize)]
 struct Layer {
     pointer: i64,
 }
 
 impl<R: Runtime> Video<R> {
+    #[cfg(target_os = "ios")]
     pub fn layer(&self) -> Result<i64, String> {
         let layer: Layer = self.0.run_mobile_plugin("layer", json!({})).map_err(|e| e.to_string())?;
         if layer.pointer == 0 {
@@ -25,6 +27,13 @@ impl<R: Runtime> Video<R> {
     pub fn awake(&self, on: bool) -> Result<(), String> {
         self.0
             .run_mobile_plugin::<Value>("awake", json!({ "on": on }))
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+
+    pub fn fullscreen(&self, on: bool) -> Result<(), String> {
+        self.0
+            .run_mobile_plugin::<Value>("fullscreen", json!({ "on": on }))
             .map(|_| ())
             .map_err(|e| e.to_string())
     }
@@ -55,7 +64,12 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
                 let handle = api.register_ios_plugin(init_plugin_wistv_video)?;
                 app.manage(Video(handle));
             }
-            #[cfg(not(target_os = "ios"))]
+            #[cfg(target_os = "android")]
+            {
+                let handle = api.register_android_plugin("tv.wis.video", "VideoPlugin")?;
+                app.manage(Video(handle));
+            }
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
             let _ = (app, api);
             Ok(())
         })

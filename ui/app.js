@@ -1618,6 +1618,10 @@ function back() {
   stepBack();
 }
 
+window.__wistvBack = () => stepBack();
+
+if (TAURI) listen("update-state", (e) => { if (e.payload?.version) toast(`Đang cập nhật WiS TV lên bản ${e.payload.version}…`); });
+
 function visible(el) {
   if (el.disabled || el.offsetParent === null) return false;
   const r = el.getBoundingClientRect();

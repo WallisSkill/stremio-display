@@ -1,0 +1,1 @@
+-keep class tv.wis.video.** { *; }

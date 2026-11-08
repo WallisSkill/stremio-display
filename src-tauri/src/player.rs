@@ -1,7 +1,7 @@
 #[cfg(windows)]
-use crate::server::stremio_dirs;
-#[cfg(windows)]
 use libloading::os::windows::{Library, LOAD_WITH_ALTERED_SEARCH_PATH};
+#[cfg(target_os = "android")]
+use libloading::Library;
 use serde_json::{json, Value};
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 #[cfg(windows)]
@@ -34,7 +34,7 @@ struct MpvEndFile {
 type Handle = *mut c_void;
 
 struct Mpv {
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "android"))]
     _lib: Library,
     create: unsafe extern "C" fn() -> Handle,
     initialize: unsafe extern "C" fn(Handle) -> c_int,
@@ -57,11 +57,39 @@ fn candidates() -> Vec<PathBuf> {
     if let Some(dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(PathBuf::from)) {
         out.push(dir.join("libmpv-2.dll"));
     }
-    out.extend(stremio_dirs().into_iter().map(|d| d.join("libmpv-2.dll")));
     out
 }
 
-#[cfg(not(windows))]
+#[cfg(windows)]
+fn open_lib() -> Result<Library, String> {
+    let path = candidates()
+        .into_iter()
+        .find(|p| p.is_file())
+        .ok_or("Không tìm thấy libmpv-2.dll cạnh WiS TV (cài lại ứng dụng hoặc đặt WISTV_LIBMPV)")?;
+    unsafe {
+        Library::load_with_flags(&path, LOAD_WITH_ALTERED_SEARCH_PATH)
+            .map_err(|e| format!("Không nạp được {}: {e}", path.display()))
+    }
+}
+
+#[cfg(target_os = "android")]
+fn open_lib() -> Result<Library, String> {
+    let vm = crate::android::java_vm();
+    if vm == 0 {
+        return Err("Java VM chưa sẵn sàng cho trình phát".into());
+    }
+    unsafe {
+        let avcodec = Library::new("libavcodec.so").map_err(|e| format!("Không nạp được libavcodec: {e}"))?;
+        let set_vm = *avcodec
+            .get::<unsafe extern "C" fn(*mut c_void, *mut c_void) -> c_int>(b"av_jni_set_java_vm\0")
+            .map_err(|e| format!("libavcodec thiếu av_jni_set_java_vm: {e}"))?;
+        set_vm(vm as *mut c_void, ptr::null_mut());
+        std::mem::forget(avcodec);
+        Library::new("libmpv.so").map_err(|e| format!("Không nạp được libmpv: {e}"))
+    }
+}
+
+#[cfg(not(any(windows, target_os = "android")))]
 mod linked {
     use super::{Handle, MpvEvent};
     use std::ffi::{c_char, c_int, c_void};
@@ -81,7 +109,7 @@ mod linked {
 }
 
 impl Mpv {
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "android")))]
     fn load() -> Result<Self, String> {
         Ok(Self {
             create: linked::mpv_create,
@@ -97,15 +125,10 @@ impl Mpv {
         })
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "android"))]
     fn load() -> Result<Self, String> {
-        let path = candidates()
-            .into_iter()
-            .find(|p| p.is_file())
-            .ok_or("Không tìm thấy libmpv-2.dll (cài Stremio hoặc đặt WISTV_LIBMPV)")?;
+        let lib = open_lib()?;
         unsafe {
-            let lib = Library::load_with_flags(&path, LOAD_WITH_ALTERED_SEARCH_PATH)
-                .map_err(|e| format!("Không nạp được {}: {e}", path.display()))?;
             macro_rules! sym {
                 ($name:literal, $t:ty) => {
                     *lib.get::<$t>(concat!($name, "\0").as_bytes())
@@ -230,7 +253,18 @@ mod win {
 #[cfg(windows)]
 const PLATFORM_OPTIONS: &[(&str, &str)] = &[("hwdec", "auto-safe"), ("sub-font", "Segoe UI Semibold")];
 
-#[cfg(not(windows))]
+#[cfg(target_os = "android")]
+const PLATFORM_OPTIONS: &[(&str, &str)] = &[
+    ("vo", "gpu"),
+    ("gpu-context", "android"),
+    ("opengl-es", "yes"),
+    ("hwdec", "mediacodec-copy"),
+    ("ao", "audiotrack,opensles"),
+    ("sub-font", "Roboto"),
+    ("config", "yes"),
+];
+
+#[cfg(not(any(windows, target_os = "android")))]
 const PLATFORM_OPTIONS: &[(&str, &str)] = &[
     ("vo", "gpu-next"),
     ("gpu-api", "vulkan"),
@@ -247,6 +281,7 @@ pub struct Request {
     pub start_ms: u64,
     pub headers: Vec<String>,
     pub wid: i64,
+    pub extra: Vec<(String, String)>,
 }
 
 pub struct Outcome {
@@ -346,6 +381,9 @@ impl Player {
             for (k, v) in PLATFORM_OPTIONS {
                 lib.set_option(ctx, k, v);
             }
+            for (k, v) in &req.extra {
+                lib.set_option(ctx, k, v);
+            }
             lib.set_option(ctx, "title", &req.title);
             if req.start_ms > 0 {
                 lib.set_option(ctx, "start", &format!("{:.3}", req.start_ms as f64 / 1000.0));
@@ -410,6 +448,32 @@ unsafe fn tracks(lib: &Mpv, ctx: Handle) -> Vec<Value> {
         .collect()
 }
 
+#[cfg(target_os = "android")]
+unsafe fn follow_surface(lib: &Mpv, ctx: Handle, seen: &mut (u64, i64)) {
+    let (generation, current) = crate::android::state();
+    if generation == seen.0 {
+        return;
+    }
+    seen.0 = generation;
+    match current {
+        Some(s) => {
+            lib.set_property(ctx, "android-surface-size", &format!("{}x{}", s.width, s.height));
+            if s.wid != seen.1 {
+                seen.1 = s.wid;
+                lib.set_property(ctx, "wid", &s.wid.to_string());
+                lib.set_property(ctx, "force-window", "yes");
+                lib.set_property(ctx, "vo", "gpu");
+            }
+        }
+        None => {
+            seen.1 = 0;
+            lib.set_property(ctx, "vo", "null");
+            lib.set_property(ctx, "force-window", "no");
+            lib.set_property(ctx, "wid", "0");
+        }
+    }
+}
+
 unsafe fn run(lib: &Mpv, ctx: Handle, start_ms: u64, wid: i64, state: &dyn Fn(Value)) -> Outcome {
     let mut pos = start_ms as f64 / 1000.0;
     let mut dur = 0.0f64;
@@ -418,11 +482,15 @@ unsafe fn run(lib: &Mpv, ctx: Handle, start_ms: u64, wid: i64, state: &dyn Fn(Va
     let mut last_emit = Instant::now() - Duration::from_secs(1);
     let mut last_tracks = String::new();
     let mut loaded = false;
+    #[cfg(target_os = "android")]
+    let mut surface = (crate::android::state().0, wid);
     loop {
         let ev = (lib.wait_event)(ctx, 0.2);
         #[cfg(windows)]
         win::video_below_ui(wid as isize);
-        #[cfg(not(windows))]
+        #[cfg(target_os = "android")]
+        follow_surface(lib, ctx, &mut surface);
+        #[cfg(not(any(windows, target_os = "android")))]
         let _ = wid;
         if let Some(p) = lib.prop_f64(ctx, "time-pos") {
             pos = p;

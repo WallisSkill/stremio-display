@@ -1,11 +1,14 @@
 mod addons;
+#[cfg(target_os = "android")]
+mod android;
 mod api;
 mod commands;
 mod player;
 mod server;
 mod state;
-#[cfg(target_os = "ios")]
 mod torrent;
+#[cfg(desktop)]
+mod update;
 mod util;
 
 use tauri::Manager;
@@ -13,12 +16,16 @@ use tauri::Manager;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default();
-    #[cfg(target_os = "ios")]
+    #[cfg(mobile)]
     let builder = builder.plugin(tauri_plugin_wistv_video::init());
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     builder
         .setup(|app| {
             let st = state::AppState::load(app.handle())?;
             app.manage(st);
+            #[cfg(desktop)]
+            update::spawn(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

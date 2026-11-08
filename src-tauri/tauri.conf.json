@@ -29,6 +29,23 @@
     "iOS": {
       "minimumSystemVersion": "15.0"
     },
-    "icon": ["icons/icon.ico", "icons/icon.png"]
+    "icon": [
+      "icons/icon.ico",
+      "icons/icon.png"
+    ],
+    "android": {
+      "minSdkVersion": 26
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDA1M0Q0MDdBRTQ4ODlFMzkKUldRNW5vamtla0E5QmVrVjUwaUx0cXFtRDJpbWp1UFpJRjR3bDlLSnFldGJBZFdyL0NxQWVjSUoK",
+      "endpoints": [
+        "https://github.com/WallisSkill/stremio-display/releases/download/windows/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

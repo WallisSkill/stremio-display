@@ -2,7 +2,7 @@
 name = "tauri-plugin-wistv-video"
 version = "0.1.0"
 edition = "2021"
-description = "Native video surface, wake lock and link opening for WiS TV on iOS"
+description = "Native video surface, wake lock and link opening for WiS TV on iOS and Android"
 links = "tauri-plugin-wistv-video"
 
 [dependencies]
