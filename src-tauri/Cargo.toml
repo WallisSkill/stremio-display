@@ -6,7 +6,7 @@ description = "WiS TV - a personal Stremio front end"
 
 [lib]
 name = "wistv_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+crate-type = ["staticlib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
