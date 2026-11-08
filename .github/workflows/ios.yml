@@ -80,6 +80,19 @@ jobs:
           grep -q MPVKit *.xcodeproj/project.pbxproj
           cat "$plist"
 
+      - name: Download mpv packages
+        working-directory: src-tauri/gen/apple
+        run: |
+          curl -sSIL -o /dev/null -w "github download check: %{http_code}
+" https://github.com/mpvkit/MPVKit/releases/download/1.0.0/Libmpv.xcframework.zip
+          proj=$(ls -d *.xcodeproj | head -1)
+          scheme="${proj%.xcodeproj}_iOS"
+          for i in 1 2 3 4 5; do
+            if xcodebuild -resolvePackageDependencies -project "$proj" -scheme "$scheme"; then exit 0; fi
+            echo "retry $i"; sleep 20
+          done
+          exit 1
+
       - name: Build IPA
         working-directory: src-tauri
         run: |
