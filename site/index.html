@@ -141,14 +141,23 @@
       }
       return box;
     }
+    const snapshot = fetch("releases.json", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .catch(() => null);
+    async function release(tag) {
+      const snap = await snapshot;
+      if (snap && typeof snap === "object" && tag in snap) return snap[tag];
+      const res = await fetch(`https://api.github.com/repos/${REPO}/releases/tags/${tag}`, { cache: "no-store" });
+      if (res.status === 404) return null;
+      if (!res.ok) throw new Error(String(res.status));
+      return res.json();
+    }
     document.querySelectorAll(".card[data-tag]").forEach(async (card) => {
       const meta = card.querySelector(".meta");
       const btn = card.querySelector(".btn");
       try {
-        const res = await fetch(`https://api.github.com/repos/${REPO}/releases/tags/${card.dataset.tag}`, { cache: "no-store" });
-        if (res.status === 404) { meta.textContent = "Sắp có"; return; }
-        if (!res.ok) throw new Error(String(res.status));
-        const rel = await res.json();
+        const rel = await release(card.dataset.tag);
+        if (!rel) { meta.textContent = "Sắp có"; return; }
         const asset = (rel.assets || []).find((a) => a.name.toLowerCase().endsWith(card.dataset.ext));
         if (!asset) { meta.textContent = "Sắp có"; return; }
         btn.href = asset.browser_download_url;

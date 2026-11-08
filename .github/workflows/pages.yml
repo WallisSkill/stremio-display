@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths: ["site/**", ".github/workflows/pages.yml"]
   workflow_dispatch:
+  workflow_run:
+    workflows: ["iOS app", "Windows app", "Android app"]
+    types: [completed]
 
 permissions:
   contents: read
@@ -24,6 +27,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
+      - name: Snapshot the app releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          out='{}'
+          for tag in ios windows android; do
+            rel=$(gh api "repos/${{ github.repository }}/releases/tags/$tag" --jq '{body, assets: [.assets[] | {name, size, updated_at, browser_download_url}]}' 2>/dev/null || echo null)
+            out=$(jq -c --arg t "$tag" --argjson r "$rel" '. + {($t): $r}' <<<"$out")
+          done
+          jq --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '. + {generated: $at}' <<<"$out" > site/releases.json
+          jq -c 'with_entries(.value |= (if type == "object" then {assets: (.assets | length)} else . end))' site/releases.json
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
