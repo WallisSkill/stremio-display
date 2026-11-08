@@ -82,7 +82,15 @@ jobs:
 
       - name: Build IPA
         working-directory: src-tauri
-        run: cargo tauri ios build --no-sign
+        run: |
+          set -o pipefail
+          cargo tauri ios build --no-sign -v 2>&1 | tee "$RUNNER_TEMP/build.log"
+
+      - name: Show build errors
+        if: failure()
+        run: |
+          grep -nE "error:|error\[|Undefined symbol|ld: |fatal|BUILD FAILED|ARCHIVE FAILED|The following build commands failed" "$RUNNER_TEMP/build.log" | grep -v "^\s*$" | head -120 || true
+          grep -nE -A3 "The following build commands failed" "$RUNNER_TEMP/build.log" || true
 
       - name: Collect IPA
         run: |
