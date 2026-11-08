@@ -59,6 +59,7 @@ body.dim .bd-shade { background: rgba(5,5,7,0.74); }
   transition: background 300ms var(--ease), backdrop-filter 300ms;
 }
 #topbar.solid { background: rgba(8,8,11,0.72); backdrop-filter: blur(24px) saturate(1.4); border-bottom: 1px solid var(--line); }
+.top-left { justify-self: start; display: flex; align-items: center; gap: 12px; min-width: 0; }
 .brand { display: inline-flex; align-items: baseline; gap: 6px; font-size: 24px; letter-spacing: -0.02em; cursor: pointer; justify-self: start; border-radius: 10px; padding: 2px 6px; outline: none; }
 .brand-w { font-weight: 800; background: linear-gradient(135deg, #fff 0%, #b9b9c6 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .brand-tv { font-weight: 400; color: var(--muted); }
@@ -398,6 +399,7 @@ html:has(body.see-through), body.see-through { background: transparent; }
 .pl-item.on { font-weight: 650; }
 .pl-item small { grid-column: 2; font-size: 12px; color: var(--faint); margin-top: -4px; }
 .pl-none { font-size: 13px; color: var(--faint); margin: 4px 10px; line-height: 1.5; }
+.pl-note { font-size: 13.5px; color: var(--muted); margin: 2px 10px 12px; line-height: 1.55; }
 .pl-delay { display: flex; align-items: center; gap: 8px; padding: 12px 10px 4px; margin-top: 6px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
 .pl-delay b { min-width: 42px; text-align: center; color: #fff; font-variant-numeric: tabular-nums; }
 .pl-mini { min-width: 34px; height: 30px; padding: 0 8px; border-radius: 8px; display: inline-grid; place-items: center; background: rgba(255,255,255,0.1); font-size: 13px; font-weight: 600; outline: none; transition: background 160ms, transform 160ms var(--ease); }
@@ -511,18 +513,21 @@ body.web-playing #wv { display: block; }
   .pl-btn:hover { background: none; transform: none; }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 760px), (hover: none) and (pointer: coarse) and (max-height: 520px) {
   :root { --gutter: 16px; }
   #topbar { grid-template-columns: auto 1fr auto; gap: 10px; padding: calc(10px + env(safe-area-inset-top)) 16px 10px; }
+  #topbar.solid { backdrop-filter: none; -webkit-backdrop-filter: none; background: rgba(8,8,11,0.94); }
+  #topbar.can-back .brand { display: none; }
   .brand { font-size: 21px; }
   .tabs {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 25;
-    justify-content: flex-start; gap: 2px; padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
-    border-radius: 0; border-width: 1px 0 0; overflow-x: auto; scrollbar-width: none;
-    background: rgba(12,12,16,0.92);
+    justify-content: space-between; gap: 0; padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
+    border-radius: 0; border-width: 1px 0 0; overflow: hidden;
+    backdrop-filter: none; -webkit-backdrop-filter: none;
+    background: rgba(12,12,16,0.97);
   }
-  .tabs::-webkit-scrollbar { display: none; }
-  .tab { flex: none; padding: 9px 14px; font-size: 14px; }
+  .tab { flex: 1 1 0; min-width: 0; padding: 10px 2px; font-size: 12.5px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tab:focus-visible { transform: none; }
   .top-right { grid-column: 3; }
   #view { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
   body.playing #view { padding-bottom: 0; }
@@ -586,8 +591,16 @@ body.web-playing #wv { display: block; }
   .toast { bottom: calc(80px + env(safe-area-inset-bottom)); }
 }
 
-@media (max-width: 760px) and (orientation: landscape) {
+@media (max-width: 760px) and (orientation: landscape), (hover: none) and (pointer: coarse) and (max-height: 520px) {
   .pl-menu { max-height: 86vh; }
+  .hero { height: auto; min-height: 0; padding-top: calc(76px + env(safe-area-inset-top)); }
+  .hero .desc { -webkit-line-clamp: 2; }
+  .detail-top { min-height: 0; padding-top: calc(76px + env(safe-area-inset-top)); }
+  #view, .tabs { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+}
+
+@media (orientation: landscape) {
+  .pl-top, .pl-bottom { padding-left: max(18px, env(safe-area-inset-left)); padding-right: max(18px, env(safe-area-inset-right)); }
 }
 
 @media (max-width: 420px) {

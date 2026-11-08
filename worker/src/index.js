@@ -52,7 +52,8 @@ async function site(request, env) {
   const origin = String(env.SITE_ORIGIN || "").replace(/\/+$/, "");
   if (!origin) return reply({ error: "not found" }, 404);
   const page = pathname.endsWith("/") || /\.(html|webmanifest)$/.test(pathname);
-  const res = await fetch(`${origin}${pathname}${search}`, { method: request.method, redirect: "manual", cf: { cacheTtl: page ? 60 : 300 } });
+  const init = { method: request.method, redirect: "manual" };
+  const res = await fetch(`${origin}${pathname}${search}`, page ? { ...init, cache: "no-store" } : { ...init, cf: { cacheTtl: 300 } });
   const headers = new Headers(res.headers);
   const moved = headers.get("location");
   if (moved && moved.startsWith(origin)) headers.set("location", moved.slice(origin.length) || "/");

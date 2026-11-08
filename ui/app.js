@@ -497,6 +497,7 @@ function closeSheet() {
   $("#scrim").hidden = true;
   $("#sheet").replaceChildren();
   app.sheetReturn?.focus?.({ preventScroll: true });
+  navSync();
 }
 
 async function openStreams(m, vid, label) {
@@ -519,6 +520,7 @@ async function openStreams(m, vid, label) {
   sheet.replaceChildren(h("div", { class: "sheet-head" }, h("h2", {}, "Chọn nguồn phát"), h("p", {}, label || m.name), tools), body);
   sheet.hidden = false;
   $("#scrim").hidden = false;
+  navSync();
 
   let groups;
   try { groups = await call("streams", { kind: m.type, id: vid }); }
@@ -801,9 +803,20 @@ function setVolume(v) {
   if (pl.s.mute) cmd("set", "mute", "no");
 }
 
+const IPHONE_FS = !TAURI && !document.documentElement.requestFullscreen && !document.documentElement.webkitRequestFullscreen;
+const STANDALONE = !TAURI && (navigator.standalone === true || window.matchMedia("(display-mode: standalone)").matches);
+
 async function toggleFullscreen() {
+  if (IPHONE_FS && !pl.fs) { toggleMenu("fullscreen"); return; }
   try { pl.fs = await call("player_fullscreen", {}); } catch (e) { toast(e, true); }
   pl.ui.fs.innerHTML = pl.fs ? ICON.unfull : ICON.full;
+}
+
+function nativeFullscreen() {
+  const p = call("player_fullscreen", { on: true });
+  pl.menu = null;
+  renderMenu();
+  p.then((on) => { pl.fs = on; pl.ui.fs.innerHTML = on ? ICON.unfull : ICON.full; }, (e) => toast(e, true));
 }
 
 function paintTime() {
@@ -969,6 +982,15 @@ function renderMenu() {
   box.hidden = !pl.menu;
   if (!pl.menu) { box.replaceChildren(); return; }
   if (pl.menu === "episodes") { renderEpisodes(box); return; }
+  if (pl.menu === "fullscreen") {
+    box.className = "pl-menu narrow";
+    box.replaceChildren(h("h4", {}, "Toàn màn hình"),
+      h("p", { class: "pl-note" }, STANDALONE
+        ? "Bạn đang mở WiS TV từ Màn hình chính: chỉ cần xoay ngang điện thoại là phim kín màn hình, phụ đề vẫn theo kiểu bạn đã chỉnh."
+        : "Safari trên iPhone không cho trang web tự vào toàn màn hình. Muốn kín màn hình mà vẫn giữ kiểu phụ đề của bạn: bấm nút Chia sẻ của Safari → Thêm vào MH chính, mở WiS TV từ biểu tượng đó rồi xoay ngang điện thoại."),
+      menuItem("Dùng toàn màn hình của iPhone", false, nativeFullscreen, "phụ đề theo kiểu iPhone"));
+    return;
+  }
   if (pl.menu === "speed") {
     const cur = pl.s.speed || 1;
     box.className = "pl-menu narrow";
@@ -1013,6 +1035,7 @@ function openPlayer(c) {
   if (!pl.ui) buildPlayer();
   if (!pl.open) pl.returnFocus = document.activeElement;
   pl.open = true;
+  navSync();
   pl.ctx = c;
   pl.s = { loaded: false, volume: pl.s.volume ?? 100 };
   pl.tracks = [];
@@ -1042,6 +1065,7 @@ function openPlayer(c) {
 function closePlayer(stop = true) {
   if (!pl.open) return;
   pl.open = false;
+  navSync();
   pl.session++;
   clearTimeout(pl.hideTimer);
   if (stop) call("player_stop").catch(() => {});
@@ -1477,6 +1501,10 @@ function render() {
   $$("[data-route]", $("#topbar")).forEach((b) => b.classList.toggle("active", b.dataset.route === route));
   ROUTES[route](view, params || {});
   if (!TOP_ROUTES.includes(route)) $$(".tab").forEach((t) => t.classList.remove("active"));
+  const canBack = app.stack.length > 1;
+  $("#back-btn").hidden = !canBack;
+  $("#topbar").classList.toggle("can-back", canBack);
+  navSync();
 }
 
 function go(route, params = {}, replace = false) {
@@ -1486,12 +1514,48 @@ function go(route, params = {}, replace = false) {
   render();
 }
 
-function back() {
-  if (pl.open) { closePlayer(); return; }
-  if (!$("#sheet").hidden) { closeSheet(); return; }
-  if (app.stack.length > 1) { app.stack.pop(); render(); return; }
+const nav = { depth: 0, skip: false, queued: false };
+const navLayers = () => Math.max(0, app.stack.length - 1) + ($("#sheet").hidden ? 0 : 1) + (pl.open ? 1 : 0);
+
+function navSync() {
+  if (TAURI || nav.queued) return;
+  nav.queued = true;
+  queueMicrotask(() => {
+    nav.queued = false;
+    if (nav.skip) return;
+    const want = navLayers();
+    while (nav.depth < want) history.pushState({ wistvDepth: ++nav.depth }, "");
+    if (want < nav.depth) {
+      const n = nav.depth - want;
+      nav.depth = want;
+      nav.skip = true;
+      history.go(-n);
+    }
+  });
+}
+
+if (!TAURI) {
+  window.addEventListener("popstate", (e) => {
+    const depth = e.state?.wistvDepth || 0;
+    nav.depth = depth;
+    if (nav.skip) { nav.skip = false; navSync(); return; }
+    while (navLayers() > depth) if (!stepBack()) break;
+    navSync();
+  });
+}
+
+function stepBack() {
+  if (pl.open) { closePlayer(); return true; }
+  if (!$("#sheet").hidden) { closeSheet(); return true; }
+  if (app.stack.length > 1) { app.stack.pop(); render(); return true; }
   const cur = app.stack[0]?.route;
-  if (cur && cur !== "home" && cur !== "login") go("home");
+  if (cur && cur !== "home" && cur !== "login") { go("home"); return true; }
+  return false;
+}
+
+function back() {
+  if (!TAURI && nav.depth > 0 && navLayers() > 0) { history.back(); return; }
+  stepBack();
 }
 
 function visible(el) {
@@ -1558,7 +1622,8 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-$("#scrim").addEventListener("click", closeSheet);
+$("#scrim").addEventListener("click", () => back());
+$("#back-btn").addEventListener("click", () => back());
 $$("[data-route]", $("#topbar")).forEach((b) => b.addEventListener("click", () => go(b.dataset.route)));
 $("#view").addEventListener("scroll", () => $("#topbar").classList.toggle("solid", $("#view").scrollTop > 40), { passive: true });
 document.addEventListener("mouseup", (e) => { if (e.button === 3) back(); });

@@ -23,7 +23,12 @@
   </div>
 
   <header id="topbar" hidden>
-    <a class="brand focusable" data-route="home" tabindex="0"><span class="brand-w">WiS</span><span class="brand-tv">TV</span></a>
+    <div class="top-left">
+      <button class="icon-btn back-btn focusable" id="back-btn" aria-label="Quay lại" hidden>
+        <svg viewBox="0 0 24 24" width="22" height="22"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <a class="brand focusable" data-route="home" tabindex="0"><span class="brand-w">WiS</span><span class="brand-tv">TV</span></a>
+    </div>
     <nav class="tabs" id="tabs">
       <button class="tab focusable" data-route="home">Trang chủ</button>
       <button class="tab focusable" data-route="movie">Phim</button>
