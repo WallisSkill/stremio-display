@@ -597,7 +597,7 @@ function buildPlayer() {
   ui.menu = h("div", { class: "pl-menu", hidden: true });
   ui.menu.addEventListener("pointerdown", (e) => e.stopPropagation());
   ui.menu.addEventListener("click", (e) => e.stopPropagation());
-  ui.fill = iconBtn(fillMode ? "fit" : "fill", fillMode ? "Vừa khung hình (Z)" : "Lấp đầy màn hình (Z)", () => setFill(!fillMode, true));
+  ui.fill = iconBtn(fillMode ? "fit" : "fill", fillMode ? "Giữ đúng tỉ lệ (Z)" : "Dãn kín màn hình (Z)", () => setFill(!fillMode, true));
   ui.clock = h("span", { class: "pl-clock" });
   ui.batt = h("span", { class: "pl-batt", hidden: true });
   const top = h("div", { class: "pl-top" }, iconBtn("left", "Quay lại (Esc)", () => closePlayer()), h("div", { class: "pl-titles" }, ui.title, ui.sub), h("div", { class: "pl-status" }, ui.clock, ui.batt));
@@ -814,9 +814,9 @@ let fillMode = (() => { try { return localStorage.getItem("wistv.fill") === "1";
 function setFill(on, announce) {
   fillMode = on;
   try { localStorage.setItem("wistv.fill", on ? "1" : "0"); } catch (e) {}
-  if (pl.open) quietSet("panscan", on ? "1.0" : "0.0");
-  if (pl.ui) { pl.ui.fill.innerHTML = ICON[on ? "fit" : "fill"]; pl.ui.fill.title = on ? "Vừa khung hình (Z)" : "Lấp đầy màn hình (Z)"; }
-  if (announce) toast(on ? "Lấp đầy màn hình" : "Vừa khung hình");
+  if (pl.open) quietSet("keepaspect", on ? "no" : "yes");
+  if (pl.ui) { pl.ui.fill.innerHTML = ICON[on ? "fit" : "fill"]; pl.ui.fill.title = on ? "Giữ đúng tỉ lệ (Z)" : "Dãn kín màn hình (Z)"; }
+  if (announce) toast(on ? "Dãn kín màn hình" : "Giữ đúng tỉ lệ hình");
 }
 
 const pad2 = (n) => String(n).padStart(2, "0");
@@ -1066,7 +1066,7 @@ function onPlayerState(s) {
   if (Date.now() < pl.seekUntil && Math.abs((s.time || 0) - pl.seekTarget) < 1.5 && !s.buffering) pl.seekUntil = 0;
   if (s.loaded && !wasLoaded) {
     const session = pl.session;
-    if (fillMode) quietSet("panscan", "1.0");
+    if (fillMode) quietSet("keepaspect", "no");
     setTimeout(() => autoSub(session), 600);
     pl.ui.root.classList.remove("loading");
     document.body.classList.add("see-through");
