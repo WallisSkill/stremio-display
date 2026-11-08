@@ -657,19 +657,30 @@ function flash(icon) {
   f.classList.add("on");
 }
 
-const SUB_DEFAULT = { scale: 1, pos: 100, color: "#FFFFFF", box: false, font: "Segoe UI Semibold", bold: false, italic: false, outline: 2.4, shadow: 1 };
+const SUB_BASE = 20;
+const SUB_DEFAULT = { scale: 1, height: SUB_BASE, color: "#FFFFFF", box: false, font: "Segoe UI Semibold", bold: false, italic: false, outline: 2.4, shadow: 1 };
 const SUB_FONTS = [["Segoe UI Semibold", "Segoe"], ["Arial", "Arial"], ["Tahoma", "Tahoma"], ["Verdana", "Verdana"], ["Calibri", "Calibri"], ["Times New Roman", "Times"], ["Georgia", "Georgia"]];
 const SUB_COLORS = [["#FFFFFF", "Trắng"], ["#FFE14D", "Vàng"], ["#7FE3FF", "Xanh"]];
 const subPrefs = (() => {
-  try { return { ...SUB_DEFAULT, ...JSON.parse(localStorage.getItem("wistv.sub") || "{}") }; } catch (e) { return { ...SUB_DEFAULT }; }
+  try {
+    const saved = JSON.parse(localStorage.getItem("wistv.sub") || "{}");
+    if (saved.height == null && saved.pos != null) saved.height = SUB_BASE + (100 - saved.pos);
+    delete saved.pos;
+    return { ...SUB_DEFAULT, ...saved };
+  } catch (e) { return { ...SUB_DEFAULT }; }
 })();
+const subPlacement = (v) => (v <= SUB_BASE ? { pos: 100, margin: Math.round((v / SUB_BASE) * 60) } : { pos: 100 - (v - SUB_BASE), margin: 60 });
 const saveSubPrefs = () => { try { localStorage.setItem("wistv.sub", JSON.stringify(subPrefs)); } catch (e) {} };
 const quietSet = (name, value) => call("player_set", { name, value: String(value) }).then(() => true, () => false);
 
 async function applySubStyle(keys) {
   const all = !keys;
   if (all || keys.includes("scale")) quietSet("sub-scale", subPrefs.scale.toFixed(2));
-  if (all || keys.includes("pos")) quietSet("sub-pos", Math.round(subPrefs.pos));
+  if (all || keys.includes("height")) {
+    const p = subPlacement(subPrefs.height);
+    quietSet("sub-margin-y", p.margin);
+    quietSet("sub-pos", p.pos);
+  }
   if (all || keys.includes("color")) quietSet("sub-color", subPrefs.color);
   if (all || keys.includes("font")) quietSet("sub-font", subPrefs.font);
   if (all || keys.includes("bold")) quietSet("sub-bold", subPrefs.bold ? "yes" : "no");
@@ -710,7 +721,7 @@ function subStylePanel() {
   return h("div", { class: "pl-substyle" },
     h("h4", {}, "Kiểu phụ đề"),
     subSlider("Cỡ chữ", 50, 250, 5, Math.round(subPrefs.scale * 100), (v) => `${v}%`, (v) => { subPrefs.scale = v / 100; saveSubPrefs(); applySubStyle(["scale"]); }),
-    subSlider("Vị trí", 0, 100, 1, 100 - Math.round(subPrefs.pos), (v) => (v === 0 ? "Dưới cùng" : `Cao ${v}%`), (v) => { subPrefs.pos = 100 - v; saveSubPrefs(); applySubStyle(["pos"]); }),
+    subSlider("Vị trí", 0, 100, 1, Math.round(subPrefs.height), (v) => (v === 0 ? "Sát mép dưới" : v === SUB_BASE ? "Mặc định" : v < SUB_BASE ? `Thấp ${SUB_BASE - v}` : `Cao ${v - SUB_BASE}`), (v) => { subPrefs.height = v; saveSubPrefs(); applySubStyle(["height"]); }),
     h("div", { class: "pl-choice wrap" }, h("span", {}, "Font"),
       SUB_FONTS.map(([font, label]) => h("button", { class: `pl-mini ${subPrefs.font === font ? "on" : ""}`, tabindex: "-1", style: `font-family:'${font}'`, onclick: () => set("font", font) }, label))),
     h("div", { class: "pl-choice" }, h("span", {}, "Kiểu chữ"),
