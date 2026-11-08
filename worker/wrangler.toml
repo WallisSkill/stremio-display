@@ -1,7 +1,12 @@
 name = "wistv-relay"
 main = "src/index.js"
 compatibility_date = "2026-10-01"
+workers_dev = false
+preview_urls = false
+routes = [
+  { pattern = "film.wis237.online/api/*", zone_name = "wis237.online" },
+]
 
 [[kv_namespaces]]
 binding = "RELAY"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
+id = "6b49d8a099024cc08b78cbab175393d4"

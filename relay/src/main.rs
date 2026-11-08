@@ -74,7 +74,7 @@ fn load_config() -> Config {
     let path = dir.join("relay.json");
     let mut cfg: Value = std::fs::read(&path)
         .ok()
-        .and_then(|b| serde_json::from_slice(&b).ok())
+        .and_then(|b| serde_json::from_slice(b.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&b)).ok())
         .unwrap_or_else(|| json!({}));
     let valid = cfg["token"].as_str().is_some_and(|t| t.len() == 64 && t.bytes().all(|c| c.is_ascii_hexdigit()));
     if !valid {
