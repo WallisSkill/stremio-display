@@ -46,9 +46,22 @@ async function lookup(request, env) {
   return value ? reply(value) : reply({ error: "offline" }, 404);
 }
 
+async function site(request, env) {
+  if (request.method !== "GET" && request.method !== "HEAD") return reply({ error: "method not allowed" }, 405);
+  const { pathname, search } = new URL(request.url);
+  const origin = String(env.SITE_ORIGIN || "").replace(/\/+$/, "");
+  if (!origin) return reply({ error: "not found" }, 404);
+  const res = await fetch(`${origin}${pathname}${search}`, { method: request.method, redirect: "manual", cf: { cacheTtl: 300 } });
+  const headers = new Headers(res.headers);
+  const moved = headers.get("location");
+  if (moved && moved.startsWith(origin)) headers.set("location", moved.slice(origin.length) || "/");
+  return new Response(res.body, { status: res.status, headers });
+}
+
 export default {
   async fetch(request, env) {
     const { pathname } = new URL(request.url);
+    if (!pathname.startsWith("/api/")) return site(request, env);
     if (pathname !== "/api/relay") return reply({ error: "not found" }, 404);
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
     if (request.method === "POST") return register(request, env);
