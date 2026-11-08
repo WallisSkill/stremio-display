@@ -1,0 +1,29 @@
+[package]
+name = "wistv"
+version = "0.1.0"
+edition = "2021"
+description = "WiS TV - a personal Stremio front end"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["custom-protocol"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio = { version = "1", features = ["time"] }
+futures = "0.3"
+libloading = "0.8"
+urlencoding = "2"
+
+[profile.dev]
+debug = 0
+
+[profile.dev.package."*"]
+opt-level = 1
+
+[profile.release]
+codegen-units = 4
+lto = "thin"
+strip = true

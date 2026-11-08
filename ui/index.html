@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WiS TV</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="backdrop" aria-hidden="true">
+    <div class="bd-layer" id="bd-a"></div>
+    <div class="bd-layer" id="bd-b"></div>
+    <div class="bd-shade"></div>
+  </div>
+
+  <header id="topbar" hidden>
+    <a class="brand focusable" data-route="home" tabindex="0"><span class="brand-w">WiS</span><span class="brand-tv">TV</span></a>
+    <nav class="tabs" id="tabs">
+      <button class="tab focusable" data-route="home">Trang chủ</button>
+      <button class="tab focusable" data-route="movie">Phim</button>
+      <button class="tab focusable" data-route="series">Phim bộ</button>
+      <button class="tab focusable" data-route="library">Thư viện</button>
+    </nav>
+    <div class="top-right">
+      <button class="icon-btn focusable" data-route="search" aria-label="Tìm kiếm">
+        <svg viewBox="0 0 24 24" width="20" height="20"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M15.5 15.5 21 21" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+      </button>
+      <button class="avatar focusable" data-route="settings" id="avatar" aria-label="Tài khoản">W</button>
+    </div>
+  </header>
+
+  <main id="view"></main>
+
+  <div id="scrim" class="scrim" hidden></div>
+  <aside id="sheet" class="sheet" hidden></aside>
+  <div id="toast" class="toast" role="status" hidden></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
