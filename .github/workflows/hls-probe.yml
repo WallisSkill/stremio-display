@@ -6,6 +6,12 @@ on:
       url:
         description: Stream URL
         required: true
+      ua:
+        description: User-Agent header
+        required: false
+      referer:
+        description: Referer header
+        required: false
 
 jobs:
   probe:
@@ -26,9 +32,18 @@ jobs:
       - name: Probe
         env:
           URL: ${{ inputs.url }}
+          UA: ${{ inputs.ua }}
+          REF: ${{ inputs.referer }}
         run: |
           cd mpv/out
           ./mpv.exe --version | head -3
+          if [ -n "$UA" ]; then
+            echo "=== headers joined with commas"
+            timeout 90 ./mpv.exe --no-config --vo=null --ao=null --frames=30 --msg-level=all=v "--http-header-fields=User-Agent: $UA,Referer: $REF" "$URL" 2>&1 | grep -iE "http|error|recogni|Video --|Audio --|Exiting|failed|403|400" | head -20
+            echo "=== headers appended one by one"
+            timeout 90 ./mpv.exe --no-config --vo=null --ao=null --frames=30 --msg-level=all=v "--http-header-fields-append=User-Agent: $UA" "--http-header-fields-append=Referer: $REF" "$URL" 2>&1 | grep -iE "http|error|recogni|Video --|Audio --|Exiting|failed|403|400" | head -20
+            exit 0
+          fi
           echo "=== default"
           timeout 90 ./mpv.exe --no-config --vo=null --ao=null --frames=30 --msg-level=all=v "$URL" 2>&1 | grep -iE "hls|extension|error|recogni|Video --|Audio --|Exiting|failed" | head -30
           echo "=== extension_picky=0"
