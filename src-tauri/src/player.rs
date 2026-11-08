@@ -220,11 +220,14 @@ impl Mpv {
     }
 
     unsafe fn with_frame<T>(&self, ctx: Handle, f: impl FnOnce(&crate::autocrop::Frame) -> T) -> Option<T> {
-        let owned: Vec<CString> = ["screenshot-raw", "video", "bgr0"].iter().filter_map(|a| CString::new(*a).ok()).collect();
-        let mut ptrs: Vec<*const c_char> = owned.iter().map(|c| c.as_ptr()).collect();
-        ptrs.push(ptr::null());
         let mut node = MpvNode { u: 0, format: 0 };
-        if (self.command_ret)(ctx, ptrs.as_mut_ptr(), &mut node) < 0 {
+        let grab = |args: &[&str], node: &mut MpvNode| {
+            let owned: Vec<CString> = args.iter().filter_map(|a| CString::new(*a).ok()).collect();
+            let mut ptrs: Vec<*const c_char> = owned.iter().map(|c| c.as_ptr()).collect();
+            ptrs.push(ptr::null());
+            (self.command_ret)(ctx, ptrs.as_mut_ptr(), node) >= 0
+        };
+        if !grab(&["screenshot-raw", "video", "bgr0"], &mut node) && !grab(&["screenshot-raw", "video"], &mut node) {
             return None;
         }
         let out = (|| {
@@ -250,7 +253,7 @@ impl Mpv {
                     _ => {}
                 }
             }
-            if format != "bgr0" || w <= 0 || h <= 0 || stride <= 0 {
+            if !matches!(format.as_str(), "bgr0" | "bgra" | "rgba" | "rgb0") || w <= 0 || h <= 0 || stride <= 0 {
                 return None;
             }
             let frame = crate::autocrop::Frame { w: w as u32, h: h as u32, stride: stride as usize, data: data? };
