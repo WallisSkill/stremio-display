@@ -810,7 +810,7 @@ function setLock(on) {
   } else wake();
 }
 
-let fillMode = (() => { try { return localStorage.getItem("wistv.fill") === "1"; } catch (e) { return false; } })();
+let fillMode = (() => { try { return localStorage.getItem("wistv.fill") !== "0"; } catch (e) { return true; } })();
 function setFill(on, announce) {
   fillMode = on;
   try { localStorage.setItem("wistv.fill", on ? "1" : "0"); } catch (e) {}
