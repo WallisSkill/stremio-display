@@ -47,10 +47,17 @@ enum Orientation {
             return
         }
         patched.insert(id)
-        let sel = #selector(getter: UIViewController.supportedInterfaceOrientations)
-        let block: @convention(block) (AnyObject) -> UInt = { _ in Orientation.mask.rawValue }
-        let imp = imp_implementationWithBlock(block)
-        if !class_addMethod(cls, sel, imp, "Q@:"), let method = class_getInstanceMethod(cls, sel) {
+        let orientations: @convention(block) (AnyObject) -> UInt = { _ in Orientation.mask.rawValue }
+        replace(cls, #selector(getter: UIViewController.supportedInterfaceOrientations), imp_implementationWithBlock(orientations), "Q@:")
+        let hidden: @convention(block) (AnyObject) -> Bool = { _ in Orientation.mask != .portrait }
+        replace(cls, #selector(getter: UIViewController.prefersStatusBarHidden), imp_implementationWithBlock(hidden), "B@:")
+        replace(cls, #selector(getter: UIViewController.prefersHomeIndicatorAutoHidden), imp_implementationWithBlock(hidden), "B@:")
+        let child: @convention(block) (AnyObject) -> AnyObject? = { _ in nil }
+        replace(cls, #selector(getter: UIViewController.childForStatusBarHidden), imp_implementationWithBlock(child), "@@:")
+    }
+
+    private static func replace(_ cls: AnyClass, _ sel: Selector, _ imp: IMP, _ types: String) {
+        if !class_addMethod(cls, sel, imp, types), let method = class_getInstanceMethod(cls, sel) {
             method_setImplementation(method, imp)
         }
     }
@@ -69,6 +76,16 @@ enum Orientation {
             let target: UIInterfaceOrientation = next == .portrait ? .portrait : .landscapeRight
             UIDevice.current.setValue(target.rawValue, forKey: "orientation")
             UIViewController.attemptRotationToDeviceOrientation()
+        }
+        for scene in scenes {
+            for window in scene.windows {
+                var vc = window.rootViewController
+                while let c = vc {
+                    c.setNeedsStatusBarAppearanceUpdate()
+                    c.setNeedsUpdateOfHomeIndicatorAutoHidden()
+                    vc = c.presentedViewController
+                }
+            }
         }
     }
 }

@@ -615,11 +615,11 @@ body.web-playing #wv { display: block; }
   .pl-row .pl-group:first-child .pl-btn:nth-child(2), .pl-row .pl-group:first-child .pl-btn:nth-child(3) { display: none; }
 }
 
-#player.touch .pl-top { padding-top: max(8px, env(safe-area-inset-top)); gap: 0; min-height: 52px; justify-content: flex-start; }
-#player.touch .pl-top .pl-btn { width: 44px; height: 44px; margin-left: -8px; }
-#player.touch .pl-titles { position: absolute; left: 50%; top: max(8px, env(safe-area-inset-top)); height: 44px; transform: translateX(-50%); max-width: calc(100% - 200px); display: flex; align-items: center; justify-content: center; gap: 8px; }
-#player.touch .pl-title { font-size: 16px; flex: none; max-width: 60%; }
-#player.touch .pl-sub { font-size: 14px; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+#player.touch .pl-top { padding-top: 4px; gap: 4px; min-height: 48px; justify-content: flex-start; }
+#player.touch .pl-top .pl-btn { width: 44px; height: 44px; margin-left: -10px; flex: none; }
+#player.touch .pl-titles { flex: 1; min-width: 0; height: 44px; display: flex; align-items: center; justify-content: flex-start; gap: 8px; }
+#player.touch .pl-title { font-size: 16px; flex: 0 1 auto; min-width: 0; }
+#player.touch .pl-sub { font-size: 14px; margin: 0; white-space: nowrap; flex: none; }
 #player.touch .pl-center { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; align-items: center; gap: clamp(36px, 12vw, 120px); pointer-events: none; transition: opacity 400ms var(--ease); }
 #player.touch .pl-center .pl-btn { pointer-events: auto; background: none; }
 #player.touch .pl-center .pl-btn.big { width: 60px; height: 60px; }
