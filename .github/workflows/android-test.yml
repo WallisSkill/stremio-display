@@ -20,6 +20,15 @@ jobs:
           gh release download android --repo "${{ github.repository }}" --pattern WiSTV.apk --dir apk
           ls -la apk
 
+      - name: Make letterboxed sample
+        run: |
+          set -e
+          command -v ffmpeg >/dev/null || (sudo apt-get update -q && sudo apt-get install -y -q ffmpeg)
+          mkdir -p media
+          ffmpeg -loglevel error -f lavfi -i "testsrc2=size=1920x800:rate=25" -t 90 -vf "pad=1920:1080:0:140:black" -c:v libx264 -preset veryfast -pix_fmt yuv420p -g 50 media/letterbox.mp4
+          ls -la media
+          (cd media && nohup python3 -m http.server 8000 >/dev/null 2>&1 &)
+
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -57,6 +66,10 @@ jobs:
           shot 4-after-back-19s
           adb shell dumpsys window displays | grep -iE "mCurrentRotation" | head -2
           adb shell pidof tv.wis.app || echo "APP NOT RUNNING"
+          adb shell am force-stop tv.wis.app
+          sleep 2
+          adb shell am start -W -n tv.wis.app/.MainActivity -a android.intent.action.VIEW -d "http://10.0.2.2:8000/letterbox.mp4"
+          for t in 15 30 45; do sleep 15; shot "5-letterbox-${t}s"; done
           adb logcat -d > shots/logcat.txt
           grep -iE "wistv|back handled|mpv|tauri|AndroidRuntime|FATAL|DEBUG  |libc " shots/logcat.txt | tail -200 > shots/logcat-app.txt
           cat shots/logcat-app.txt | tail -80
@@ -71,6 +84,49 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           script: bash "$RUNNER_TEMP/smoke.sh"
+
+      - name: Measure letterbox crop
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import struct, zlib, glob
+          def load(p):
+              d = open(p, 'rb').read()
+              pos, w, h, idat = 8, 0, 0, b''
+              while pos < len(d):
+                  n, t = struct.unpack('>I4s', d[pos:pos+8])
+                  body = d[pos+8:pos+8+n]
+                  if t == b'IHDR':
+                      w, h, depth, ctype = struct.unpack('>IIBB', body[:10])
+                  elif t == b'IDAT':
+                      idat += body
+                  pos += 12 + n
+              bpp = 4 if ctype == 6 else 3
+              raw = zlib.decompress(idat)
+              rows, prev, stride = [], bytearray(w * bpp), w * bpp
+              for y in range(h):
+                  f, line = raw[y*(stride+1)], bytearray(raw[y*(stride+1)+1:(y+1)*(stride+1)])
+                  for i in range(stride):
+                      a = line[i-bpp] if i >= bpp else 0
+                      b, c = prev[i], (prev[i-bpp] if i >= bpp else 0)
+                      if f == 1: line[i] = (line[i] + a) & 255
+                      elif f == 2: line[i] = (line[i] + b) & 255
+                      elif f == 3: line[i] = (line[i] + (a + b) // 2) & 255
+                      elif f == 4:
+                          pa, pb, pc = abs(b - c), abs(a - c), abs(a + b - 2 * c)
+                          line[i] = (line[i] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
+                  rows.append(bytes(line)); prev = line
+              return w, h, bpp, rows
+          for p in sorted(glob.glob('shots/5-letterbox-*.png')):
+              w, h, bpp, rows = load(p)
+              lit = lambda x, y: max(rows[y][x*bpp:x*bpp+3]) > 40
+              cx, cy = w // 2, h // 2
+              top = next((y for y in range(h) if lit(cx, y)), h)
+              bottom = next((h - 1 - y for y in range(h) if lit(cx, h - 1 - y)), 0)
+              left = next((x for x in range(w) if lit(x, cy)), w)
+              right = next((w - 1 - x for x in range(w) if lit(w - 1 - x, cy)), 0)
+              print(f"{p}: screen {w}x{h} picture x {left}-{right} y {top}-{bottom}")
+          PY
 
       - uses: actions/upload-artifact@v4
         if: always()
