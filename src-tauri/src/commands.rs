@@ -278,7 +278,16 @@ type Target = (i64, Vec<(String, String)>);
 #[cfg(target_os = "ios")]
 async fn video_target(app: &AppHandle, _st: &AppState) -> R<Target> {
     use tauri_plugin_wistv_video::VideoExt;
-    Ok((app.video().layer()?, Vec::new()))
+    let video = app.video();
+    let _ = video.landscape(true);
+    let until = Instant::now() + Duration::from_millis(1500);
+    while Instant::now() < until {
+        if matches!(video.layer_size(), Ok((w, h)) if w > h) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    Ok((video.layer()?, Vec::new()))
 }
 
 #[cfg(windows)]

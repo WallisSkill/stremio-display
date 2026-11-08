@@ -17,6 +17,16 @@ final class VideoLayer: CAMetalLayer {
 
 final class VideoView: UIView {
     override class var layerClass: AnyClass { VideoLayer.self }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard let metal = layer as? CAMetalLayer else { return }
+        let scale = metal.contentsScale
+        let size = CGSize(width: (bounds.width * scale).rounded(), height: (bounds.height * scale).rounded())
+        if metal.drawableSize != size {
+            metal.drawableSize = size
+        }
+    }
 }
 
 enum Orientation {
@@ -135,6 +145,13 @@ final class VideoPlugin: Plugin {
 
     @objc public func layer(_ invoke: Invoke) {
         invoke.resolve(["pointer": pointer])
+    }
+
+    @objc public func layerSize(_ invoke: Invoke) {
+        DispatchQueue.main.async {
+            self.video.layoutIfNeeded()
+            invoke.resolve(["width": Double(self.video.bounds.width), "height": Double(self.video.bounds.height)])
+        }
     }
 
     @objc public func battery(_ invoke: Invoke) {

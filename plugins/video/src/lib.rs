@@ -51,6 +51,11 @@ impl<R: Runtime> Video<R> {
             .map_err(|e| e.to_string())
     }
 
+    pub fn layer_size(&self) -> Result<(f64, f64), String> {
+        let v: Value = self.0.run_mobile_plugin("layerSize", json!({})).map_err(|e| e.to_string())?;
+        Ok((v["width"].as_f64().unwrap_or(0.0), v["height"].as_f64().unwrap_or(0.0)))
+    }
+
     pub fn battery(&self) -> Result<Value, String> {
         self.0.run_mobile_plugin::<Value>("battery", json!({})).map_err(|e| e.to_string())
     }
