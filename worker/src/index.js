@@ -51,10 +51,15 @@ async function site(request, env) {
   const { pathname, search } = new URL(request.url);
   const origin = String(env.SITE_ORIGIN || "").replace(/\/+$/, "");
   if (!origin) return reply({ error: "not found" }, 404);
-  const res = await fetch(`${origin}${pathname}${search}`, { method: request.method, redirect: "manual", cf: { cacheTtl: 300 } });
+  const page = pathname.endsWith("/") || /\.(html|webmanifest)$/.test(pathname);
+  const res = await fetch(`${origin}${pathname}${search}`, { method: request.method, redirect: "manual", cf: { cacheTtl: page ? 60 : 300 } });
   const headers = new Headers(res.headers);
   const moved = headers.get("location");
   if (moved && moved.startsWith(origin)) headers.set("location", moved.slice(origin.length) || "/");
+  if (res.ok) {
+    const versioned = /(^|&)v=[0-9a-f]{6,}/.test(search.slice(1));
+    headers.set("cache-control", versioned ? "public, max-age=31536000, immutable" : page ? "no-cache" : "public, max-age=3600");
+  }
   return new Response(res.body, { status: res.status, headers });
 }
 
