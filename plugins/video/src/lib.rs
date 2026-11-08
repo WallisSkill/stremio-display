@@ -56,6 +56,17 @@ impl<R: Runtime> Video<R> {
         Ok((v["width"].as_f64().unwrap_or(0.0), v["height"].as_f64().unwrap_or(0.0)))
     }
 
+    pub fn layer_info(&self) -> Result<Value, String> {
+        self.0.run_mobile_plugin::<Value>("layerSize", json!({})).map_err(|e| e.to_string())
+    }
+
+    pub fn gravity(&self, fill: bool) -> Result<(), String> {
+        self.0
+            .run_mobile_plugin::<Value>("gravity", json!({ "on": fill }))
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+
     pub fn battery(&self) -> Result<Value, String> {
         self.0.run_mobile_plugin::<Value>("battery", json!({})).map_err(|e| e.to_string())
     }

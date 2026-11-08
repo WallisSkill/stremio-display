@@ -150,7 +150,21 @@ final class VideoPlugin: Plugin {
     @objc public func layerSize(_ invoke: Invoke) {
         DispatchQueue.main.async {
             self.video.layoutIfNeeded()
-            invoke.resolve(["width": Double(self.video.bounds.width), "height": Double(self.video.bounds.height)])
+            var out: [String: Any] = ["width": Double(self.video.bounds.width), "height": Double(self.video.bounds.height), "gravity": self.video.layer.contentsGravity.rawValue]
+            if let metal = self.video.layer as? CAMetalLayer {
+                out["drawableWidth"] = Double(metal.drawableSize.width)
+                out["drawableHeight"] = Double(metal.drawableSize.height)
+            }
+            invoke.resolve(out)
+        }
+    }
+
+    @objc public func gravity(_ invoke: Invoke) throws {
+        let args = try invoke.parseArgs(AwakeArgs.self)
+        DispatchQueue.main.async {
+            self.video.contentMode = args.on ? .scaleToFill : .scaleAspectFit
+            self.video.layer.contentsGravity = args.on ? .resize : .resizeAspect
+            invoke.resolve()
         }
     }
 

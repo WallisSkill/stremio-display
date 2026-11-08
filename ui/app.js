@@ -826,13 +826,23 @@ let fillMode = (() => { try { const v = localStorage.getItem("wistv.fill"); retu
 function setFill(on, announce) {
   fillMode = on;
   try { localStorage.setItem("wistv.fill", on ? "1" : "0"); } catch (e) {}
-  if (pl.open) quietSet("keepaspect", on ? "no" : "yes");
+  const applied = pl.open ? applyFill(on) : Promise.resolve(null);
   if (pl.ui) {
     pl.ui.stretch.title = on ? "Giữ đúng tỉ lệ (Z)" : "Dãn kín màn hình (Z)";
     if (pl.ui.fillIcon) { pl.ui.fillIcon.innerHTML = ICON[on ? "fit" : "fill"]; pl.ui.fillLabel.textContent = on ? "Vừa hình" : "Dãn hình"; }
     else pl.ui.stretch.innerHTML = ICON[on ? "fit" : "fill"];
   }
-  if (announce) toast(on ? "Dãn kín màn hình" : "Giữ đúng tỉ lệ hình");
+  if (!announce) return;
+  const label = on ? "Dãn kín màn hình" : "Giữ đúng tỉ lệ hình";
+  if (!TAURI || !TOUCH || ANDROID) { toast(label); return; }
+  applied.then((d) => toast(d ? `${label} · ${fillReport(d)}` : label));
+}
+const applyFill = (on) => call("player_fill", { on }).catch(() => null);
+function fillReport(d) {
+  const m = d.mpv || {};
+  const l = d.layer || {};
+  const n = (v) => Math.round(Number(v) || 0);
+  return `mpv ${n(m.w)}×${n(m.h)} lề ${n(m.ml)}/${n(m.mr)}/${n(m.mt)}/${n(m.mb)} video ${n(m.dw)}×${n(m.dh)} · lớp ${n(l.width)}×${n(l.height)} vẽ ${n(l.drawableWidth)}×${n(l.drawableHeight)} ${l.gravity || ""}`;
 }
 
 const pad2 = (n) => String(n).padStart(2, "0");
@@ -1082,7 +1092,7 @@ function onPlayerState(s) {
   if (Date.now() < pl.seekUntil && Math.abs((s.time || 0) - pl.seekTarget) < 1.5 && !s.buffering) pl.seekUntil = 0;
   if (s.loaded && !wasLoaded) {
     const session = pl.session;
-    if (fillMode) quietSet("keepaspect", "no");
+    applyFill(fillMode);
     setTimeout(() => autoSub(session), 600);
     pl.ui.root.classList.remove("loading");
     document.body.classList.add("see-through");

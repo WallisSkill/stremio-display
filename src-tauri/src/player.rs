@@ -433,6 +433,20 @@ impl Player {
         let _ = self.command(&["quit".to_string()]);
     }
 
+    pub fn layout(&self) -> Value {
+        let Ok(lib) = mpv() else { return Value::Null };
+        let live = self.live.lock().unwrap();
+        let Some(live) = live.as_ref() else { return Value::Null };
+        let ctx = live.ctx as Handle;
+        let mut out = serde_json::Map::new();
+        for key in ["osd-dimensions/w", "osd-dimensions/h", "osd-dimensions/ml", "osd-dimensions/mr", "osd-dimensions/mt", "osd-dimensions/mb", "video-params/dw", "video-params/dh", "keepaspect"] {
+            if let Some(v) = unsafe { lib.prop(ctx, key) } {
+                out.insert(key.rsplit('/').next().unwrap_or(key).to_string(), Value::String(v));
+            }
+        }
+        Value::Object(out)
+    }
+
     #[cfg(target_os = "ios")]
     pub fn background(&self, hidden: bool) -> Result<(), String> {
         let vo = PLATFORM_OPTIONS.iter().find(|(k, _)| *k == "vo").map_or("gpu-next", |(_, v)| *v);

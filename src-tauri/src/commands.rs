@@ -492,6 +492,24 @@ pub async fn device_battery() -> R<Value> {
 }
 
 #[tauri::command]
+pub async fn player_fill(app: AppHandle, on: bool) -> R<Value> {
+    #[cfg(target_os = "ios")]
+    let layer = {
+        use tauri_plugin_wistv_video::VideoExt;
+        let video = app.video();
+        let _ = video.gravity(on);
+        video.layer_info().unwrap_or(Value::Null)
+    };
+    #[cfg(not(target_os = "ios"))]
+    let layer = Value::Null;
+    off_main(app, move |st| {
+        st.player.set("keepaspect", if on { "no" } else { "yes" })?;
+        Ok(json!({ "mpv": st.player.layout(), "layer": layer }))
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn player_background(app: AppHandle, hidden: bool) -> R<()> {
     off_main(app, move |st| st.player.background(hidden)).await
 }
