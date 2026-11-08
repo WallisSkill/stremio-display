@@ -24,7 +24,7 @@ pub async fn login(st: State<'_, AppState>, email: String, password: String) -> 
         .as_str()
         .ok_or("Đăng nhập thất bại")?
         .to_string();
-    let user = res["user"].clone();
+    let user = crate::state::slim_user(&res["user"]);
     st.set_session(Some(Session {
         auth_key,
         user: user.clone(),

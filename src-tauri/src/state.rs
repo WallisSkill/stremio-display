@@ -14,6 +14,16 @@ pub struct Session {
     pub user: Value,
 }
 
+pub fn slim_user(user: &Value) -> Value {
+    let mut out = serde_json::Map::new();
+    for key in ["_id", "email", "fullname", "avatar"] {
+        if let Some(v) = user.get(key) {
+            out.insert(key.to_string(), v.clone());
+        }
+    }
+    Value::Object(out)
+}
+
 pub struct AppState {
     pub http: reqwest::Client,
     pub data_dir: PathBuf,
@@ -29,7 +39,16 @@ impl AppState {
         fs::create_dir_all(&data_dir)?;
         let session = fs::read(data_dir.join("session.json"))
             .ok()
-            .and_then(|b| serde_json::from_slice::<Session>(&b).ok());
+            .and_then(|b| serde_json::from_slice::<Session>(&b).ok())
+            .map(|s| Session {
+                user: slim_user(&s.user),
+                auth_key: s.auth_key,
+            });
+        if let Some(s) = &session {
+            if let Ok(bytes) = serde_json::to_vec(s) {
+                let _ = fs::write(data_dir.join("session.json"), bytes);
+            }
+        }
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(25))
             .user_agent("WiSTV/0.1")
@@ -49,6 +68,10 @@ impl AppState {
     }
 
     pub fn set_session(&self, s: Option<Session>) -> Result<(), String> {
+        let s = s.map(|s| Session {
+            user: slim_user(&s.user),
+            auth_key: s.auth_key,
+        });
         let file = self.data_dir.join("session.json");
         match &s {
             Some(s) => {
