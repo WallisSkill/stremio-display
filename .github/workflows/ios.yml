@@ -32,21 +32,20 @@ jobs:
         with:
           workspaces: "src-tauri -> target"
 
-      - uses: actions/setup-node@v4
+      - uses: taiki-e/install-action@v2
         with:
-          node-version: 22
+          tool: tauri-cli@2
 
       - name: Install tools
         run: |
-          npm install -g @tauri-apps/cli@^2.11
           brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
-          tauri --version
+          cargo tauri --version
 
       - name: Create Xcode project
         working-directory: src-tauri
         run: |
-          tauri ios init --ci
-          tauri icon icons/icon.png
+          cargo tauri ios init --ci
+          cargo tauri icon icons/icon.png
 
       - name: Add mpv and app settings
         working-directory: src-tauri/gen/apple
@@ -81,7 +80,7 @@ jobs:
 
       - name: Build IPA
         working-directory: src-tauri
-        run: tauri ios build --no-sign
+        run: cargo tauri ios build --no-sign
 
       - name: Collect IPA
         run: |
