@@ -586,20 +586,41 @@ function buildPlayer() {
   ui.cc = iconBtn("cc", "Âm thanh và phụ đề (C)", () => toggleMenu("tracks"));
   ui.eps = iconBtn("list", "Các tập (E)", () => toggleMenu("episodes"));
   ui.nextUp = h("button", { class: "pl-nextup", tabindex: "-1", hidden: true, onclick: (e) => { e.stopPropagation(); playNext(false); } });
-  ui.speed = h("button", { class: "pl-btn pl-speed", tabindex: "-1", title: "Tốc độ", onclick: (e) => { e.stopPropagation(); toggleMenu("speed"); } }, "1×");
+  ui.speedVal = h("span", {}, "1×");
+  ui.speed = h("button", { class: "pl-btn pl-speed", tabindex: "-1", title: "Tốc độ", onclick: (e) => { e.stopPropagation(); toggleMenu("speed"); } }, ...(TOUCH ? [h("span", { html: ICON.speed }), h("span", { class: "pl-label" }, "Tốc độ (", ui.speedVal, ")")] : [ui.speedVal]));
   ui.fs = iconBtn("full", "Toàn màn hình (F)", toggleFullscreen);
   ui.menu = h("div", { class: "pl-menu", hidden: true });
   ui.menu.addEventListener("pointerdown", (e) => e.stopPropagation());
   ui.menu.addEventListener("click", (e) => e.stopPropagation());
   const top = h("div", { class: "pl-top" }, iconBtn("left", "Quay lại (Esc)", () => closePlayer()), h("div", { class: "pl-titles" }, ui.title, ui.sub));
-  const bottom = h("div", { class: "pl-bottom" },
-    ui.seek,
-    h("div", { class: "pl-row" },
-      h("div", { class: "pl-group" }, ui.play, iconBtn("back10", "Lùi 10 giây (←)", () => seekBy(-10)), iconBtn("fwd10", "Tới 10 giây (→)", () => seekBy(10)), ui.next, h("div", { class: "pl-volwrap" }, ui.volBtn, ui.vol), ui.time),
-      h("div", { class: "pl-group" }, ui.eps, ui.cc, ui.speed, ui.fs)));
-  bottom.addEventListener("click", (e) => e.stopPropagation());
-  bottom.addEventListener("dblclick", (e) => e.stopPropagation());
-  ui.root = h("div", { id: "player", hidden: true }, ui.bg, ui.hit, h("div", { class: "pl-shade" }), ui.spin, ui.flash, top, bottom, ui.nextUp, ui.menu);
+  const back10 = iconBtn("back10", "Lùi 10 giây (←)", () => seekBy(-10));
+  const fwd10 = iconBtn("fwd10", "Tới 10 giây (→)", () => seekBy(10));
+  const seekRow = h("div", { class: "pl-seekrow" }, ui.seek, ui.time);
+  let center = null;
+  let bottom;
+  if (TOUCH) {
+    for (const [btn, text] of [[ui.eps, "Các tập"], [ui.cc, "Âm thanh và phụ đề"], [ui.next, "Tập tiếp"]]) {
+      btn.classList.add("act");
+      btn.append(h("span", { class: "pl-label" }, text));
+    }
+    ui.speed.classList.add("act");
+    ui.play.classList.add("huge");
+    back10.classList.add("big");
+    fwd10.classList.add("big");
+    center = h("div", { class: "pl-center" }, back10, ui.play, fwd10);
+    bottom = h("div", { class: "pl-bottom" }, seekRow, h("div", { class: "pl-actions" }, ui.speed, ui.eps, ui.cc, ui.next));
+  } else {
+    bottom = h("div", { class: "pl-bottom" },
+      seekRow,
+      h("div", { class: "pl-row" },
+        h("div", { class: "pl-group" }, ui.play, back10, fwd10, ui.next, h("div", { class: "pl-volwrap" }, ui.volBtn, ui.vol)),
+        h("div", { class: "pl-group" }, ui.eps, ui.cc, ui.speed, ui.fs)));
+  }
+  for (const el of [bottom, center].filter(Boolean)) {
+    el.addEventListener("click", (e) => e.stopPropagation());
+    el.addEventListener("dblclick", (e) => e.stopPropagation());
+  }
+  ui.root = h("div", { id: "player", class: TOUCH ? "touch" : "", hidden: true }, ui.bg, ui.hit, h("div", { class: "pl-shade" }), ui.spin, ui.flash, top, ...(center ? [center] : []), bottom, ui.nextUp, ui.menu);
   let lastTap = 0;
   let tapTimer = null;
   let swipe = null;
@@ -893,7 +914,7 @@ function paintState() {
   if (document.activeElement !== ui.vol && s.volume != null) ui.vol.value = String(Math.round(s.volume));
   ui.volBtn.innerHTML = s.mute || s.volume === 0 ? ICON.mute : ICON.vol;
   ui.vol.style.setProperty("--v", `${((s.mute ? 0 : s.volume ?? 100) / 150) * 100}%`);
-  ui.speed.textContent = `${s.speed && s.speed !== 1 ? +s.speed.toFixed(2) : 1}×`;
+  ui.speedVal.textContent = `${s.speed && s.speed !== 1 ? +s.speed.toFixed(2) : 1}×`;
   const nx = nextEpisode();
   ui.next.hidden = !nx;
   ui.eps.hidden = !((pl.ctx?.m?.videos || []).length > 1);
@@ -1619,6 +1640,12 @@ function back() {
 }
 
 window.__wistvBack = () => stepBack();
+
+if (TAURI && TOUCH) document.addEventListener("visibilitychange", () => {
+  if (!pl.open) return;
+  if (document.hidden) { pl.bgVideo = true; quietSet("vid", "no"); }
+  else if (pl.bgVideo) { pl.bgVideo = false; quietSet("vid", "auto"); }
+});
 
 if (TAURI) listen("update-state", (e) => { if (e.payload?.version) toast(`Đang cập nhật WiS TV lên bản ${e.payload.version}…`); });
 

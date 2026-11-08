@@ -496,10 +496,20 @@ pub fn open_url(app: AppHandle, url: String) -> R<()> {
     open_external(&app, &url)
 }
 
+#[cfg(not(target_os = "android"))]
 #[tauri::command]
 pub fn startup_open() -> Option<String> {
     std::env::var("WISTV_OPEN")
         .ok()
+        .filter(|u| u.starts_with("http://") || u.starts_with("https://"))
+}
+
+#[cfg(target_os = "android")]
+#[tauri::command]
+pub fn startup_open(app: AppHandle) -> Option<String> {
+    use tauri_plugin_wistv_video::VideoExt;
+    app.video()
+        .startup_url()
         .filter(|u| u.starts_with("http://") || u.starts_with("https://"))
 }
 

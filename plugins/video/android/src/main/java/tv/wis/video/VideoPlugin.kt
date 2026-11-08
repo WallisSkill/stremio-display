@@ -23,6 +23,7 @@ import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
+import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 
 class Native {
@@ -111,6 +112,15 @@ class VideoPlugin(private val activity: Activity) : Plugin(activity), SurfaceHol
             }
         }
         invoke.resolve()
+    }
+
+    @Command
+    fun startupUrl(invoke: Invoke) {
+        val data = activity.intent?.data
+        val url = if (activity.intent?.action == Intent.ACTION_VIEW && (data?.scheme == "http" || data?.scheme == "https")) data.toString() else null
+        val out = JSObject()
+        out.put("url", url)
+        invoke.resolve(out)
     }
 
     @Command

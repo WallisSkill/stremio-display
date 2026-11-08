@@ -31,6 +31,12 @@ impl<R: Runtime> Video<R> {
             .map_err(|e| e.to_string())
     }
 
+    #[cfg(target_os = "android")]
+    pub fn startup_url(&self) -> Option<String> {
+        let v: Value = self.0.run_mobile_plugin("startupUrl", json!({})).ok()?;
+        v["url"].as_str().map(str::to_string)
+    }
+
     pub fn landscape(&self, on: bool) -> Result<(), String> {
         self.0
             .run_mobile_plugin::<Value>("landscape", json!({ "on": on }))
