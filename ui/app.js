@@ -1213,6 +1213,19 @@ async function renderLibrary(view) {
   renderGridPage(view, "Thư viện", items, app.user ? "Thư viện trống. Bấm “Thư viện” ở trang phim để thêm." : "Đăng nhập tài khoản Stremio để dùng Thư viện.");
 }
 
+let addonsAt = 0;
+const addonKey = (list) => JSON.stringify((list || []).map((a) => a.transportUrl));
+async function syncAddons(maxAge) {
+  if (!TAURI || Date.now() - addonsAt < maxAge) return false;
+  addonsAt = Date.now();
+  try {
+    const list = await call("addons", { refresh: true });
+    const changed = addonKey(list) !== addonKey(app.addons);
+    app.addons = list;
+    return changed;
+  } catch (e) { return false; }
+}
+
 function renderSearch(view, { q = "" } = {}) {
   document.body.classList.add("dim");
   const input = h("input", { placeholder: "Phim, phim bộ, diễn viên…", value: q, spellcheck: "false" });
@@ -1235,6 +1248,7 @@ function renderSearch(view, { q = "" } = {}) {
   input.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(run, 450); });
   input.addEventListener("keydown", (e) => { if (e.key === "Enter") { clearTimeout(timer); run(); } });
   run();
+  syncAddons(60000).then((changed) => { if (changed && input.isConnected) run(); });
 }
 
 async function renderSettings(view) {
@@ -1641,6 +1655,12 @@ function back() {
 
 window.__wistvBack = () => stepBack();
 
+if (TAURI) document.addEventListener("visibilitychange", async () => {
+  if (document.hidden || pl.open) return;
+  const route = app.stack[app.stack.length - 1]?.route;
+  if (await syncAddons(120000) && (route === "home" || route === "movie" || route === "series")) render();
+});
+
 if (TAURI && TOUCH) document.addEventListener("visibilitychange", () => {
   if (!pl.open) return;
   if (document.hidden) { pl.bgVideo = true; quietSet("vid", "no"); }
@@ -1818,7 +1838,7 @@ async function boot() {
   const hit = cacheGet(bootKey());
   const fresh = Promise.allSettled([call("addons"), call("library")]);
   const apply = ([addons, library]) => {
-    if (addons.status === "fulfilled") app.addons = addons.value;
+    if (addons.status === "fulfilled") { app.addons = addons.value; addonsAt = Date.now(); }
     else { app.addons = app.addons || []; toast(`Không tải được addon: ${addons.reason}`, true); }
     if (library.status === "fulfilled") app.library = library.value;
     else app.library = app.library || [];
