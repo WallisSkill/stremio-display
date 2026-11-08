@@ -602,7 +602,55 @@ function buildPlayer() {
   ui.root = h("div", { id: "player", hidden: true }, ui.bg, ui.hit, h("div", { class: "pl-shade" }), ui.spin, ui.flash, top, bottom, ui.nextUp, ui.menu);
   let lastTap = 0;
   let tapTimer = null;
+  let swipe = null;
+  let swipedAt = 0;
+  const swipeTip = () => {
+    const d = pl.s.duration || 0;
+    const delta = (pl.drag - swipe.from) * d;
+    ui.tip.textContent = `${secs(pl.drag * d)} · ${delta < 0 ? "−" : "+"}${secs(Math.abs(delta))}`;
+    ui.tip.style.left = `${Math.min(92, Math.max(8, pl.drag * 100))}%`;
+  };
+  ui.hit.addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "mouse" || pl.menu || !pl.s.loaded || !(pl.s.duration > 0)) return;
+    swipe = { id: e.pointerId, x: e.clientX, y: e.clientY, from: curTime() / pl.s.duration, on: false };
+  });
+  ui.hit.addEventListener("pointermove", (e) => {
+    if (!swipe || e.pointerId !== swipe.id) return;
+    const dx = e.clientX - swipe.x;
+    if (!swipe.on) {
+      const dy = e.clientY - swipe.y;
+      if (Math.abs(dy) > 16 && Math.abs(dy) > Math.abs(dx)) { swipe = null; return; }
+      if (Math.abs(dx) < 14 || Math.abs(dx) < Math.abs(dy) * 1.3) return;
+      swipe.on = true;
+      swipe.x = e.clientX;
+      try { ui.hit.setPointerCapture(e.pointerId); } catch (err) {}
+      ui.seek.classList.add("dragging");
+      pl.drag = swipe.from;
+      wake();
+      return;
+    }
+    const width = ui.seek.getBoundingClientRect().width || window.innerWidth;
+    pl.drag = Math.min(1, Math.max(0, swipe.from + dx / width));
+    swipeTip();
+    paintTime();
+  });
+  const endSwipe = (e) => {
+    if (!swipe || e.pointerId !== swipe.id) return;
+    const done = swipe.on;
+    swipe = null;
+    if (!done) return;
+    swipedAt = Date.now();
+    const target = pl.drag * (pl.s.duration || 0);
+    pl.drag = null;
+    ui.seek.classList.remove("dragging");
+    if (e.type === "pointerup") seekTo(target);
+    paintTime();
+    wake();
+  };
+  ui.hit.addEventListener("pointerup", endSwipe);
+  ui.hit.addEventListener("pointercancel", endSwipe);
   ui.hit.addEventListener("click", (e) => {
+    if (Date.now() - swipedAt < 400) return;
     if (pl.menu) { toggleMenu(null); return; }
     if (!TOUCH) { togglePause(); return; }
     const now = Date.now();

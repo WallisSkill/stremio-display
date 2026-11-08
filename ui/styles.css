@@ -326,7 +326,7 @@ html:has(body.see-through), body.see-through { background: transparent; }
 .pl-loading-bg::after { content: ""; position: absolute; inset: 0; background: rgba(0,0,0,0.72); backdrop-filter: blur(30px); }
 #player.loading .pl-loading-bg { opacity: 1; }
 #player.loading { background: #000; }
-.pl-hit { position: absolute; inset: 0; }
+.pl-hit { position: absolute; inset: 0; touch-action: none; }
 .pl-shade {
   position: absolute; inset: 0; pointer-events: none;
   background:
