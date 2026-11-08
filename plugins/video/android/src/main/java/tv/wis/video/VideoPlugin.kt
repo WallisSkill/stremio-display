@@ -11,6 +11,7 @@ import android.net.Uri
 import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import android.util.Log
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.webkit.WebView
@@ -80,6 +81,7 @@ class VideoPlugin(private val activity: Activity) : Plugin(activity), SurfaceHol
             object : OnBackPressedCallback(true) {
                 override fun handleOnBackPressed() {
                     webView.evaluateJavascript("window.__wistvBack ? String(window.__wistvBack()) : 'false'") { result ->
+                        Log.i("WiSTV", "back handled by page: $result")
                         if (result != "\"true\"") {
                             isEnabled = false
                             owner.onBackPressedDispatcher.onBackPressed()

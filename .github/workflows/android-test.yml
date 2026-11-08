@@ -33,6 +33,7 @@ jobs:
           set -x
           shot() { adb exec-out screencap -p > "shots/$1.png"; }
           adb install -r apk/WiSTV.apk
+          adb shell settings put secure immersive_mode_confirmations confirmed
           adb logcat -c
           adb shell am start -W -n tv.wis.app/.MainActivity
           sleep 30
@@ -53,13 +54,14 @@ jobs:
           shot 3-after-home-23s
           adb shell input keyevent KEYCODE_BACK
           sleep 4
+          adb shell dumpsys window | grep -E "mCurrentFocus|mFocusedApp" | head -3
           shot 4-after-back-4s
           sleep 15
           shot 4-after-back-19s
           adb shell dumpsys window displays | grep -iE "mCurrentRotation" | head -2
           adb shell pidof tv.wis.app || echo "APP NOT RUNNING"
           adb logcat -d > shots/logcat.txt
-          grep -iE "wistv|mpv|tauri|AndroidRuntime|FATAL|DEBUG  |libc " shots/logcat.txt | tail -200 > shots/logcat-app.txt
+          grep -iE "wistv|back handled|mpv|tauri|AndroidRuntime|FATAL|DEBUG  |libc " shots/logcat.txt | tail -200 > shots/logcat-app.txt
           cat shots/logcat-app.txt | tail -80
           EOF
 
