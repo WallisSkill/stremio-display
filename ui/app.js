@@ -764,6 +764,55 @@ const subPlacement = (v) => (v <= SUB_BASE ? { pos: 100, margin: Math.round((v /
 const saveSubPrefs = () => { try { localStorage.setItem("wistv.sub", JSON.stringify(subPrefs)); } catch (e) {} };
 const quietSet = (name, value) => call("player_set", { name, value: String(value) }).then(() => true, () => false);
 
+const SUB_LANGS = [["", "Tắt"], ["vi", "Tiếng Việt"], ["en", "English"], ["zh", "中文"], ["ko", "한국어"], ["ja", "日本語"]];
+const sameLang = (a, b) => !!a && !!b && langName(a) === langName(b);
+let subLang = (() => { try { const v = localStorage.getItem("wistv.sublang"); return v == null ? "vi" : v; } catch (e) { return "vi"; } })();
+const setSubLang = (v) => { subLang = v; try { localStorage.setItem("wistv.sublang", v); } catch (e) {} };
+const subPicks = () => { try { return JSON.parse(localStorage.getItem("wistv.subpick") || "{}"); } catch (e) { return {}; } };
+function rememberSub(choice) {
+  const id = pl.ctx?.m?.id;
+  if (!id) return;
+  const all = subPicks();
+  delete all[id];
+  all[id] = { ...choice, at: Date.now() };
+  const keys = Object.keys(all);
+  for (const k of keys.slice(0, Math.max(0, keys.length - 300))) delete all[k];
+  try { localStorage.setItem("wistv.subpick", JSON.stringify(all)); } catch (e) {}
+}
+
+function loadAddonSubs() {
+  if (pl.subs !== null && pl.subs !== "loading") return Promise.resolve(pl.subs);
+  if (pl.subsJob) return pl.subsJob;
+  if (!pl.ctx?.m?.type || String(pl.ctx.vid).startsWith("local:")) { pl.subs = []; return Promise.resolve(pl.subs); }
+  pl.subs = "loading";
+  const session = pl.session;
+  pl.subsJob = call("subtitles", { kind: pl.ctx.m.type, id: pl.ctx.vid })
+    .then((list) => { if (pl.session === session) { pl.subs = list; pl.subsJob = null; if (pl.menu === "tracks") renderMenu(); } return list; })
+    .catch(() => { if (pl.session === session) { pl.subs = []; pl.subsJob = null; } return []; });
+  return pl.subsJob;
+}
+
+function addAddonSub(s, quiet) {
+  pl.added.add(s.url);
+  const args = ["sub-add", s.url, "select", `${langName(s.lang)} · ${s.addon}`, s.lang || ""];
+  return quiet ? call("player_command", { args }).catch(() => {}) : cmd(...args);
+}
+
+async function autoSub(session) {
+  const pick = subPicks()[pl.ctx?.m?.id];
+  const want = pick || (subLang ? { lang: subLang } : null);
+  if (!want || pl.session !== session) return;
+  if (want.off) { quietSet("sid", "no"); return; }
+  const tracks = pl.tracks.filter((t) => t.type === "sub" && !t.external);
+  const inFile = tracks.find((t) => sameLang(t.lang, want.lang) && (!want.title || t.title === want.title)) || tracks.find((t) => sameLang(t.lang, want.lang));
+  if (inFile && !want.url) { quietSet("sid", inFile.id); return; }
+  const list = await loadAddonSubs();
+  if (pl.session !== session || !Array.isArray(list)) return;
+  const fromAddon = (want.url && list.find((s) => s.url === want.url)) || list.find((s) => sameLang(s.lang, want.lang));
+  if (fromAddon) { if (!pl.added.has(fromAddon.url)) addAddonSub(fromAddon, true); return; }
+  if (inFile) quietSet("sid", inFile.id);
+}
+
 async function applySubStyle(keys) {
   const all = !keys;
   if (all || keys.includes("scale")) quietSet("sub-scale", subPrefs.scale.toFixed(2));
@@ -934,6 +983,8 @@ function onPlayerState(s) {
   pl.s = { ...pl.s, ...s };
   if (Date.now() < pl.seekUntil && Math.abs((s.time || 0) - pl.seekTarget) < 1.5 && !s.buffering) pl.seekUntil = 0;
   if (s.loaded && !wasLoaded) {
+    const session = pl.session;
+    setTimeout(() => autoSub(session), 600);
     pl.ui.root.classList.remove("loading");
     document.body.classList.add("see-through");
     wake();
@@ -1024,13 +1075,7 @@ function renderEpisodes(box) {
 
 function toggleMenu(kind) {
   pl.menu = kind && pl.menu !== kind ? kind : null;
-  if (pl.menu === "tracks" && pl.subs === null && pl.ctx?.m?.type && !String(pl.ctx.vid).startsWith("local:")) {
-    pl.subs = "loading";
-    const session = pl.session;
-    call("subtitles", { kind: pl.ctx.m.type, id: pl.ctx.vid })
-      .then((list) => { if (pl.session === session) { pl.subs = list; if (pl.menu === "tracks") renderMenu(); } })
-      .catch(() => { if (pl.session === session) pl.subs = []; });
-  }
+  if (pl.menu === "tracks" && pl.subs === null) loadAddonSubs();
   renderMenu();
   wake();
 }
@@ -1082,8 +1127,8 @@ function fillMenu(box) {
   const audioCol = h("div", { class: "pl-col" }, h("h4", {}, "Âm thanh"),
     audio.length ? audio.map((t) => menuItem(trackLabel(t), t.selected, () => { setProp("aid", t.id); })) : h("p", { class: "pl-none" }, "Chưa có thông tin"));
   const subCol = h("div", { class: "pl-col" }, h("h4", {}, "Phụ đề"),
-    menuItem("Tắt", !sid || sid === "no" || sid === "false", () => setProp("sid", "no")),
-    subs.map((t) => menuItem(trackLabel(t), t.selected, () => setProp("sid", t.id))),
+    menuItem("Tắt", !sid || sid === "no" || sid === "false", () => { rememberSub({ off: true }); setProp("sid", "no"); }),
+    subs.map((t) => menuItem(trackLabel(t), t.selected, () => { rememberSub(t.external ? { lang: t.lang, url: t.file || undefined } : { lang: t.lang, title: t.title }); setProp("sid", t.id); })),
     h("div", { class: "pl-delay" }, h("span", {}, "Độ trễ"),
       h("button", { class: "pl-mini", tabindex: "-1", onclick: () => cmd("add", "sub-delay", "-0.1") }, "−0.1s"),
       h("b", {}, `${(pl.s.subDelay || 0).toFixed(1)}s`),
@@ -1099,8 +1144,8 @@ function fillMenu(box) {
       const done = pl.added.has(s.url);
       return menuItem(langName(s.lang) || "Không rõ", done, () => {
         if (done) return;
-        pl.added.add(s.url);
-        cmd("sub-add", s.url, "select", `${langName(s.lang)} · ${s.addon}`, s.lang || "");
+        rememberSub({ lang: s.lang, url: s.url });
+        addAddonSub(s, false);
         renderMenu();
       }, s.addon);
     }));
@@ -1117,6 +1162,7 @@ function openPlayer(c) {
   pl.s = { loaded: false, volume: pl.s.volume ?? 100 };
   pl.tracks = [];
   pl.subs = null;
+  pl.subsJob = null;
   pl.added = new Set();
   pl.menu = null;
   pl.epSeason = null;
@@ -1298,7 +1344,13 @@ async function renderSettings(view) {
       h("a", { class: "btn primary focusable", href: IOS_IPA, download: "WiSTV.ipa", rel: "noopener" }, "Tải WiS TV cho iPhone (.ipa)")),
     h("p", { class: "hint" }, "Cài từ máy tính bằng Sideloadly với Apple ID của bạn. Mỗi 7 ngày ký lại một lần, app và dữ liệu vẫn giữ nguyên."));
   const touchHelp = h("div", { class: "hint" }, "Trên điện thoại: chạm vào hình để hiện/ẩn điều khiển, chạm đúp bên trái/phải để tua 10 giây, chạm đúp giữa để dừng/tiếp.");
-  view.append(h("div", { class: "page plain" }, h("h1", {}, "Cài đặt"), account, ios, pc, list, TOUCH ? h("div", { class: "panel" }, h("h3", {}, "Điều khiển"), touchHelp) : help));
+  const subs = h("div", { class: "panel" }, h("h3", {}, "Phụ đề"));
+  const paintSubs = () => subs.replaceChildren(h("h3", {}, "Phụ đề"),
+    h("p", { class: "hint" }, "Ngôn ngữ phụ đề mặc định. Phim có sẵn phụ đề ngôn ngữ này thì dùng luôn, không có thì tự lấy từ addon. Phụ đề bạn chọn trong lúc xem được nhớ riêng cho từng phim."),
+    h("div", { class: "pl-pick", style: "display:flex;gap:8px;flex-wrap:wrap;margin-top:12px" },
+      SUB_LANGS.map(([code, label]) => h("button", { class: `btn focusable ${subLang === code ? "primary" : ""}`, onclick: () => { setSubLang(code); paintSubs(); } }, label))));
+  paintSubs();
+  view.append(h("div", { class: "page plain" }, h("h1", {}, "Cài đặt"), account, ios, pc, subs, list, TOUCH ? h("div", { class: "panel" }, h("h3", {}, "Điều khiển"), touchHelp) : help));
   $(".panel .btn")?.focus({ preventScroll: true });
 }
 
@@ -1664,8 +1716,8 @@ if (TAURI) document.addEventListener("visibilitychange", async () => {
 
 if (TAURI && TOUCH && !ANDROID) document.addEventListener("visibilitychange", () => {
   if (!pl.open) return;
-  if (document.hidden) { pl.bgVideo = true; quietSet("vid", "no"); }
-  else if (pl.bgVideo) { pl.bgVideo = false; quietSet("vid", "auto"); }
+  if (document.hidden) { pl.bgVideo = true; call("player_background", { hidden: true }).catch(() => {}); }
+  else if (pl.bgVideo) { pl.bgVideo = false; call("player_background", { hidden: false }).catch(() => {}); }
 });
 
 if (TAURI) listen("update-state", (e) => { if (e.payload?.version) toast(`Đang cập nhật WiS TV lên bản ${e.payload.version}…`); });

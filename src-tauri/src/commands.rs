@@ -462,6 +462,11 @@ pub fn player_set(st: State<'_, AppState>, name: String, value: String) -> R<()>
 }
 
 #[tauri::command]
+pub fn player_background(st: State<'_, AppState>, hidden: bool) -> R<()> {
+    st.player.background(hidden)
+}
+
+#[tauri::command]
 pub fn player_stop(st: State<'_, AppState>) {
     st.player.stop();
 }

@@ -2,6 +2,7 @@ mod addons;
 #[cfg(target_os = "android")]
 mod android;
 mod api;
+mod autocrop;
 mod commands;
 mod player;
 mod server;
@@ -41,6 +42,7 @@ pub fn run() {
             commands::play,
             commands::player_command,
             commands::player_set,
+            commands::player_background,
             commands::player_stop,
             commands::player_fullscreen,
             commands::startup_open,
