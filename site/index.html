@@ -48,6 +48,19 @@
     ol { margin: 10px 0 0; padding-left: 20px; color: var(--muted); font-size: 14px; }
     ol li { margin: 6px 0; }
     a.inline { color: var(--text); }
+    .ver { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+    .ver b { color: var(--text); font-size: 15px; font-weight: 700; padding: 3px 10px; border-radius: 999px; background: rgba(255,255,255,0.1); }
+    .ver span { font-size: 13px; color: var(--faint); }
+    .news h3 { margin: 0 0 8px; font-size: 14.5px; font-weight: 650; }
+    .news ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+    .news li { display: flex; gap: 9px; align-items: flex-start; font-size: 14px; color: var(--muted); line-height: 1.45; }
+    .tag { flex: none; font-size: 11.5px; font-weight: 700; padding: 2px 7px; border-radius: 6px; margin-top: 1px; background: rgba(255,255,255,0.1); color: var(--text); }
+    .tag.new { background: rgba(74,222,128,0.16); color: var(--ok); }
+    .tag.fix { background: rgba(96,165,250,0.16); color: #93c5fd; }
+    .tag.fast { background: rgba(250,204,21,0.16); color: #fde047; }
+    .older { margin-top: 12px; display: flex; flex-direction: column; gap: 14px; }
+    .older h4 { margin: 0 0 6px; font-size: 13.5px; font-weight: 650; color: var(--text); }
+    .older h4 span { font-weight: 400; color: var(--faint); margin-left: 6px; }
     footer { margin-top: 36px; text-align: center; font-size: 13px; color: var(--faint); }
   </style>
 </head>
@@ -99,6 +112,35 @@
     const REPO = "WallisSkill/stremio-display";
     const size = (n) => n >= 1e9 ? (n / 1e9).toFixed(1) + " GB" : (n / 1e6).toFixed(0) + " MB";
     const date = (s) => new Date(s).toLocaleDateString("vi-VN");
+    const KIND = { "Mới": "new", "Sửa": "fix", "Nhanh hơn": "fast" };
+    const el = (tag, cls, ...kids) => {
+      const n = document.createElement(tag);
+      if (cls) n.className = cls;
+      n.append(...kids);
+      return n;
+    };
+    function parseNotes(body) {
+      const m = /<!-- wistv-notes ([\s\S]*?) -->/.exec(body || "");
+      if (!m) return [];
+      try {
+        const list = JSON.parse(m[1]);
+        return Array.isArray(list) ? list.filter((v) => v && typeof v.version === "string") : [];
+      } catch (e) {
+        return [];
+      }
+    }
+    const changeList = (changes) => {
+      const items = (Array.isArray(changes) ? changes : []).map((c) => el("li", "", el("span", `tag ${KIND[c.kind] || ""}`, String(c.kind || "")), el("span", "", String(c.text || ""))));
+      return el("ul", "", ...(items.length ? items : [el("li", "", el("span", "", "Cập nhật nhỏ, sửa lỗi vặt"))]));
+    };
+    function news(notes) {
+      const box = el("div", "news", el("h3", "", "Có gì mới"), changeList(notes[0].changes));
+      if (notes.length > 1) {
+        const older = el("div", "older", ...notes.slice(1).map((v) => el("div", "", el("h4", "", `Phiên bản ${v.version}`, el("span", "", v.date ? date(v.date) : "")), changeList(v.changes))));
+        box.append(el("details", "", el("summary", "", "Các bản trước"), older));
+      }
+      return box;
+    }
     document.querySelectorAll(".card[data-tag]").forEach(async (card) => {
       const meta = card.querySelector(".meta");
       const btn = card.querySelector(".btn");
@@ -111,7 +153,14 @@
         if (!asset) { meta.textContent = "Sắp có"; return; }
         btn.href = asset.browser_download_url;
         btn.removeAttribute("aria-disabled");
-        meta.textContent = `${size(asset.size)} · cập nhật ${date(asset.updated_at)}`;
+        const notes = parseNotes(rel.body);
+        const last = notes[0];
+        if (last && last.version) {
+          meta.replaceChildren(el("div", "ver", el("b", "", `Phiên bản ${last.version}`), el("span", "", `${size(asset.size)} · ${date(last.date || asset.updated_at)}`)));
+          btn.after(news(notes));
+        } else {
+          meta.textContent = `${size(asset.size)} · cập nhật ${date(asset.updated_at)}`;
+        }
       } catch (e) {
         meta.textContent = "Không kiểm tra được, thử tải lại trang";
       }
