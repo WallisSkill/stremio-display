@@ -70,6 +70,12 @@ jobs:
           sleep 2
           adb shell am start -W -n tv.wis.app/.MainActivity -a android.intent.action.VIEW -d "http://10.0.2.2:8000/letterbox.mp4"
           for t in 15 30 45; do sleep 15; shot "5-letterbox-${t}s"; done
+          adb shell input keyevent KEYCODE_Z
+          sleep 5
+          shot 6-toggle-1
+          adb shell input keyevent KEYCODE_Z
+          sleep 5
+          shot 6-toggle-2
           adb logcat -d > shots/logcat.txt
           grep -iE "wistv|back handled|mpv|tauri|AndroidRuntime|FATAL|DEBUG  |libc " shots/logcat.txt | tail -200 > shots/logcat-app.txt
           cat shots/logcat-app.txt | tail -80
@@ -117,7 +123,7 @@ jobs:
                           line[i] = (line[i] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
                   rows.append(bytes(line)); prev = line
               return w, h, bpp, rows
-          for p in sorted(glob.glob('shots/5-letterbox-*.png')):
+          for p in sorted(glob.glob('shots/5-letterbox-*.png') + glob.glob('shots/6-toggle-*.png')):
               w, h, bpp, rows = load(p)
               lit = lambda x, y: max(rows[y][x*bpp:x*bpp+3]) > 40
               cx, cy = w // 2, h // 2
