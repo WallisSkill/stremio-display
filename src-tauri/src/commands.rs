@@ -461,6 +461,19 @@ pub fn player_set(st: State<'_, AppState>, name: String, value: String) -> R<()>
     st.player.set(&name, &value)
 }
 
+#[cfg(mobile)]
+#[tauri::command]
+pub fn device_battery(app: AppHandle) -> R<Value> {
+    use tauri_plugin_wistv_video::VideoExt;
+    app.video().battery()
+}
+
+#[cfg(desktop)]
+#[tauri::command]
+pub fn device_battery() -> R<Value> {
+    Ok(Value::Null)
+}
+
 #[tauri::command]
 pub fn player_background(st: State<'_, AppState>, hidden: bool) -> R<()> {
     st.player.background(hidden)

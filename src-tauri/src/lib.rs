@@ -43,6 +43,7 @@ pub fn run() {
             commands::player_command,
             commands::player_set,
             commands::player_background,
+            commands::device_battery,
             commands::player_stop,
             commands::player_fullscreen,
             commands::startup_open,

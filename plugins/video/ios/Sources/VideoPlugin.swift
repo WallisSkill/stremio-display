@@ -137,6 +137,18 @@ final class VideoPlugin: Plugin {
         invoke.resolve(["pointer": pointer])
     }
 
+    @objc public func battery(_ invoke: Invoke) {
+        DispatchQueue.main.async {
+            let device = UIDevice.current
+            device.isBatteryMonitoringEnabled = true
+            var out: [String: Any] = ["charging": device.batteryState == .charging || device.batteryState == .full]
+            if device.batteryLevel >= 0 {
+                out["level"] = Double(device.batteryLevel)
+            }
+            invoke.resolve(out)
+        }
+    }
+
     @objc public func awake(_ invoke: Invoke) throws {
         let args = try invoke.parseArgs(AwakeArgs.self)
         DispatchQueue.main.async {

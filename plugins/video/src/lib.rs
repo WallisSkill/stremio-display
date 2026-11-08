@@ -51,6 +51,10 @@ impl<R: Runtime> Video<R> {
             .map_err(|e| e.to_string())
     }
 
+    pub fn battery(&self) -> Result<Value, String> {
+        self.0.run_mobile_plugin::<Value>("battery", json!({})).map_err(|e| e.to_string())
+    }
+
     pub fn open(&self, url: &str) -> Result<(), String> {
         self.0
             .run_mobile_plugin::<Value>("open", json!({ "url": url }))

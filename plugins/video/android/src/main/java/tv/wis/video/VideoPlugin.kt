@@ -4,6 +4,8 @@ import android.app.Activity
 import android.app.UiModeManager
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.os.BatteryManager
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.graphics.Color
@@ -127,6 +129,18 @@ class VideoPlugin(private val activity: Activity) : Plugin(activity), SurfaceHol
             }
         }
         invoke.resolve()
+    }
+
+    @Command
+    fun battery(invoke: Invoke) {
+        val status = activity.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val level = status?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+        val scale = status?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+        val state = status?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+        val out = JSObject()
+        if (level >= 0 && scale > 0) out.put("level", level.toDouble() / scale)
+        out.put("charging", state == BatteryManager.BATTERY_STATUS_CHARGING || state == BatteryManager.BATTERY_STATUS_FULL)
+        invoke.resolve(out)
     }
 
     @Command

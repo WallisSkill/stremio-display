@@ -337,7 +337,16 @@ html:has(body.see-through), body.see-through { background: transparent; }
 }
 .pl-top, .pl-bottom { position: absolute; left: 0; right: 0; padding: 0 clamp(18px, 3vw, 48px); transition: opacity 400ms var(--ease), transform 400ms var(--ease); }
 .pl-top { top: 0; display: flex; align-items: center; gap: 16px; padding-top: 22px; }
-.pl-titles { min-width: 0; }
+.pl-titles { min-width: 0; flex: 1; }
+.pl-status { margin-left: auto; flex: none; display: flex; align-items: center; gap: 12px; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; text-shadow: 0 2px 12px rgba(0,0,0,0.6); }
+.pl-batt { display: inline-flex; align-items: center; gap: 6px; }
+.pl-batt[hidden] { display: none; }
+.pl-cell { position: relative; display: inline-block; width: 24px; height: 12px; border: 1.5px solid rgba(255,255,255,0.85); border-radius: 3.5px; padding: 1.5px; box-sizing: border-box; }
+.pl-cell::after { content: ""; position: absolute; right: -4px; top: 3px; width: 2px; height: 4px; border-radius: 0 1px 1px 0; background: rgba(255,255,255,0.85); }
+.pl-cell b { display: block; height: 100%; border-radius: 1.5px; background: #fff; }
+.pl-batt.low .pl-cell b { background: #ff453a; }
+.pl-cell em { position: absolute; inset: 0; display: grid; place-items: center; color: #000; }
+.pl-cell em svg { width: 7px; height: 10px; filter: drop-shadow(0 0 1px #fff); }
 .pl-title { display: block; font-size: 20px; font-weight: 650; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 2px 12px rgba(0,0,0,0.6); }
 .pl-sub { display: block; font-size: 14px; color: rgba(255,255,255,0.7); margin-top: 2px; }
 .pl-bottom { bottom: 0; padding-bottom: 20px; }
@@ -619,7 +628,12 @@ body.web-playing #wv { display: block; }
 #player.touch .pl-top .pl-btn { width: 44px; height: 44px; margin-left: -10px; flex: none; }
 #player.touch .pl-titles { flex: 1; min-width: 0; height: 44px; display: flex; align-items: center; justify-content: flex-start; gap: 8px; }
 #player.touch .pl-title { font-size: 16px; flex: 0 1 auto; min-width: 0; }
-#player.touch .pl-sub { font-size: 14px; margin: 0; white-space: nowrap; flex: none; }
+#player.touch .pl-sub { font-size: 14px; margin: 0; white-space: nowrap; flex: 0 1000 auto; min-width: 3em; overflow: hidden; text-overflow: ellipsis; }
+#player.touch .pl-status { padding-left: 12px; }
+#player.locked .pl-top, #player.locked .pl-center, #player.locked .pl-bottom, #player.locked .pl-menu, #player.locked .pl-nextup, #player.locked .pl-shade { display: none; }
+.pl-unlock { display: none; }
+#player.locked.unlock-shown .pl-unlock { position: absolute; left: 50%; bottom: max(28px, env(safe-area-inset-bottom)); transform: translateX(-50%); display: inline-flex; align-items: center; gap: 10px; height: 46px; padding: 0 22px; border-radius: 23px; border: 1px solid rgba(255,255,255,0.35); background: rgba(0,0,0,0.55); color: #fff; font-size: 15px; font-weight: 600; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+.pl-unlock svg { width: 22px; height: 22px; display: block; }
 #player.touch .pl-center { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; align-items: center; gap: clamp(36px, 12vw, 120px); pointer-events: none; transition: opacity 400ms var(--ease); }
 #player.touch .pl-center .pl-btn { pointer-events: auto; background: none; }
 #player.touch .pl-center .pl-btn.big { width: 60px; height: 60px; }
@@ -633,7 +647,7 @@ body.web-playing #wv { display: block; }
 #player.touch .pl-bottom { padding-bottom: max(10px, env(safe-area-inset-bottom)); }
 #player.touch .pl-seekrow { gap: 14px; }
 #player.touch .pl-time { font-size: 14px; }
-#player.touch .pl-actions { display: flex; justify-content: center; align-items: center; gap: clamp(8px, 4vw, 44px); margin-top: 2px; }
+#player.touch .pl-actions { display: flex; justify-content: center; align-items: center; gap: clamp(4px, 3vw, 36px); margin-top: 2px; }
 #player.touch .pl-btn.act { width: auto; height: 40px; padding: 0 10px; border-radius: 20px; display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; min-width: 0; }
 #player.touch .pl-btn.act svg { width: 22px; height: 22px; }
 #player.touch .pl-btn.act > span:not(.pl-label) { display: grid; }
