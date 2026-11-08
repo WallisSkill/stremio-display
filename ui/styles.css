@@ -405,6 +405,15 @@ html:has(body.see-through), body.see-through { background: transparent; }
 .pl-mini:hover:not(:disabled) { background: rgba(255,255,255,0.2); }
 .pl-mini:focus-visible { background: #fff; color: #000; }
 .pl-mini:disabled { opacity: 0.3; cursor: default; }
+.pl-substyle { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
+.pl-slider { padding: 6px 10px; }
+.pl-slider-head { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+.pl-slider-head b { color: #fff; font-variant-numeric: tabular-nums; }
+.pl-range { width: 100%; margin: 0; -webkit-appearance: none; appearance: none; height: 4px; border-radius: 2px; background: linear-gradient(90deg, #fff var(--v, 50%), rgba(255,255,255,0.25) var(--v, 50%)); cursor: pointer; outline: none; }
+.pl-range::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.5); }
+.pl-choice { display: flex; align-items: center; gap: 6px; padding: 6px 10px; font-size: 13px; color: var(--muted); }
+.pl-choice span { flex: 1; }
+.pl-mini.on { background: #fff; color: #000; }
 .spinner.small { width: 22px; height: 22px; margin: 16px auto; border-width: 2.5px; }
 
 .cal-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 22px; }

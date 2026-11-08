@@ -599,6 +599,11 @@ function buildPlayer() {
   ui.hit.addEventListener("click", () => { if (pl.menu) toggleMenu(null); else togglePause(); });
   ui.hit.addEventListener("dblclick", toggleFullscreen);
   ui.root.addEventListener("mousemove", wake);
+  ui.root.addEventListener("mouseleave", () => {
+    if (!pl.open || pl.menu || pl.drag != null) return;
+    clearTimeout(pl.hideTimer);
+    ui.root.classList.add("idle");
+  });
   ui.root.addEventListener("wheel", (e) => { if (!e.target.closest(".pl-menu")) setVolume(Math.round((pl.s.volume ?? 100) - Math.sign(e.deltaY) * 5)); }, { passive: true });
   const frac = (e) => { const r = ui.seek.getBoundingClientRect(); return Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)); };
   ui.seek.addEventListener("pointermove", (e) => {
@@ -647,6 +652,62 @@ function flash(icon) {
   f.classList.remove("on");
   void f.offsetWidth;
   f.classList.add("on");
+}
+
+const SUB_DEFAULT = { scale: 1, pos: 100, color: "#FFFFFF", box: false };
+const subPrefs = (() => {
+  try { return { ...SUB_DEFAULT, ...JSON.parse(localStorage.getItem("wistv.sub") || "{}") }; } catch (e) { return { ...SUB_DEFAULT }; }
+})();
+const saveSubPrefs = () => { try { localStorage.setItem("wistv.sub", JSON.stringify(subPrefs)); } catch (e) {} };
+const quietSet = (name, value) => call("player_set", { name, value: String(value) }).then(() => true, () => false);
+
+async function applySubStyle(keys) {
+  const all = !keys;
+  if (all || keys.includes("scale")) quietSet("sub-scale", subPrefs.scale.toFixed(2));
+  if (all || keys.includes("pos")) quietSet("sub-pos", Math.round(subPrefs.pos));
+  if (all || keys.includes("color")) quietSet("sub-color", subPrefs.color);
+  if (all || keys.includes("box")) {
+    const edge = subPrefs.box ? "#B4000000" : "#FF000000";
+    if (subPrefs.box) {
+      if (!(await quietSet("sub-border-style", "background-box"))) await quietSet("sub-border-style", "opaque-box");
+      quietSet("sub-back-color", "#B4000000");
+    } else if (!all) {
+      await quietSet("sub-border-style", "outline-and-shadow");
+      quietSet("sub-back-color", "#00000000");
+    }
+    if (subPrefs.box || !all) {
+      quietSet("sub-outline-color", edge);
+      quietSet("sub-border-color", edge);
+    }
+  }
+}
+
+function subSlider(label, min, max, step, value, show, onChange) {
+  const out = h("b", {}, show(value));
+  const input = h("input", { type: "range", min: String(min), max: String(max), step: String(step), value: String(value), tabindex: "-1", class: "pl-range" });
+  const paint = () => input.style.setProperty("--v", `${((Number(input.value) - min) / (max - min)) * 100}%`);
+  paint();
+  input.addEventListener("input", () => { const v = Number(input.value); out.textContent = show(v); paint(); onChange(v); });
+  input.addEventListener("change", () => input.blur());
+  return h("div", { class: "pl-slider" }, h("div", { class: "pl-slider-head" }, h("span", {}, label), out), input);
+}
+
+function subStylePanel() {
+  const pick = (label, on, fn) => h("button", { class: `pl-mini ${on ? "on" : ""}`, tabindex: "-1", onclick: fn }, label);
+  const set = (key, value) => { subPrefs[key] = value; saveSubPrefs(); applySubStyle([key]); renderMenu(); };
+  return h("div", { class: "pl-substyle" },
+    h("h4", {}, "Kiểu phụ đề"),
+    subSlider("Cỡ chữ", 50, 250, 5, Math.round(subPrefs.scale * 100), (v) => `${v}%`, (v) => { subPrefs.scale = v / 100; saveSubPrefs(); applySubStyle(["scale"]); }),
+    subSlider("Vị trí", 0, 100, 1, 100 - Math.round(subPrefs.pos), (v) => (v === 0 ? "Dưới cùng" : `Cao ${v}%`), (v) => { subPrefs.pos = 100 - v; saveSubPrefs(); applySubStyle(["pos"]); }),
+    h("div", { class: "pl-choice" }, h("span", {}, "Màu chữ"),
+      pick("Trắng", subPrefs.color === "#FFFFFF", () => set("color", "#FFFFFF")),
+      pick("Vàng", subPrefs.color === "#FFE14D", () => set("color", "#FFE14D"))),
+    h("div", { class: "pl-choice" }, h("span", {}, "Nền"),
+      pick("Viền", !subPrefs.box, () => set("box", false)),
+      pick("Nền tối", subPrefs.box, () => set("box", true))),
+    h("div", { class: "pl-choice" },
+      h("button", { class: "pl-mini", tabindex: "-1", onclick: () => { Object.assign(subPrefs, SUB_DEFAULT); saveSubPrefs(); applySubStyle(["scale", "pos", "color", "box"]); renderMenu(); } }, "Đặt lại")),
+    h("p", { class: "pl-none" }, "Lưu cho mọi phim. Phụ đề ASS có kiểu riêng chỉ đổi được cỡ chữ."));
 }
 
 const cmd = (...args) => call("player_command", { args: args.map(String) }).catch((e) => toast(e, true));
@@ -835,7 +896,8 @@ function renderMenu() {
     h("div", { class: "pl-delay" }, h("span", {}, "Độ trễ"),
       h("button", { class: "pl-mini", tabindex: "-1", onclick: () => cmd("add", "sub-delay", "-0.1") }, "−0.1s"),
       h("b", {}, `${(pl.s.subDelay || 0).toFixed(1)}s`),
-      h("button", { class: "pl-mini", tabindex: "-1", onclick: () => cmd("add", "sub-delay", "0.1") }, "+0.1s")));
+      h("button", { class: "pl-mini", tabindex: "-1", onclick: () => cmd("add", "sub-delay", "0.1") }, "+0.1s")),
+    subStylePanel());
   const addonCol = h("div", { class: "pl-col" }, h("h4", {}, "Phụ đề từ addon"));
   if (pl.subs === "loading") addonCol.append(h("div", { class: "spinner small" }));
   else if (!pl.subs || !pl.subs.length) addonCol.append(h("p", { class: "pl-none" }, "Không addon nào có phụ đề cho mục này"));
@@ -908,6 +970,7 @@ async function startPlayback(m, vid, label, stream, start) {
   openPlayer({ m, vid, label, stream });
   try {
     await call("play", { stream, ctx: ctx(session) });
+    if (pl.session === session) applySubStyle();
   } catch (e) {
     if (pl.session === session) closePlayer(false);
     toast(e, true);
