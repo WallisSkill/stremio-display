@@ -483,7 +483,7 @@ unsafe fn run(lib: &Mpv, ctx: Handle, start_ms: u64, wid: i64, state: &dyn Fn(Va
     let mut last_tracks = String::new();
     let mut loaded = false;
     #[cfg(target_os = "android")]
-    let mut surface = (crate::android::state().0, wid);
+    let mut surface = (u64::MAX, wid);
     loop {
         let ev = (lib.wait_event)(ctx, 0.2);
         #[cfg(windows)]
