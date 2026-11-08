@@ -48,7 +48,20 @@ class VideoPlugin(private val activity: Activity) : Plugin(activity), SurfaceHol
     private val television: Boolean
         get() = (activity.getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager)?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
 
+    private fun bars(hidden: Boolean) {
+        val window = activity.window
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        if (hidden) {
+            controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+
     private fun orient(landscape: Boolean) {
+        bars(landscape)
+        activity.window.decorView.postDelayed({ bars(landscape) }, 600)
         if (television) return
         activity.requestedOrientation = if (landscape) {
             ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
@@ -133,16 +146,7 @@ class VideoPlugin(private val activity: Activity) : Plugin(activity), SurfaceHol
     @Command
     fun fullscreen(invoke: Invoke) {
         val args = invoke.parseArgs(FlagArgs::class.java)
-        activity.runOnUiThread {
-            val window = activity.window
-            val controller = WindowCompat.getInsetsController(window, window.decorView)
-            if (args.on) {
-                controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-                controller.hide(WindowInsetsCompat.Type.systemBars())
-            } else {
-                controller.show(WindowInsetsCompat.Type.systemBars())
-            }
-        }
+        activity.runOnUiThread { bars(args.on) }
         invoke.resolve()
     }
 

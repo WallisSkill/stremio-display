@@ -354,7 +354,7 @@ impl Player {
             for (k, v) in [
                 ("wid", wid.as_str()),
                 ("force-window", "yes"),
-                ("keepaspect", "no"),
+                ("keepaspect", "yes"),
                 ("osc", "no"),
                 ("osd-level", "0"),
                 ("input-default-bindings", "no"),

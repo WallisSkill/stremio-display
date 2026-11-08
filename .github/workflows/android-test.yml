@@ -48,10 +48,15 @@ jobs:
           sleep 5
           adb shell am start -n tv.wis.app/.MainActivity
           sleep 8
-          shot 3-after-home
+          shot 3-after-home-8s
+          sleep 15
+          shot 3-after-home-23s
           adb shell input keyevent KEYCODE_BACK
-          sleep 5
-          shot 4-after-back
+          sleep 4
+          shot 4-after-back-4s
+          sleep 15
+          shot 4-after-back-19s
+          adb shell dumpsys window displays | grep -iE "mCurrentRotation" | head -2
           adb shell pidof tv.wis.app || echo "APP NOT RUNNING"
           adb logcat -d > shots/logcat.txt
           grep -iE "wistv|mpv|tauri|AndroidRuntime|FATAL|DEBUG  |libc " shots/logcat.txt | tail -200 > shots/logcat-app.txt
