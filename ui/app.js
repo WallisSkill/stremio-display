@@ -1375,6 +1375,14 @@ async function syncAddons(maxAge) {
   } catch (e) { return false; }
 }
 
+const searchHistory = () => { try { const v = JSON.parse(localStorage.getItem("wistv.searches") || "[]"); return Array.isArray(v) ? v.filter((x) => typeof x === "string") : []; } catch (e) { return []; } };
+const saveSearches = (list) => { try { localStorage.setItem("wistv.searches", JSON.stringify(list.slice(0, 10))); } catch (e) {} };
+function rememberSearch(term) {
+  const t = String(term || "").trim();
+  if (t.length < 2) return;
+  saveSearches([t, ...searchHistory().filter((x) => x.toLowerCase() !== t.toLowerCase())]);
+}
+
 function renderSearch(view, { q = "" } = {}) {
   document.body.classList.add("dim");
   const input = h("input", { placeholder: "Phim, phim bộ, diễn viên…", value: q, spellcheck: "false" });
@@ -1386,7 +1394,7 @@ function renderSearch(view, { q = "" } = {}) {
     const term = input.value.trim();
     const mine = ++token;
     if (app.stack.length) app.stack[app.stack.length - 1].params = { q: term };
-    if (term.length < 2) { results.replaceChildren(h("div", { class: "empty" }, "Nhập ít nhất 2 ký tự để tìm.")); return; }
+    if (term.length < 2) { showHistory(); return; }
     const cats = catalogsOf(null, { search: true });
     if (!cats.length) { results.replaceChildren(h("div", { class: "empty" }, "Không addon nào hỗ trợ tìm kiếm.")); return; }
     results.replaceChildren(...cats.map(({ addon, cat }) =>
@@ -1394,8 +1402,20 @@ function renderSearch(view, { q = "" } = {}) {
         async () => (mine === token ? call("catalog", { url: addon.transportUrl, kind: cat.type, id: cat.id, extra: [["search", term]] }) : []),
         { eager: true })));
   };
+  const showHistory = () => {
+    const list = searchHistory();
+    if (!list.length) { results.replaceChildren(h("div", { class: "empty" }, "Nhập ít nhất 2 ký tự để tìm.")); return; }
+    const pick = (t) => { input.value = t; clearTimeout(timer); rememberSearch(t); run(); };
+    const drop = (t) => { saveSearches(searchHistory().filter((x) => x !== t)); showHistory(); };
+    results.replaceChildren(h("div", { class: "search-history" },
+      h("div", { class: "sh-head" }, h("h3", {}, "Tìm kiếm gần đây"), h("button", { class: "link focusable", onclick: () => { saveSearches([]); showHistory(); } }, "Xoá hết")),
+      ...list.map((t) => h("div", { class: "sh-row" },
+        h("button", { class: "sh-term focusable", onclick: () => pick(t) }, h("span", { html: ICON.search }), h("span", {}, t)),
+        h("button", { class: "sh-x focusable", title: "Xoá", "aria-label": `Xoá ${t}`, html: ICON.close, onclick: () => drop(t) })))));
+  };
   input.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(run, 450); });
-  input.addEventListener("keydown", (e) => { if (e.key === "Enter") { clearTimeout(timer); run(); } });
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") { clearTimeout(timer); rememberSearch(input.value); run(); } });
+  results.addEventListener("click", (e) => { if (input.value.trim().length >= 2 && e.target.closest(".card, a, button") && !e.target.closest(".search-history")) rememberSearch(input.value); }, true);
   run();
   syncAddons(60000).then((changed) => { if (changed && input.isConnected) run(); });
 }
