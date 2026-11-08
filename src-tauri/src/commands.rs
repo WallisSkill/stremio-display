@@ -451,14 +451,20 @@ pub async fn play(
     .inspect_err(|_| keep_awake(&awake_app, false))
 }
 
-#[tauri::command]
-pub fn player_command(st: State<'_, AppState>, args: Vec<String>) -> R<()> {
-    st.player.command(&args)
+async fn off_main<T: Send + 'static>(app: AppHandle, f: impl FnOnce(&AppState) -> R<T> + Send + 'static) -> R<T> {
+    tauri::async_runtime::spawn_blocking(move || f(&app.state::<AppState>()))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn player_set(st: State<'_, AppState>, name: String, value: String) -> R<()> {
-    st.player.set(&name, &value)
+pub async fn player_command(app: AppHandle, args: Vec<String>) -> R<()> {
+    off_main(app, move |st| st.player.command(&args)).await
+}
+
+#[tauri::command]
+pub async fn player_set(app: AppHandle, name: String, value: String) -> R<()> {
+    off_main(app, move |st| st.player.set(&name, &value)).await
 }
 
 #[cfg(mobile)]
@@ -477,8 +483,8 @@ pub async fn device_battery() -> R<Value> {
 }
 
 #[tauri::command]
-pub fn player_background(st: State<'_, AppState>, hidden: bool) -> R<()> {
-    st.player.background(hidden)
+pub async fn player_background(app: AppHandle, hidden: bool) -> R<()> {
+    off_main(app, move |st| st.player.background(hidden)).await
 }
 
 #[tauri::command]
