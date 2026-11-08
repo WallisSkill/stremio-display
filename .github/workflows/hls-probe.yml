@@ -1,0 +1,35 @@
+name: HLS probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: Stream URL
+        required: true
+
+jobs:
+  probe:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Download mpv
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          gh release download --repo shinchiro/mpv-winbuild-cmake --pattern "mpv-x86_64-2*.7z" --dir mpv
+          7z x -y -ompv/out mpv/*.7z > /dev/null
+          ls mpv/out | head
+
+      - name: Probe
+        env:
+          URL: ${{ inputs.url }}
+        run: |
+          cd mpv/out
+          ./mpv.exe --version | head -3
+          echo "=== default"
+          timeout 90 ./mpv.exe --no-config --vo=null --ao=null --frames=30 --msg-level=all=v "$URL" 2>&1 | grep -iE "hls|extension|error|recogni|Video --|Audio --|Exiting|failed" | head -30
+          echo "=== extension_picky=0"
+          timeout 90 ./mpv.exe --no-config --vo=null --ao=null --frames=30 --demuxer-lavf-o=extension_picky=0 --msg-level=all=v "$URL" 2>&1 | grep -iE "hls|extension|error|recogni|Video --|Audio --|Exiting|failed" | head -30
