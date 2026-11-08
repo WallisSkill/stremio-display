@@ -58,27 +58,21 @@ jobs:
             y["packages"] ||= {}
             y["packages"]["MPVKit"] = { "url" => "https://github.com/mpvkit/MPVKit", "exactVersion" => "1.0.0" }
             t = y["targets"].keys.find { |k| k.end_with?("_iOS") }
-            (y["targets"][t]["dependencies"] ||= []) << { "package" => "MPVKit", "product" => "MPVKit" }
+            target = y["targets"][t]
+            (target["dependencies"] ||= []) << { "package" => "MPVKit", "product" => "MPVKit", "embed" => false }
+            info = (target["info"] ||= {})
+            info["path"] ||= Dir["*_iOS/Info.plist"].first
+            props = (info["properties"] ||= {})
+            props["CFBundleDisplayName"] = "WiS TV"
+            props["UIBackgroundModes"] = ["audio"]
+            props["NSAppTransportSecurity"] = { "NSAllowsArbitraryLoads" => true }
+            props["UISupportedInterfaceOrientations"] = ["UIInterfaceOrientationPortrait", "UIInterfaceOrientationLandscapeLeft", "UIInterfaceOrientationLandscapeRight"]
+            props["UIRequiresFullScreen"] = true
             File.write(f, y.to_yaml)
+            puts y["targets"][t].to_yaml
           '
-          plist=$(ls */Info.plist | head -1)
-          pb() { /usr/libexec/PlistBuddy -c "$1" "$plist" || true; }
-          pb "Delete :UIBackgroundModes"
-          pb "Add :UIBackgroundModes array"
-          pb "Add :UIBackgroundModes:0 string audio"
-          pb "Delete :NSAppTransportSecurity"
-          pb "Add :NSAppTransportSecurity dict"
-          pb "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool true"
-          pb "Delete :UISupportedInterfaceOrientations"
-          pb "Add :UISupportedInterfaceOrientations array"
-          pb "Add :UISupportedInterfaceOrientations:0 string UIInterfaceOrientationPortrait"
-          pb "Add :UISupportedInterfaceOrientations:1 string UIInterfaceOrientationLandscapeLeft"
-          pb "Add :UISupportedInterfaceOrientations:2 string UIInterfaceOrientationLandscapeRight"
-          pb "Delete :CFBundleDisplayName"
-          pb "Add :CFBundleDisplayName string WiS TV"
           xcodegen generate
           grep -q MPVKit *.xcodeproj/project.pbxproj
-          cat "$plist"
 
       - name: Download mpv packages
         working-directory: src-tauri/gen/apple
@@ -112,10 +106,24 @@ jobs:
             app=$(find src-tauri/gen/apple/build -name '*.app' -type d | grep -i iphoneos | head -1)
             [ -n "$app" ] || app=$(find src-tauri/gen/apple/build -name '*.app' -type d | head -1)
             mkdir -p Payload && cp -R "$app" Payload/
-            zip -qry out/WiSTV.ipa Payload
           else
-            cp "$ipa" out/WiSTV.ipa
+            unzip -q "$ipa"
           fi
+          app=$(ls -d Payload/*.app | head -1)
+          exe="$app/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Info.plist")"
+          if [ -d "$app/Frameworks" ]; then
+            for fw in "$app"/Frameworks/*.framework; do
+              name=$(basename "$fw" .framework)
+              if ! otool -L "$exe" | grep -q "$name.framework"; then
+                echo "removing unused $name.framework"; rm -rf "$fw"
+              fi
+            done
+            rmdir "$app/Frameworks" 2>/dev/null || true
+          fi
+          /usr/libexec/PlistBuddy -c 'Print' "$app/Info.plist"
+          otool -L "$exe" | grep -i -E "mpv|framework/" | head -20 || true
+          rm -f out/WiSTV.ipa
+          zip -qry out/WiSTV.ipa Payload
           ls -la out
 
       - uses: actions/upload-artifact@v4
