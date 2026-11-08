@@ -101,6 +101,7 @@ const ICON = {
   unfull: '<svg viewBox="0 0 24 24"><path d="M9 4v3.5A1.5 1.5 0 0 1 7.5 9H4M20 9h-3.5A1.5 1.5 0 0 1 15 7.5V4M15 20v-3.5a1.5 1.5 0 0 1 1.5-1.5H20M4 15h3.5A1.5 1.5 0 0 1 9 16.5V20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   up: '<svg viewBox="0 0 24 24"><path d="m6 15 6-6 6 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   down: '<svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  list: '<svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="12" height="8.5" rx="1.8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M18.5 7v9.5a2 2 0 0 1-2 2H6.5M3.5 17h0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   cog: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2.8v2.6M12 18.6v2.6M21.2 12h-2.6M5.4 12H2.8M18.5 5.5l-1.8 1.8M7.3 16.7l-1.8 1.8M18.5 18.5l-1.8-1.8M7.3 7.3 5.5 5.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
 };
 
@@ -541,7 +542,7 @@ async function openStreams(m, vid, label) {
         h("div", { class: "s-name" }, q.tags.map(([t, solid]) => h("span", { class: `badge ${solid ? "solid" : ""}` }, t)), firstLine),
         h("div", { class: "s-meta" }, metaBits || (s.infoHash ? "Torrent" : s.externalUrl ? "Mở ngoài" : "")),
         sub ? h("div", { class: "s-sub" }, sub) : null);
-      btn.addEventListener("click", () => startPlayback(m, vid, label, s, resume ? resumeMs : 0));
+      btn.addEventListener("click", () => startPlayback(m, vid, label, s, resume ? resumeMs : 0, g.addon));
       body.append(btn);
     }
   }
@@ -582,6 +583,8 @@ function buildPlayer() {
   ui.vol.addEventListener("input", () => setVolume(Number(ui.vol.value)));
   ui.vol.addEventListener("pointerdown", (e) => e.stopPropagation());
   ui.cc = iconBtn("cc", "Âm thanh và phụ đề (C)", () => toggleMenu("tracks"));
+  ui.eps = iconBtn("list", "Các tập (E)", () => toggleMenu("episodes"));
+  ui.nextUp = h("button", { class: "pl-nextup", tabindex: "-1", hidden: true, onclick: (e) => { e.stopPropagation(); playNext(false); } });
   ui.speed = h("button", { class: "pl-btn pl-speed", tabindex: "-1", title: "Tốc độ", onclick: (e) => { e.stopPropagation(); toggleMenu("speed"); } }, "1×");
   ui.fs = iconBtn("full", "Toàn màn hình (F)", toggleFullscreen);
   ui.menu = h("div", { class: "pl-menu", hidden: true });
@@ -591,11 +594,11 @@ function buildPlayer() {
   const bottom = h("div", { class: "pl-bottom" },
     ui.seek,
     h("div", { class: "pl-row" },
-      h("div", { class: "pl-group" }, ui.play, iconBtn("back10", "Lùi 10 giây (←)", () => seekBy(-10)), iconBtn("fwd10", "Tới 10 giây (→)", () => seekBy(10)), ui.next, ui.time),
-      h("div", { class: "pl-group" }, h("div", { class: "pl-volwrap" }, ui.volBtn, ui.vol), ui.cc, ui.speed, ui.fs)));
+      h("div", { class: "pl-group" }, ui.play, iconBtn("back10", "Lùi 10 giây (←)", () => seekBy(-10)), iconBtn("fwd10", "Tới 10 giây (→)", () => seekBy(10)), ui.next, h("div", { class: "pl-volwrap" }, ui.volBtn, ui.vol), ui.time),
+      h("div", { class: "pl-group" }, ui.eps, ui.cc, ui.speed, ui.fs)));
   bottom.addEventListener("click", (e) => e.stopPropagation());
   bottom.addEventListener("dblclick", (e) => e.stopPropagation());
-  ui.root = h("div", { id: "player", hidden: true }, ui.bg, ui.hit, h("div", { class: "pl-shade" }), ui.spin, ui.flash, top, bottom, ui.menu);
+  ui.root = h("div", { id: "player", hidden: true }, ui.bg, ui.hit, h("div", { class: "pl-shade" }), ui.spin, ui.flash, top, bottom, ui.nextUp, ui.menu);
   ui.hit.addEventListener("click", () => { if (pl.menu) toggleMenu(null); else togglePause(); });
   ui.hit.addEventListener("dblclick", toggleFullscreen);
   ui.root.addEventListener("mousemove", wake);
@@ -654,7 +657,9 @@ function flash(icon) {
   f.classList.add("on");
 }
 
-const SUB_DEFAULT = { scale: 1, pos: 100, color: "#FFFFFF", box: false };
+const SUB_DEFAULT = { scale: 1, pos: 100, color: "#FFFFFF", box: false, font: "Segoe UI Semibold", bold: false, italic: false, outline: 2.4, shadow: 1 };
+const SUB_FONTS = [["Segoe UI Semibold", "Segoe"], ["Arial", "Arial"], ["Tahoma", "Tahoma"], ["Verdana", "Verdana"], ["Calibri", "Calibri"], ["Times New Roman", "Times"], ["Georgia", "Georgia"]];
+const SUB_COLORS = [["#FFFFFF", "Trắng"], ["#FFE14D", "Vàng"], ["#7FE3FF", "Xanh"]];
 const subPrefs = (() => {
   try { return { ...SUB_DEFAULT, ...JSON.parse(localStorage.getItem("wistv.sub") || "{}") }; } catch (e) { return { ...SUB_DEFAULT }; }
 })();
@@ -666,6 +671,13 @@ async function applySubStyle(keys) {
   if (all || keys.includes("scale")) quietSet("sub-scale", subPrefs.scale.toFixed(2));
   if (all || keys.includes("pos")) quietSet("sub-pos", Math.round(subPrefs.pos));
   if (all || keys.includes("color")) quietSet("sub-color", subPrefs.color);
+  if (all || keys.includes("font")) quietSet("sub-font", subPrefs.font);
+  if (all || keys.includes("bold")) quietSet("sub-bold", subPrefs.bold ? "yes" : "no");
+  if (all || keys.includes("italic")) quietSet("sub-italic", subPrefs.italic ? "yes" : "no");
+  if (all || keys.includes("outline")) {
+    if (!(await quietSet("sub-outline-size", subPrefs.outline.toFixed(1)))) quietSet("sub-border-size", subPrefs.outline.toFixed(1));
+  }
+  if (all || keys.includes("shadow")) quietSet("sub-shadow-offset", subPrefs.shadow.toFixed(1));
   if (all || keys.includes("box")) {
     const edge = subPrefs.box ? "#B4000000" : "#FF000000";
     if (subPrefs.box) {
@@ -699,14 +711,21 @@ function subStylePanel() {
     h("h4", {}, "Kiểu phụ đề"),
     subSlider("Cỡ chữ", 50, 250, 5, Math.round(subPrefs.scale * 100), (v) => `${v}%`, (v) => { subPrefs.scale = v / 100; saveSubPrefs(); applySubStyle(["scale"]); }),
     subSlider("Vị trí", 0, 100, 1, 100 - Math.round(subPrefs.pos), (v) => (v === 0 ? "Dưới cùng" : `Cao ${v}%`), (v) => { subPrefs.pos = 100 - v; saveSubPrefs(); applySubStyle(["pos"]); }),
+    h("div", { class: "pl-choice wrap" }, h("span", {}, "Font"),
+      SUB_FONTS.map(([font, label]) => h("button", { class: `pl-mini ${subPrefs.font === font ? "on" : ""}`, tabindex: "-1", style: `font-family:'${font}'`, onclick: () => set("font", font) }, label))),
+    h("div", { class: "pl-choice" }, h("span", {}, "Kiểu chữ"),
+      pick("Thường", !subPrefs.bold && !subPrefs.italic, () => { subPrefs.italic = false; set("bold", false); applySubStyle(["italic"]); }),
+      h("button", { class: `pl-mini ${subPrefs.bold ? "on" : ""}`, tabindex: "-1", style: "font-weight:800", onclick: () => set("bold", !subPrefs.bold) }, "Đậm"),
+      h("button", { class: `pl-mini ${subPrefs.italic ? "on" : ""}`, tabindex: "-1", style: "font-style:italic", onclick: () => set("italic", !subPrefs.italic) }, "Nghiêng")),
     h("div", { class: "pl-choice" }, h("span", {}, "Màu chữ"),
-      pick("Trắng", subPrefs.color === "#FFFFFF", () => set("color", "#FFFFFF")),
-      pick("Vàng", subPrefs.color === "#FFE14D", () => set("color", "#FFE14D"))),
+      SUB_COLORS.map(([c, label]) => pick(label, subPrefs.color === c, () => set("color", c)))),
     h("div", { class: "pl-choice" }, h("span", {}, "Nền"),
       pick("Viền", !subPrefs.box, () => set("box", false)),
       pick("Nền tối", subPrefs.box, () => set("box", true))),
+    subSlider("Độ dày viền", 0, 6, 0.2, subPrefs.outline, (v) => (v === 0 ? "Không viền" : v.toFixed(1)), (v) => { subPrefs.outline = v; saveSubPrefs(); applySubStyle(["outline"]); }),
+    subSlider("Bóng chữ", 0, 4, 0.5, subPrefs.shadow, (v) => (v === 0 ? "Không bóng" : v.toFixed(1)), (v) => { subPrefs.shadow = v; saveSubPrefs(); applySubStyle(["shadow"]); }),
     h("div", { class: "pl-choice" },
-      h("button", { class: "pl-mini", tabindex: "-1", onclick: () => { Object.assign(subPrefs, SUB_DEFAULT); saveSubPrefs(); applySubStyle(["scale", "pos", "color", "box"]); renderMenu(); } }, "Đặt lại")),
+      h("button", { class: "pl-mini", tabindex: "-1", onclick: () => { Object.assign(subPrefs, SUB_DEFAULT); saveSubPrefs(); applySubStyle(); applySubStyle(["box"]); renderMenu(); } }, "Đặt lại")),
     h("p", { class: "pl-none" }, "Lưu cho mọi phim. Phụ đề ASS có kiểu riêng chỉ đổi được cỡ chữ."));
 }
 
@@ -783,7 +802,13 @@ function paintState() {
   ui.volBtn.innerHTML = s.mute || s.volume === 0 ? ICON.mute : ICON.vol;
   ui.vol.style.setProperty("--v", `${((s.mute ? 0 : s.volume ?? 100) / 150) * 100}%`);
   ui.speed.textContent = `${s.speed && s.speed !== 1 ? +s.speed.toFixed(2) : 1}×`;
-  ui.next.hidden = !nextEpisode();
+  const nx = nextEpisode();
+  ui.next.hidden = !nx;
+  ui.eps.hidden = !((pl.ctx?.m?.videos || []).length > 1);
+  const left = (s.duration || 0) - (s.time || 0);
+  const showUp = !!nx && s.loaded && s.duration > 300 && left > 0 && left <= 90;
+  if (showUp && ui.nextUp.hidden) ui.nextUp.innerHTML = `${ICON.next}<span>Tập tiếp · ${epShort(nx)}</span>`;
+  ui.nextUp.hidden = !showUp;
   ui.root.classList.toggle("paused", !!s.paused);
   paintTime();
 }
@@ -814,36 +839,73 @@ function nextEpisode() {
   return list.slice(i + 1).find((v) => ((v.season ?? 0) !== 0 || curSeason === 0) && (!v.released || new Date(v.released) <= now)) || null;
 }
 
-async function playNext(auto) {
+function sameSource(groups, c) {
+  const bg = c.stream?.behaviorHints?.bingeGroup;
+  if (bg) {
+    for (const g of groups) {
+      const s = g.streams.find((x) => x.behaviorHints?.bingeGroup === bg);
+      if (s) return { stream: s, addon: g.addon };
+    }
+  }
+  const g = c.addon && groups.find((x) => x.addon === c.addon);
+  if (!g || !g.streams.length) return null;
+  const tag = quality(c.stream || {}).tags[0]?.[0];
+  const s = (tag && g.streams.find((x) => quality(x).tags[0]?.[0] === tag)) || g.streams[0];
+  return { stream: s, addon: g.addon };
+}
+
+async function playEpisode(v, auto) {
   const c = pl.ctx;
-  const nx = nextEpisode();
-  if (!c || !nx) return false;
-  const session = pl.session;
+  if (!c || !v) return false;
+  const session = ++pl.session;
+  call("player_stop").catch(() => {});
+  pl.menu = null;
+  renderMenu();
   pl.ui.root.classList.add("loading");
   document.body.classList.remove("see-through");
   pl.s = { ...pl.s, loaded: false };
   pl.ui.title.textContent = c.m.name;
-  pl.ui.sub.textContent = epName(nx);
+  pl.ui.sub.textContent = epName(v);
   paintState();
   let groups = [];
-  try { groups = await call("streams", { kind: c.m.type, id: nx.id }); } catch (e) { groups = []; }
+  try { groups = await call("streams", { kind: c.m.type, id: v.id }); } catch (e) { groups = []; }
   if (pl.session !== session) return true;
-  const bg = c.stream?.behaviorHints?.bingeGroup;
-  let pick = null;
-  if (bg) {
-    for (const g of groups) {
-      pick = g.streams.find((s) => s.behaviorHints?.bingeGroup === bg);
-      if (pick) break;
-    }
-  }
+  const pick = sameSource(groups, c);
   if (pick) {
-    startPlayback(c.m, nx.id, epName(nx), pick, 0);
+    const entry = libEntry(c.m.id);
+    const resume = entry?.state?.video_id === v.id ? entry.state.timeOffset || 0 : 0;
+    startPlayback(c.m, v.id, epName(v), pick.stream, resume, pick.addon);
   } else {
-    closePlayer();
-    openStreams(c.m, nx.id, epName(nx));
-    if (auto) toast("Chọn nguồn cho tập tiếp theo");
+    closePlayer(false);
+    openStreams(c.m, v.id, epName(v));
+    toast(auto ? "Chọn nguồn cho tập tiếp theo" : "Không có cùng nguồn cho tập này, hãy chọn nguồn khác");
   }
   return true;
+}
+
+const playNext = (auto) => playEpisode(nextEpisode(), auto);
+
+function renderEpisodes(box) {
+  const c = pl.ctx;
+  const vids = (c?.m?.videos || []).filter((v) => v.id).sort(epSort);
+  const seasons = [...new Set(vids.map((v) => v.season ?? 0))].sort((a, b) => (a === 0) - (b === 0) || a - b);
+  if (pl.epSeason == null || !seasons.includes(pl.epSeason)) pl.epSeason = (vids.find((v) => v.id === c.vid) || {}).season ?? seasons[0];
+  const now = new Date();
+  const list = h("div", { class: "pl-eps" }, vids.filter((v) => (v.season ?? 0) === pl.epSeason).map((v) => {
+    const cur = v.id === c.vid;
+    const date = v.released ? new Date(v.released) : null;
+    const future = date && date > now;
+    const note = cur ? "Đang xem" : future ? `Ra ngày ${date.toLocaleDateString("vi-VN")}` : date && !isNaN(date) ? date.toLocaleDateString("vi-VN") : "";
+    return h("button", { class: `pl-ep ${cur ? "on" : ""}`, tabindex: "-1", disabled: future || null, onclick: () => { if (!cur) playEpisode(v, false); } },
+      h("span", { class: "pl-ep-n" }, v.episode ?? v.number ?? "?"),
+      h("div", {}, h("b", {}, v.title || v.name || `Tập ${v.episode ?? ""}`), note ? h("small", {}, note) : null));
+  }));
+  box.className = "pl-menu episodes";
+  box.replaceChildren(
+    h("h4", {}, "Các tập"),
+    seasons.length > 1 ? h("div", { class: "pl-seasons" }, seasons.map((s) => h("button", { class: `pl-mini ${s === pl.epSeason ? "on" : ""}`, tabindex: "-1", onclick: () => { pl.epSeason = s; renderMenu(); } }, s === 0 ? "Đặc biệt" : `Mùa ${s}`))) : null,
+    list);
+  requestAnimationFrame(() => list.querySelector(".pl-ep.on")?.scrollIntoView({ block: "center" }));
 }
 
 function toggleMenu(kind) {
@@ -877,6 +939,7 @@ function renderMenu() {
   const box = pl.ui.menu;
   box.hidden = !pl.menu;
   if (!pl.menu) { box.replaceChildren(); return; }
+  if (pl.menu === "episodes") { renderEpisodes(box); return; }
   if (pl.menu === "speed") {
     const cur = pl.s.speed || 1;
     box.className = "pl-menu narrow";
@@ -927,6 +990,7 @@ function openPlayer(c) {
   pl.subs = null;
   pl.added = new Set();
   pl.menu = null;
+  pl.epSeason = null;
   pl.drag = null;
   pl.seekUntil = 0;
   const ui = pl.ui;
@@ -959,7 +1023,7 @@ function closePlayer(stop = true) {
   pl.returnFocus?.focus?.({ preventScroll: true });
 }
 
-async function startPlayback(m, vid, label, stream, start) {
+async function startPlayback(m, vid, label, stream, start, addon) {
   const ctx = (session) => ({ id: m.id, kind: m.type, name: m.type === "series" && label ? `${m.name} · ${label}` : m.name, poster: m.poster || null, video: vid, start: Math.floor(start || 0), session });
   if (stream.externalUrl && !stream.url && !stream.infoHash) {
     try { await call("play", { stream, ctx: ctx(0) }); closeSheet(); } catch (e) { toast(e, true); }
@@ -967,7 +1031,7 @@ async function startPlayback(m, vid, label, stream, start) {
   }
   closeSheet();
   const session = ++pl.session;
-  openPlayer({ m, vid, label, stream });
+  openPlayer({ m, vid, label, stream, addon });
   try {
     await call("play", { stream, ctx: ctx(session) });
     if (pl.session === session) applySubStyle();
@@ -990,6 +1054,7 @@ function playerKey(e) {
   if (k === "m" || k === "M") { cmd("cycle", "mute"); return handled(); }
   if (k === "n" || k === "N" || k === "MediaTrackNext") { playNext(false); return handled(); }
   if (k === "c" || k === "C") { toggleMenu("tracks"); return handled(); }
+  if ((k === "e" || k === "E") && !pl.ui.eps.hidden) { toggleMenu("episodes"); return handled(); }
   if (k === "Escape") {
     if (pl.menu) toggleMenu(null);
     else if (pl.fs) toggleFullscreen();
@@ -1511,6 +1576,7 @@ if (TAURI) {
   });
   TAURI.event.listen("library-changed", async ({ payload }) => {
     if (payload && payload.error) toast(`Không lưu được tiến độ: ${payload.error}`, true);
+    if (payload && payload.quiet) return;
     await refreshLibrary();
     const cur = app.stack[app.stack.length - 1];
     if (cur && !pl.open && $("#sheet").hidden && (cur.route === "home" || cur.route === "detail" || cur.route === "library")) {

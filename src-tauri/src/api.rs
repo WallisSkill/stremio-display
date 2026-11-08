@@ -76,6 +76,18 @@ pub async fn library_get(http: &reqwest::Client, auth_key: &str) -> Result<Vec<V
     Ok(res.as_array().cloned().unwrap_or_default())
 }
 
+pub async fn library_get_one(http: &reqwest::Client, auth_key: &str, id: &str) -> Result<Option<Value>, String> {
+    let res = call(
+        http,
+        "datastoreGet",
+        json!({ "authKey": auth_key, "collection": "libraryItem", "ids": [id], "all": false }),
+    )
+    .await?;
+    Ok(res
+        .as_array()
+        .and_then(|a| a.iter().find(|i| i["_id"].as_str() == Some(id)).cloned()))
+}
+
 pub async fn library_put(http: &reqwest::Client, auth_key: &str, item: &Value) -> Result<(), String> {
     call(
         http,

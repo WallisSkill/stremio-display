@@ -6,7 +6,57 @@ use crate::state::{AppState, Session};
 use crate::util::now_iso;
 use serde::Deserialize;
 use serde_json::{json, Value};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
+
+const SAVE_EVERY: Duration = Duration::from_secs(30);
+const MAX_STEP_MS: u64 = 5_000;
+
+struct Watch {
+    last_pos: Option<u64>,
+    unsaved: u64,
+    last_save: Instant,
+    was_paused: bool,
+}
+
+impl Watch {
+    fn new() -> Self {
+        Self { last_pos: None, unsaved: 0, last_save: Instant::now(), was_paused: false }
+    }
+
+    fn step(&mut self, pos: u64, playing: bool) {
+        if let Some(prev) = self.last_pos {
+            if playing && pos > prev && pos - prev < MAX_STEP_MS {
+                self.unsaved += pos - prev;
+            }
+        }
+        self.last_pos = Some(pos);
+    }
+
+    fn observe(&mut self, pos: u64, dur: u64, playing: bool, paused: bool) -> Option<u64> {
+        self.step(pos, playing);
+        let just_paused = paused && !self.was_paused;
+        self.was_paused = paused;
+        if dur == 0 || self.unsaved == 0 || !(just_paused || self.last_save.elapsed() >= SAVE_EVERY) {
+            return None;
+        }
+        self.last_save = Instant::now();
+        Some(std::mem::take(&mut self.unsaved))
+    }
+
+    fn finish(&mut self, pos: u64) -> u64 {
+        self.step(pos, true);
+        std::mem::take(&mut self.unsaved)
+    }
+}
+
+struct Progress {
+    position_ms: u64,
+    duration_ms: u64,
+    watched_ms: u64,
+    finished: bool,
+}
 
 type R<T> = Result<T, String>;
 
@@ -258,11 +308,33 @@ pub async fn play(
     };
     let state_app = app.clone();
     let session = ctx.session;
+    let watch = Arc::new(Mutex::new(Watch::new()));
+    let lock = Arc::new(tauri::async_runtime::Mutex::new(()));
+    let (state_watch, state_lock, state_ctx) = (watch.clone(), lock.clone(), ctx.clone());
     st.player.start(
         req,
         move |mut s| {
             s["session"] = json!(session);
-            let _ = state_app.emit("player-state", s);
+            let _ = state_app.emit("player-state", &s);
+            if s["loaded"].as_bool() != Some(true) {
+                return;
+            }
+            let ms = |k: &str| (s[k].as_f64().unwrap_or(0.0).max(0.0) * 1000.0) as u64;
+            let (pos, dur) = (ms("time"), ms("duration"));
+            let paused = s["paused"].as_bool() == Some(true);
+            let playing = !paused && s["buffering"].as_bool() != Some(true);
+            let due = state_watch.lock().unwrap().observe(pos, dur, playing, paused);
+            if let Some(watched) = due {
+                let (app, ctx, lock) = (state_app.clone(), state_ctx.clone(), state_lock.clone());
+                tauri::async_runtime::spawn(async move {
+                    let _guard = lock.lock().await;
+                    let st = app.state::<AppState>();
+                    let p = Progress { position_ms: pos, duration_ms: dur, watched_ms: watched, finished: false };
+                    if save_progress(&st, &ctx, &p).await.is_ok() {
+                        let _ = app.emit("library-changed", json!({ "ok": true, "quiet": true }));
+                    }
+                });
+            }
         },
         move |out| {
             let _ = app.emit(
@@ -277,9 +349,20 @@ pub async fn play(
                     "error": out.error,
                 }),
             );
+            if out.error.is_some() {
+                return;
+            }
+            let watched = watch.lock().unwrap().finish(out.position_ms);
             tauri::async_runtime::spawn(async move {
+                let _guard = lock.lock().await;
                 let st = app.state::<AppState>();
-                let saved = save_progress(&st, &ctx, &out).await;
+                let p = Progress {
+                    position_ms: out.position_ms,
+                    duration_ms: out.duration_ms,
+                    watched_ms: watched,
+                    finished: out.ended || out.position_ms.saturating_mul(10) >= out.duration_ms.saturating_mul(9),
+                };
+                let saved = save_progress(&st, &ctx, &p).await;
                 let _ = app.emit("library-changed", json!({ "ok": saved.is_ok(), "error": saved.err() }));
             });
         },
@@ -455,41 +538,52 @@ pub async fn addon_discover(st: State<'_, AppState>) -> R<Vec<Value>> {
     Ok(out)
 }
 
-async fn save_progress(st: &AppState, ctx: &PlayCtx, out: &player::Outcome) -> R<()> {
+fn season_episode(video: &str) -> Option<(u64, u64)> {
+    let mut parts = video.rsplit(':');
+    let episode = parts.next()?.parse().ok()?;
+    let season = parts.next()?.parse().ok()?;
+    Some((season, episode))
+}
+
+async fn save_progress(st: &AppState, ctx: &PlayCtx, p: &Progress) -> R<()> {
     let Some(key) = st.auth_key() else {
         return Ok(());
     };
-    if ctx.id.starts_with("local:") || out.duration_ms == 0 || out.error.is_some() {
+    if ctx.id.starts_with("local:") || p.duration_ms == 0 {
         return Ok(());
     }
-    let lib = api::library_get(&st.http, &key).await?;
     let now = now_iso();
-    let mut item = lib
-        .into_iter()
-        .find(|i| i["_id"].as_str() == Some(ctx.id.as_str()))
-        .unwrap_or_else(|| {
-            new_item(&ctx.id, &json!(ctx.name), &json!(ctx.kind), &json!(ctx.poster), &now)
-        });
+    let mut item = api::library_get_one(&st.http, &key, &ctx.id)
+        .await?
+        .unwrap_or_else(|| new_item(&ctx.id, &json!(ctx.name), &json!(ctx.kind), &json!(ctx.poster), &now));
     if !item["state"].is_object() {
         item["state"] = json!({});
     }
-    let watched = out.position_ms.saturating_sub(ctx.start.unwrap_or(0));
-    let finished = out.position_ms.saturating_mul(10) >= out.duration_ms.saturating_mul(9);
     let s = &mut item["state"];
     let num = |v: &Value| v.as_u64().unwrap_or(0);
-    let time_watched = num(&s["timeWatched"]) + watched;
-    let overall = num(&s["overallTimeWatched"]) + watched;
+    let same_video = s["video_id"].as_str() == Some(ctx.video.as_str());
+    let time_watched = if same_video { num(&s["timeWatched"]) } else { 0 } + p.watched_ms;
+    let overall = num(&s["overallTimeWatched"]) + p.watched_ms;
     s["lastWatched"] = json!(now);
     s["video_id"] = json!(ctx.video);
-    s["duration"] = json!(out.duration_ms);
+    s["duration"] = json!(p.duration_ms);
     s["timeWatched"] = json!(time_watched);
     s["overallTimeWatched"] = json!(overall);
-    if finished {
+    if ctx.kind == "series" {
+        if let Some((season, episode)) = season_episode(&ctx.video) {
+            s["season"] = json!(season);
+            s["episode"] = json!(episode);
+        }
+    }
+    if !same_video {
+        s["flaggedWatched"] = json!(0);
+    }
+    if p.finished {
         s["timeOffset"] = json!(0);
         s["timesWatched"] = json!(num(&s["timesWatched"]) + 1);
         s["flaggedWatched"] = json!(1);
     } else {
-        s["timeOffset"] = json!(out.position_ms);
+        s["timeOffset"] = json!(p.position_ms);
         for f in ["timesWatched", "flaggedWatched"] {
             if s[f].is_null() {
                 s[f] = json!(0);
