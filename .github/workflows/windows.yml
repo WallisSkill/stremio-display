@@ -1,0 +1,90 @@
+name: Windows app
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "src-tauri/**"
+      - "plugins/**"
+      - "ui/**"
+      - ".github/workflows/windows.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: tauri-cli@2
+
+      - name: Download libmpv
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          mkdir -p "$RUNNER_TEMP/mpv"
+          gh release download --repo shinchiro/mpv-winbuild-cmake --pattern "mpv-dev-x86_64-2*.7z" --dir "$RUNNER_TEMP/mpv"
+          ls -la "$RUNNER_TEMP/mpv"
+          7z e -y -r -o"$RUNNER_TEMP/mpv/out" "$RUNNER_TEMP"/mpv/*.7z libmpv-2.dll
+          cp "$RUNNER_TEMP/mpv/out/libmpv-2.dll" src-tauri/libmpv-2.dll
+          ls -la src-tauri/libmpv-2.dll
+
+      - name: Build installer
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: |
+          set -e
+          VERSION="0.1.${{ github.run_number }}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          printf '{"version":"%s"}' "$VERSION" > "$RUNNER_TEMP/version.json"
+          cd src-tauri
+          cargo tauri build --config tauri.windows-release.json --config "$RUNNER_TEMP/version.json"
+
+      - name: Collect installer
+        run: |
+          set -e
+          dir=src-tauri/target/release/bundle/nsis
+          ls -la "$dir"
+          exe=$(ls "$dir"/*-setup.exe | head -1)
+          mkdir -p out
+          cp "$exe" out/WiSTV-setup.exe
+          sig=$(cat "$exe.sig")
+          url="https://github.com/${{ github.repository }}/releases/download/windows/WiSTV-setup.exe"
+          date=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          printf '{"version":"%s","notes":"","pub_date":"%s","platforms":{"windows-x86_64":{"signature":"%s","url":"%s"}}}\n' "$VERSION" "$date" "$sig" "$url" > out/latest.json
+          cat out/latest.json
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WiSTV-windows
+          path: out/
+
+      - name: Publish installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          gh release view windows >/dev/null 2>&1 || gh release create windows --title "WiS TV cho Windows" --notes "Bản cài đặt WiS TV cho Windows. Ứng dụng tự cập nhật khi mở."
+          gh release upload windows out/WiSTV-setup.exe --clobber
+          gh release upload windows out/latest.json --clobber

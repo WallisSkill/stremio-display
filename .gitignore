@@ -4,3 +4,4 @@
 /worker/.wrangler/
 /plugins/*/.tauri/
 /plugins/*/target/
+/src-tauri/libmpv-2.dll
