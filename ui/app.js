@@ -852,7 +852,8 @@ function setVolume(v) {
   if (pl.s.mute) cmd("set", "mute", "no");
 }
 
-const IPHONE_FS = !TAURI && !document.documentElement.requestFullscreen && !document.documentElement.webkitRequestFullscreen;
+const IOS_IPA = "https://github.com/WallisSkill/stremio-display/releases/download/ios/WiSTV.ipa";
+const IPHONE_FS =!TAURI && !document.documentElement.requestFullscreen && !document.documentElement.webkitRequestFullscreen;
 const STANDALONE = !TAURI && (navigator.standalone === true || window.matchMedia("(display-mode: standalone)").matches);
 
 async function toggleFullscreen() {
@@ -1255,8 +1256,13 @@ async function renderSettings(view) {
       h("p", { class: "hint" }, "Không có máy tính thì vẫn xem được các nguồn có link trực tiếp mà trình duyệt phát được (MP4, HLS)."));
     check(false);
   }
+  const ios = TAURI ? null : h("div", { class: "panel" }, h("h3", {}, "Ứng dụng cho iPhone"),
+    h("p", { class: "hint" }, "Bản app phát được mọi định dạng (MKV, HEVC, phụ đề trong file) và tự phát torrent ngay trên iPhone, không cần máy tính."),
+    h("div", { style: "display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:12px" },
+      h("a", { class: "btn primary focusable", href: IOS_IPA, download: "WiSTV.ipa", rel: "noopener" }, "Tải WiS TV cho iPhone (.ipa)")),
+    h("p", { class: "hint" }, "Cài từ máy tính bằng Sideloadly với Apple ID của bạn. Mỗi 7 ngày ký lại một lần, app và dữ liệu vẫn giữ nguyên."));
   const touchHelp = h("div", { class: "hint" }, "Trên điện thoại: chạm vào hình để hiện/ẩn điều khiển, chạm đúp bên trái/phải để tua 10 giây, chạm đúp giữa để dừng/tiếp.");
-  view.append(h("div", { class: "page plain" }, h("h1", {}, "Cài đặt"), account, pc, list, TOUCH ? h("div", { class: "panel" }, h("h3", {}, "Điều khiển"), touchHelp) : help));
+  view.append(h("div", { class: "page plain" }, h("h1", {}, "Cài đặt"), account, ios, pc, list, TOUCH ? h("div", { class: "panel" }, h("h3", {}, "Điều khiển"), touchHelp) : help));
   $(".panel .btn")?.focus({ preventScroll: true });
 }
 

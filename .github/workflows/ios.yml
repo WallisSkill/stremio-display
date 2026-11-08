@@ -11,7 +11,7 @@ on:
       - ".github/workflows/ios.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ios
@@ -103,3 +103,10 @@ jobs:
           name: WiSTV-ipa
           path: out/WiSTV.ipa
           retention-days: 14
+
+      - name: Publish IPA
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view ios >/dev/null 2>&1 || gh release create ios --prerelease --title "WiS TV cho iPhone" --notes "Bản dựng mới nhất của WiS TV cho iPhone. Cài bằng Sideloadly, ký lại mỗi 7 ngày."
+          gh release upload ios out/WiSTV.ipa --clobber
