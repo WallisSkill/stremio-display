@@ -463,14 +463,16 @@ pub fn player_set(st: State<'_, AppState>, name: String, value: String) -> R<()>
 
 #[cfg(mobile)]
 #[tauri::command]
-pub fn device_battery(app: AppHandle) -> R<Value> {
+pub async fn device_battery(app: AppHandle) -> R<Value> {
     use tauri_plugin_wistv_video::VideoExt;
-    app.video().battery()
+    tauri::async_runtime::spawn_blocking(move || app.video().battery())
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[cfg(desktop)]
 #[tauri::command]
-pub fn device_battery() -> R<Value> {
+pub async fn device_battery() -> R<Value> {
     Ok(Value::Null)
 }
 
@@ -510,8 +512,10 @@ pub fn player_fullscreen(window: WebviewWindow, on: Option<bool>) -> R<bool> {
 }
 
 #[tauri::command]
-pub fn open_url(app: AppHandle, url: String) -> R<()> {
-    open_external(&app, &url)
+pub async fn open_url(app: AppHandle, url: String) -> R<()> {
+    tauri::async_runtime::spawn_blocking(move || open_external(&app, &url))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[cfg(not(target_os = "android"))]
