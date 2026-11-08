@@ -28,6 +28,17 @@ fn main() {
             commands::library,
             commands::library_toggle,
             commands::play,
+            commands::player_command,
+            commands::player_set,
+            commands::player_stop,
+            commands::player_fullscreen,
+            commands::startup_open,
+            commands::open_url,
+            commands::subtitles,
+            commands::addon_install,
+            commands::addon_remove,
+            commands::addon_move,
+            commands::addon_discover,
         ])
         .run(tauri::generate_context!())
         .expect("WiS TV failed to start");

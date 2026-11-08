@@ -28,9 +28,38 @@ const web = {
   async library() { return []; },
   async library_toggle() { throw "Thư viện chỉ có trong ứng dụng WiS TV"; },
   async play() { throw "Phát phim chỉ có trong ứng dụng WiS TV"; },
+  async startup_open() { return null; },
+  async subtitles() { return []; },
+  async addon_discover() {
+    const lists = await Promise.all(["https://api.strem.io/addonsofficialcollection.json", "https://api.strem.io/addonscollection.json"].map((u) => fetch(u).then((r) => r.json()).catch(() => [])));
+    return lists.flat().filter((a, i, all) => a.transportUrl && all.findIndex((b) => b.transportUrl === a.transportUrl) === i);
+  },
+  async addon_install() { throw "Cài addon chỉ có trong ứng dụng WiS TV"; },
+  async addon_remove() { throw "Gỡ addon chỉ có trong ứng dụng WiS TV"; },
+  async addon_move() { throw "Sắp xếp addon chỉ có trong ứng dụng WiS TV"; },
+  async open_url({ url }) { window.open(url, "_blank", "noopener"); },
 };
 
-const call = (cmd, args = {}) => (TAURI ? TAURI.core.invoke(cmd, args) : web[cmd](args));
+const JUNK = new Set(["null", "undefined", ""]);
+const junk = (v) => typeof v === "string" && JUNK.has(v.trim().toLowerCase());
+function tidy(m) {
+  if (!m || typeof m !== "object") return m;
+  for (const [k, v] of Object.entries(m)) {
+    if (junk(v)) delete m[k];
+    else if (Array.isArray(v) && v.every((x) => x == null || typeof x === "string")) m[k] = v.filter((x) => x != null && !junk(x));
+  }
+  for (const v of Array.isArray(m.videos) ? m.videos : []) {
+    for (const [k, x] of Object.entries(v || {})) if (junk(x)) delete v[k];
+  }
+  return m;
+}
+
+const call = (cmd, args = {}) => {
+  const p = TAURI ? TAURI.core.invoke(cmd, args) : web[cmd](args);
+  if (cmd === "catalog") return p.then((list) => list.map(tidy));
+  if (cmd === "meta") return p.then(tidy);
+  return p;
+};
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -60,6 +89,19 @@ const ICON = {
   left: '<svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   right: '<svg viewBox="0 0 24 24"><path d="m9 5 7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   search: '<svg viewBox="0 0 24 24" width="24" height="24"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M15.5 15.5 21 21" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
+  pause: '<svg viewBox="0 0 24 24"><rect x="6" y="4.5" width="4.2" height="15" rx="1.3" fill="currentColor"/><rect x="13.8" y="4.5" width="4.2" height="15" rx="1.3" fill="currentColor"/></svg>',
+  back10: '<svg viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 3.5v4.2h4.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><text x="12" y="15.6" text-anchor="middle" font-size="7.6" font-weight="700" fill="currentColor" font-family="Segoe UI, sans-serif">10</text></svg>',
+  fwd10: '<svg viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M20 3.5v4.2h-4.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><text x="12" y="15.6" text-anchor="middle" font-size="7.6" font-weight="700" fill="currentColor" font-family="Segoe UI, sans-serif">10</text></svg>',
+  next: '<svg viewBox="0 0 24 24"><path d="M5 5.2v13.6a.9.9 0 0 0 1.4.75l9.6-6.8a.9.9 0 0 0 0-1.5L6.4 4.45A.9.9 0 0 0 5 5.2Z" fill="currentColor"/><rect x="16.6" y="4.5" width="2.6" height="15" rx="1.1" fill="currentColor"/></svg>',
+  vol: '<svg viewBox="0 0 24 24"><path d="M4 9.5v5h3.6l4.9 4V5.5L7.6 9.5H4Z" fill="currentColor"/><path d="M15.5 9a4.2 4.2 0 0 1 0 6M18 6.5a7.8 7.8 0 0 1 0 11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  mute: '<svg viewBox="0 0 24 24"><path d="M4 9.5v5h3.6l4.9 4V5.5L7.6 9.5H4Z" fill="currentColor"/><path d="m15.5 9.5 5 5m0-5-5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  cc: '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M10.4 10.2a2.3 2.3 0 1 0 0 3.6M17 10.2a2.3 2.3 0 1 0 0 3.6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>',
+  speed: '<svg viewBox="0 0 24 24"><path d="M4.6 17.5a8.5 8.5 0 1 1 14.8 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="m12 13.5 4-5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="13.5" r="1.6" fill="currentColor"/></svg>',
+  full: '<svg viewBox="0 0 24 24"><path d="M4 9V5.5A1.5 1.5 0 0 1 5.5 4H9M15 4h3.5A1.5 1.5 0 0 1 20 5.5V9M20 15v3.5a1.5 1.5 0 0 1-1.5 1.5H15M9 20H5.5A1.5 1.5 0 0 1 4 18.5V15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  unfull: '<svg viewBox="0 0 24 24"><path d="M9 4v3.5A1.5 1.5 0 0 1 7.5 9H4M20 9h-3.5A1.5 1.5 0 0 1 15 7.5V4M15 20v-3.5a1.5 1.5 0 0 1 1.5-1.5H20M4 15h3.5A1.5 1.5 0 0 1 9 16.5V20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  up: '<svg viewBox="0 0 24 24"><path d="m6 15 6-6 6 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  down: '<svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  cog: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2.8v2.6M12 18.6v2.6M21.2 12h-2.6M5.4 12H2.8M18.5 5.5l-1.8 1.8M7.3 16.7l-1.8 1.8M18.5 18.5l-1.8-1.8M7.3 7.3 5.5 5.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
 };
 
 const TYPE_LABEL = { movie: "Phim", series: "Phim bộ", channel: "Kênh", tv: "Truyền hình", anime: "Anime" };
@@ -236,6 +278,16 @@ function shelf(title, sub, shape, load, opts = {}) {
 
 function setHero(m, info, dots, idx) {
   setBackdrop(bgOf(m));
+  info.dataset.cur = m.id;
+  if (!m.description && !m._rich && m.id && m.type) {
+    m._rich = true;
+    call("meta", { kind: m.type, id: m.id })
+      .then((full) => {
+        Object.assign(m, full, { _rich: true });
+        if (info.isConnected && info.dataset.cur === m.id) setHero(m, info, dots, idx);
+      })
+      .catch(() => {});
+  }
   info.classList.add("fade");
   setTimeout(() => {
     const focusedIdx = $$(".btn", info).indexOf(document.activeElement);
@@ -266,7 +318,7 @@ function renderBrowse(view, filterType) {
   const rotate = () => {
     clearInterval(app.heroTimer);
     app.heroTimer = setInterval(() => {
-      if (!featured.length || !document.hasFocus()) return;
+      if (!featured.length || !document.hasFocus() || pl.open) return;
       fi = (fi + 1) % featured.length;
       setHero(featured[fi], info, dots, fi);
     }, 9000);
@@ -302,7 +354,7 @@ function renderBrowse(view, filterType) {
 
   const cats = catalogsOf(filterType).slice(0, 16);
   if (!cats.length) {
-    info.append(h("h1", { class: "title-text" }, "Chưa có danh mục"), h("p", { class: "desc" }, "Cài thêm addon trong Stremio, WiS TV sẽ tự đồng bộ."));
+    info.append(h("h1", { class: "title-text" }, "Chưa có danh mục"), h("p", { class: "desc" }, "Mở mục Addon để cài thêm addon có danh mục phim."));
   }
   cats.forEach(({ addon, cat }, i) => {
     const shape = i === 0 ? "wide" : "poster";
@@ -398,7 +450,11 @@ async function renderDetail(view, { kind, id, video, autoplay }) {
   }
 
   playBtn.focus({ preventScroll: true });
-  if (autoplay) openStreams(m, target.vid, target.label);
+  if (autoplay) {
+    const top = app.stack[app.stack.length - 1];
+    if (top && top.params) top.params.autoplay = false;
+    openStreams(m, target.vid, target.label);
+  }
 }
 
 const epSort = (a, b) => (a.season ?? 0) - (b.season ?? 0) || (a.episode ?? a.number ?? 0) - (b.episode ?? b.number ?? 0);
@@ -492,15 +548,394 @@ async function openStreams(m, vid, label) {
   $(".stream", body)?.focus({ preventScroll: true });
 }
 
+const pl = { session: 0, open: false, s: {}, tracks: [], subs: null, added: new Set(), menu: null, fs: false, drag: null, seekUntil: 0, seekTarget: 0, hideTimer: null, ctx: null, ui: null, returnFocus: null };
+
+const LANG = { vi: "Tiếng Việt", vie: "Tiếng Việt", vn: "Tiếng Việt", en: "English", eng: "English", ja: "日本語", jpn: "日本語", ko: "한국어", kor: "한국어", zh: "中文", chi: "中文", zho: "中文", fr: "Français", fre: "Français", fra: "Français", es: "Español", spa: "Español", de: "Deutsch", ger: "Deutsch", deu: "Deutsch", it: "Italiano", ita: "Italiano", pt: "Português", por: "Português", pob: "Português (BR)", ru: "Русский", rus: "Русский", th: "ไทย", tha: "ไทย", id: "Bahasa Indonesia", ind: "Bahasa Indonesia", ar: "العربية", ara: "العربية" };
+const langName = (code) => (code ? LANG[String(code).toLowerCase()] || String(code).toUpperCase() : "");
+const LANG_RANK = ["vi", "vie", "vn", "en", "eng"];
+const langRank = (code) => { const i = LANG_RANK.indexOf(String(code || "").toLowerCase()); return i < 0 ? 99 : i; };
+const secs = (s) => fmtTime(Math.max(0, s || 0) * 1000);
+
+function iconBtn(icon, title, onclick, cls = "") {
+  return h("button", { class: `pl-btn ${cls}`, tabindex: "-1", title, "aria-label": title, html: ICON[icon], onclick: (e) => { e.stopPropagation(); onclick(e); } });
+}
+
+function buildPlayer() {
+  const ui = {};
+  ui.bg = h("div", { class: "pl-loading-bg" });
+  ui.hit = h("div", { class: "pl-hit" });
+  ui.title = h("b", { class: "pl-title" });
+  ui.sub = h("span", { class: "pl-sub" });
+  ui.spin = h("div", { class: "pl-spin" }, h("div", { class: "spinner" }), ui.bufText = h("span"));
+  ui.flash = h("div", { class: "pl-flash" });
+  ui.buf = h("div", { class: "pl-buf" });
+  ui.fill = h("div", { class: "pl-fill" });
+  ui.knob = h("div", { class: "pl-knob" });
+  ui.hover = h("div", { class: "pl-hover" });
+  ui.tip = h("div", { class: "pl-tip" });
+  ui.seek = h("div", { class: "pl-seek" }, h("div", { class: "pl-track" }, ui.buf, ui.hover, ui.fill), ui.knob, ui.tip);
+  ui.play = iconBtn("pause", "Dừng (Space)", togglePause, "big");
+  ui.next = iconBtn("next", "Tập tiếp (N)", () => playNext(false));
+  ui.time = h("span", { class: "pl-time" });
+  ui.volBtn = iconBtn("vol", "Tắt tiếng (M)", () => call("player_command", { args: ["cycle", "mute"] }).catch(() => {}));
+  ui.vol = h("input", { type: "range", min: "0", max: "150", step: "1", value: "100", tabindex: "-1", class: "pl-vol" });
+  ui.vol.addEventListener("input", () => setVolume(Number(ui.vol.value)));
+  ui.vol.addEventListener("pointerdown", (e) => e.stopPropagation());
+  ui.cc = iconBtn("cc", "Âm thanh và phụ đề (C)", () => toggleMenu("tracks"));
+  ui.speed = h("button", { class: "pl-btn pl-speed", tabindex: "-1", title: "Tốc độ", onclick: (e) => { e.stopPropagation(); toggleMenu("speed"); } }, "1×");
+  ui.fs = iconBtn("full", "Toàn màn hình (F)", toggleFullscreen);
+  ui.menu = h("div", { class: "pl-menu", hidden: true });
+  ui.menu.addEventListener("pointerdown", (e) => e.stopPropagation());
+  ui.menu.addEventListener("click", (e) => e.stopPropagation());
+  const top = h("div", { class: "pl-top" }, iconBtn("left", "Quay lại (Esc)", () => closePlayer()), h("div", { class: "pl-titles" }, ui.title, ui.sub));
+  const bottom = h("div", { class: "pl-bottom" },
+    ui.seek,
+    h("div", { class: "pl-row" },
+      h("div", { class: "pl-group" }, ui.play, iconBtn("back10", "Lùi 10 giây (←)", () => seekBy(-10)), iconBtn("fwd10", "Tới 10 giây (→)", () => seekBy(10)), ui.next, ui.time),
+      h("div", { class: "pl-group" }, h("div", { class: "pl-volwrap" }, ui.volBtn, ui.vol), ui.cc, ui.speed, ui.fs)));
+  bottom.addEventListener("click", (e) => e.stopPropagation());
+  bottom.addEventListener("dblclick", (e) => e.stopPropagation());
+  ui.root = h("div", { id: "player", hidden: true }, ui.bg, ui.hit, h("div", { class: "pl-shade" }), ui.spin, ui.flash, top, bottom, ui.menu);
+  ui.hit.addEventListener("click", () => { if (pl.menu) toggleMenu(null); else togglePause(); });
+  ui.hit.addEventListener("dblclick", toggleFullscreen);
+  ui.root.addEventListener("mousemove", wake);
+  ui.root.addEventListener("wheel", (e) => { if (!e.target.closest(".pl-menu")) setVolume(Math.round((pl.s.volume ?? 100) - Math.sign(e.deltaY) * 5)); }, { passive: true });
+  const frac = (e) => { const r = ui.seek.getBoundingClientRect(); return Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)); };
+  ui.seek.addEventListener("pointermove", (e) => {
+    const f = frac(e);
+    const d = pl.s.duration || 0;
+    ui.tip.textContent = secs(f * d);
+    ui.tip.style.left = `${f * 100}%`;
+    ui.hover.style.width = `${f * 100}%`;
+    if (pl.drag != null) { pl.drag = f; paintTime(); }
+  });
+  ui.seek.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || !(pl.s.duration > 0)) return;
+    e.stopPropagation();
+    ui.seek.setPointerCapture(e.pointerId);
+    ui.seek.classList.add("dragging");
+    pl.drag = frac(e);
+    paintTime();
+  });
+  const release = (e) => {
+    if (pl.drag == null) return;
+    const target = pl.drag * (pl.s.duration || 0);
+    pl.drag = null;
+    ui.seek.classList.remove("dragging");
+    if (e.type === "pointerup") seekTo(target);
+    paintTime();
+  };
+  ui.seek.addEventListener("pointerup", release);
+  ui.seek.addEventListener("pointercancel", release);
+  document.body.append(ui.root);
+  pl.ui = ui;
+}
+
+function wake() {
+  if (!pl.open) return;
+  pl.ui.root.classList.remove("idle");
+  clearTimeout(pl.hideTimer);
+  pl.hideTimer = setTimeout(() => {
+    if (pl.open && !pl.s.paused && !pl.menu && pl.drag == null && !pl.ui.root.querySelector(".pl-bottom:hover, .pl-top:hover")) pl.ui.root.classList.add("idle");
+    else wake();
+  }, 3000);
+}
+
+function flash(icon) {
+  const f = pl.ui.flash;
+  f.innerHTML = ICON[icon];
+  f.classList.remove("on");
+  void f.offsetWidth;
+  f.classList.add("on");
+}
+
+const cmd = (...args) => call("player_command", { args: args.map(String) }).catch((e) => toast(e, true));
+const setProp = (name, value) => call("player_set", { name, value: String(value) }).catch((e) => toast(e, true));
+
+function curTime() {
+  if (pl.drag != null) return pl.drag * (pl.s.duration || 0);
+  if (Date.now() < pl.seekUntil) return pl.seekTarget;
+  return pl.s.time || 0;
+}
+
+function togglePause() {
+  if (!pl.s.loaded) return;
+  flash(pl.s.paused ? "play" : "pause");
+  pl.s.paused = !pl.s.paused;
+  paintState();
+  cmd("cycle", "pause");
+  wake();
+}
+
+function seekTo(t) {
+  const d = pl.s.duration || 0;
+  const target = Math.max(0, d ? Math.min(d - 1, t) : t);
+  pl.seekTarget = target;
+  pl.seekUntil = Date.now() + 2500;
+  paintTime();
+  cmd("seek", target.toFixed(2), "absolute");
+}
+
+function seekBy(dt) {
+  if (!pl.s.loaded) return;
+  flash(dt < 0 ? "back10" : "fwd10");
+  seekTo(curTime() + dt);
+  wake();
+}
+
+function setVolume(v) {
+  const vol = Math.max(0, Math.min(150, v));
+  pl.s.volume = vol;
+  pl.ui.vol.value = String(vol);
+  paintState();
+  setProp("volume", vol);
+  if (pl.s.mute) cmd("set", "mute", "no");
+}
+
+async function toggleFullscreen() {
+  try { pl.fs = await call("player_fullscreen", {}); } catch (e) { toast(e, true); }
+  pl.ui.fs.innerHTML = pl.fs ? ICON.unfull : ICON.full;
+}
+
+function paintTime() {
+  const ui = pl.ui;
+  const d = pl.s.duration || 0;
+  const t = curTime();
+  const f = d > 0 ? Math.min(1, t / d) : 0;
+  ui.fill.style.width = `${f * 100}%`;
+  ui.knob.style.left = `${f * 100}%`;
+  const cacheEnd = pl.s.cache != null ? pl.s.cache : t;
+  ui.buf.style.width = d > 0 ? `${Math.min(100, (Math.max(cacheEnd, t) / d) * 100)}%` : "0%";
+  ui.time.textContent = d > 0 ? `${secs(t)} / ${secs(d)}` : pl.s.loaded ? secs(t) : "";
+  ui.seek.classList.toggle("off", !(d > 0));
+}
+
+function paintState() {
+  const ui = pl.ui;
+  const s = pl.s;
+  ui.play.innerHTML = s.paused ? ICON.play : ICON.pause;
+  ui.play.title = s.paused ? "Phát (Space)" : "Dừng (Space)";
+  const showSpin = !s.loaded || s.buffering;
+  ui.spin.hidden = !showSpin;
+  ui.bufText.textContent = !s.loaded ? (pl.ctx?.stream?.infoHash ? "Đang tải torrent…" : "Đang mở…") : s.cachePercent != null && s.cachePercent < 100 ? `Đang tải ${Math.round(s.cachePercent)}%` : "";
+  if (document.activeElement !== ui.vol && s.volume != null) ui.vol.value = String(Math.round(s.volume));
+  ui.volBtn.innerHTML = s.mute || s.volume === 0 ? ICON.mute : ICON.vol;
+  ui.vol.style.setProperty("--v", `${((s.mute ? 0 : s.volume ?? 100) / 150) * 100}%`);
+  ui.speed.textContent = `${s.speed && s.speed !== 1 ? +s.speed.toFixed(2) : 1}×`;
+  ui.next.hidden = !nextEpisode();
+  ui.root.classList.toggle("paused", !!s.paused);
+  paintTime();
+}
+
+function onPlayerState(s) {
+  if (!pl.open || s.session !== pl.session) return;
+  if (s.tracks) pl.tracks = s.tracks;
+  const wasLoaded = pl.s.loaded;
+  pl.s = { ...pl.s, ...s };
+  if (Date.now() < pl.seekUntil && Math.abs((s.time || 0) - pl.seekTarget) < 1.5 && !s.buffering) pl.seekUntil = 0;
+  if (s.loaded && !wasLoaded) {
+    pl.ui.root.classList.remove("loading");
+    document.body.classList.add("see-through");
+    wake();
+  }
+  paintState();
+  if (pl.menu === "tracks" && s.tracks) renderMenu();
+}
+
+function nextEpisode() {
+  const c = pl.ctx;
+  if (!c || !c.m || !Array.isArray(c.m.videos)) return null;
+  const list = c.m.videos.filter((v) => v.id).sort(epSort);
+  const i = list.findIndex((v) => v.id === c.vid);
+  if (i < 0) return null;
+  const curSeason = list[i].season ?? 0;
+  const now = new Date();
+  return list.slice(i + 1).find((v) => ((v.season ?? 0) !== 0 || curSeason === 0) && (!v.released || new Date(v.released) <= now)) || null;
+}
+
+async function playNext(auto) {
+  const c = pl.ctx;
+  const nx = nextEpisode();
+  if (!c || !nx) return false;
+  const session = pl.session;
+  pl.ui.root.classList.add("loading");
+  document.body.classList.remove("see-through");
+  pl.s = { ...pl.s, loaded: false };
+  pl.ui.title.textContent = c.m.name;
+  pl.ui.sub.textContent = epName(nx);
+  paintState();
+  let groups = [];
+  try { groups = await call("streams", { kind: c.m.type, id: nx.id }); } catch (e) { groups = []; }
+  if (pl.session !== session) return true;
+  const bg = c.stream?.behaviorHints?.bingeGroup;
+  let pick = null;
+  if (bg) {
+    for (const g of groups) {
+      pick = g.streams.find((s) => s.behaviorHints?.bingeGroup === bg);
+      if (pick) break;
+    }
+  }
+  if (pick) {
+    startPlayback(c.m, nx.id, epName(nx), pick, 0);
+  } else {
+    closePlayer();
+    openStreams(c.m, nx.id, epName(nx));
+    if (auto) toast("Chọn nguồn cho tập tiếp theo");
+  }
+  return true;
+}
+
+function toggleMenu(kind) {
+  pl.menu = kind && pl.menu !== kind ? kind : null;
+  if (pl.menu === "tracks" && pl.subs === null && pl.ctx?.m?.type && !String(pl.ctx.vid).startsWith("local:")) {
+    pl.subs = "loading";
+    const session = pl.session;
+    call("subtitles", { kind: pl.ctx.m.type, id: pl.ctx.vid })
+      .then((list) => { if (pl.session === session) { pl.subs = list; if (pl.menu === "tracks") renderMenu(); } })
+      .catch(() => { if (pl.session === session) pl.subs = []; });
+  }
+  renderMenu();
+  wake();
+}
+
+function trackLabel(t) {
+  const bits = [langName(t.lang), t.title && t.title !== t.lang ? t.title : ""].filter(Boolean);
+  if (t.type === "audio") {
+    if (t.codec) bits.push(String(t.codec).toUpperCase());
+    if (t.channels) bits.push(`${t.channels}ch`);
+  }
+  if (t.external) bits.push("ngoài");
+  return bits.join(" · ") || `${t.type === "audio" ? "Âm thanh" : "Phụ đề"} ${t.id}`;
+}
+
+function menuItem(label, on, onclick, extra) {
+  return h("button", { class: `pl-item ${on ? "on" : ""}`, tabindex: "-1", onclick }, h("i", { html: on ? ICON.check : "" }), h("span", {}, label), extra ? h("small", {}, extra) : null);
+}
+
+function renderMenu() {
+  const box = pl.ui.menu;
+  box.hidden = !pl.menu;
+  if (!pl.menu) { box.replaceChildren(); return; }
+  if (pl.menu === "speed") {
+    const cur = pl.s.speed || 1;
+    box.className = "pl-menu narrow";
+    box.replaceChildren(h("h4", {}, "Tốc độ phát"),
+      ...[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map((v) => menuItem(v === 1 ? "Bình thường" : `${v}×`, Math.abs(cur - v) < 0.01, () => { pl.s.speed = v; setProp("speed", v); renderMenu(); paintState(); })));
+    return;
+  }
+  box.className = "pl-menu";
+  const audio = pl.tracks.filter((t) => t.type === "audio");
+  const subs = pl.tracks.filter((t) => t.type === "sub");
+  const sid = pl.s.sid;
+  const audioCol = h("div", { class: "pl-col" }, h("h4", {}, "Âm thanh"),
+    audio.length ? audio.map((t) => menuItem(trackLabel(t), t.selected, () => { setProp("aid", t.id); })) : h("p", { class: "pl-none" }, "Chưa có thông tin"));
+  const subCol = h("div", { class: "pl-col" }, h("h4", {}, "Phụ đề"),
+    menuItem("Tắt", !sid || sid === "no" || sid === "false", () => setProp("sid", "no")),
+    subs.map((t) => menuItem(trackLabel(t), t.selected, () => setProp("sid", t.id))),
+    h("div", { class: "pl-delay" }, h("span", {}, "Độ trễ"),
+      h("button", { class: "pl-mini", tabindex: "-1", onclick: () => cmd("add", "sub-delay", "-0.1") }, "−0.1s"),
+      h("b", {}, `${(pl.s.subDelay || 0).toFixed(1)}s`),
+      h("button", { class: "pl-mini", tabindex: "-1", onclick: () => cmd("add", "sub-delay", "0.1") }, "+0.1s")));
+  const addonCol = h("div", { class: "pl-col" }, h("h4", {}, "Phụ đề từ addon"));
+  if (pl.subs === "loading") addonCol.append(h("div", { class: "spinner small" }));
+  else if (!pl.subs || !pl.subs.length) addonCol.append(h("p", { class: "pl-none" }, "Không addon nào có phụ đề cho mục này"));
+  else {
+    const seen = new Set();
+    const list = pl.subs.filter((s) => !seen.has(s.url) && seen.add(s.url)).sort((a, b) => langRank(a.lang) - langRank(b.lang) || String(a.lang).localeCompare(String(b.lang))).slice(0, 60);
+    addonCol.append(...list.map((s) => {
+      const done = pl.added.has(s.url);
+      return menuItem(langName(s.lang) || "Không rõ", done, () => {
+        if (done) return;
+        pl.added.add(s.url);
+        cmd("sub-add", s.url, "select", `${langName(s.lang)} · ${s.addon}`, s.lang || "");
+        renderMenu();
+      }, s.addon);
+    }));
+  }
+  box.replaceChildren(audioCol, subCol, addonCol);
+}
+
+function openPlayer(c) {
+  if (!pl.ui) buildPlayer();
+  if (!pl.open) pl.returnFocus = document.activeElement;
+  pl.open = true;
+  pl.ctx = c;
+  pl.s = { loaded: false, volume: pl.s.volume ?? 100 };
+  pl.tracks = [];
+  pl.subs = null;
+  pl.added = new Set();
+  pl.menu = null;
+  pl.drag = null;
+  pl.seekUntil = 0;
+  const ui = pl.ui;
+  const isEp = c.m.type === "series" && c.label;
+  ui.title.textContent = c.m.name || "";
+  ui.sub.textContent = isEp ? c.label : yearOf(c.m) || "";
+  const bg = bgOf(c.m);
+  ui.bg.style.backgroundImage = bg ? `url("${bg}")` : "";
+  ui.root.classList.add("loading");
+  ui.root.classList.remove("idle");
+  ui.root.hidden = false;
+  renderMenu();
+  document.body.classList.add("playing");
+  document.body.classList.remove("see-through");
+  clearInterval(app.heroTimer);
+  paintState();
+  wake();
+}
+
+function closePlayer(stop = true) {
+  if (!pl.open) return;
+  pl.open = false;
+  pl.session++;
+  clearTimeout(pl.hideTimer);
+  if (stop) call("player_stop").catch(() => {});
+  if (pl.fs) { call("player_fullscreen", { on: false }).catch(() => {}); pl.fs = false; pl.ui.fs.innerHTML = ICON.full; }
+  pl.menu = null;
+  pl.ui.root.hidden = true;
+  document.body.classList.remove("playing", "see-through");
+  pl.returnFocus?.focus?.({ preventScroll: true });
+}
+
 async function startPlayback(m, vid, label, stream, start) {
-  toast(stream.infoHash ? "Đang kết nối torrent…" : "Đang mở trình phát…");
+  const ctx = (session) => ({ id: m.id, kind: m.type, name: m.type === "series" && label ? `${m.name} · ${label}` : m.name, poster: m.poster || null, video: vid, start: Math.floor(start || 0), session });
+  if (stream.externalUrl && !stream.url && !stream.infoHash) {
+    try { await call("play", { stream, ctx: ctx(0) }); closeSheet(); } catch (e) { toast(e, true); }
+    return;
+  }
+  closeSheet();
+  const session = ++pl.session;
+  openPlayer({ m, vid, label, stream });
   try {
-    await call("play", {
-      stream,
-      ctx: { id: m.id, kind: m.type, name: m.type === "series" && label ? `${m.name} · ${label}` : m.name, poster: m.poster || null, video: vid, start: Math.floor(start || 0) },
-    });
-    closeSheet();
-  } catch (e) { toast(e, true); }
+    await call("play", { stream, ctx: ctx(session) });
+  } catch (e) {
+    if (pl.session === session) closePlayer(false);
+    toast(e, true);
+  }
+}
+
+function playerKey(e) {
+  if (e.target instanceof HTMLInputElement && e.target.type !== "range") return false;
+  const k = e.key;
+  const handled = () => { e.preventDefault(); wake(); return true; };
+  if (k === " " || k === "k" || k === "K" || k === "MediaPlayPause") { togglePause(); return handled(); }
+  if (k === "ArrowLeft" || k === "j" || k === "J") { seekBy(e.shiftKey ? -60 : -10); return handled(); }
+  if (k === "ArrowRight" || k === "l" || k === "L") { seekBy(e.shiftKey ? 60 : 10); return handled(); }
+  if (k === "ArrowUp") { setVolume(Math.round((pl.s.volume ?? 100) + 5)); return handled(); }
+  if (k === "ArrowDown") { setVolume(Math.round((pl.s.volume ?? 100) - 5)); return handled(); }
+  if (k === "f" || k === "F") { toggleFullscreen(); return handled(); }
+  if (k === "m" || k === "M") { cmd("cycle", "mute"); return handled(); }
+  if (k === "n" || k === "N" || k === "MediaTrackNext") { playNext(false); return handled(); }
+  if (k === "c" || k === "C") { toggleMenu("tracks"); return handled(); }
+  if (k === "Escape") {
+    if (pl.menu) toggleMenu(null);
+    else if (pl.fs) toggleFullscreen();
+    else closePlayer();
+    return handled();
+  }
+  if (k === "Backspace") { closePlayer(); return handled(); }
+  if (k === "Enter") return handled();
+  return false;
 }
 
 function renderGridPage(view, title, items, emptyText) {
@@ -554,20 +989,13 @@ async function renderSettings(view) {
         ? h("button", { class: "btn focusable", onclick: async () => { await call("logout"); app.user = null; app.library = []; app.addons = []; go("login", {}, true); } }, "Đăng xuất")
         : h("button", { class: "btn primary focusable", onclick: () => go("login", {}, true) }, "Đăng nhập")));
   const list = h("div", { class: "panel" }, h("h3", {}, `Addon (${app.addons.length})`),
-    app.addons.map((a) => {
-      const mf = a.manifest || {};
-      return h("div", { class: "addon" },
-        mf.logo ? h("img", { src: mf.logo, alt: "" }) : h("div", { class: "ph" }, (mf.name || "?")[0]),
-        h("div", {}, h("b", {}, mf.name || a.transportUrl), mf.description ? h("p", {}, mf.description) : null),
-        h("span", { class: "ver" }, mf.version ? `v${mf.version}` : ""));
-    }),
-    h("div", { style: "margin-top:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap" },
-      h("button", { class: "btn focusable", onclick: async () => { try { app.addons = await call("addons", { refresh: true }); toast("Đã đồng bộ addon"); go("settings", {}, true); } catch (e) { toast(e, true); } } }, "Đồng bộ lại"),
-      h("span", { class: "hint" }, "Cài hoặc gỡ addon trong Stremio như bình thường, WiS TV dùng đúng danh sách đó.")));
+    h("div", { style: "display:flex;gap:12px;align-items:center;flex-wrap:wrap" },
+      h("button", { class: "btn primary focusable", onclick: () => go("addons") }, "Quản lý addon"),
+      h("span", { class: "hint" }, "Cài, gỡ, sắp xếp addon ngay trong WiS TV. Danh sách đồng bộ với tài khoản Stremio.")));
   const help = h("div", { class: "panel" }, h("h3", {}, "Điều khiển"),
     h("div", { class: "hint" },
-      "Mũi tên để di chuyển, Enter để chọn, Esc hoặc Backspace để quay lại.", h("br"),
-      "Trong trình phát: Space dừng/tiếp, ← → tua 5 giây, ↑ ↓ tua 1 phút, F toàn màn hình, J đổi phụ đề, # đổi âm thanh, Q thoát."));
+      "Mũi tên để di chuyển, Enter để chọn, Esc hoặc Backspace để quay lại. Giữ chuột trái và kéo để cuộn các hàng phim.", h("br"),
+      "Trong trình phát: Space hoặc bấm vào hình để dừng/tiếp, ← → tua 10 giây (Shift: 1 phút), ↑ ↓ hoặc lăn chuột chỉnh âm lượng, M tắt tiếng, F hoặc bấm đúp để toàn màn hình, C chọn âm thanh và phụ đề, N tập tiếp, Esc quay lại."));
   view.append(h("div", { class: "page plain" }, h("h1", {}, "Cài đặt"), account, list, help));
   $(".panel .btn")?.focus({ preventScroll: true });
 }
@@ -625,7 +1053,235 @@ const ROUTES = {
   library: renderLibrary,
   search: renderSearch,
   settings: renderSettings,
+  calendar: renderCalendar,
+  addons: renderAddons,
 };
+
+const TOP_ROUTES = ["home", "movie", "series", "calendar", "library", "addons", "search", "settings"];
+
+async function seriesMetas(onProgress) {
+  const ids = libItems().filter((i) => i.type === "series").map((i) => i._id);
+  app.metaCache = app.metaCache || new Map();
+  const out = [];
+  let next = 0, done = 0;
+  const worker = async () => {
+    while (next < ids.length) {
+      const id = ids[next++];
+      let m = app.metaCache.get(id);
+      if (!m) {
+        try { m = await call("meta", { kind: "series", id }); app.metaCache.set(id, m); } catch (e) { m = null; }
+      }
+      done++;
+      if (m) out.push(m);
+      onProgress && onProgress(done, ids.length);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(6, ids.length) }, worker));
+  return out;
+}
+
+const dayKey = (d) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+const WEEKDAYS = ["T2", "T3", "T4", "T5", "T6", "T7", "CN"];
+
+function calEpisode(x, cls = "cal-ep") {
+  const el = h("button", { class: `${cls} focusable`, title: `${x.m.name} · ${epName(x.v)}` },
+    image(x.m.poster, x.m.name),
+    h("div", {}, h("b", {}, x.m.name), h("span", {}, `${epShort(x.v)}${x.v.title || x.v.name ? " · " + (x.v.title || x.v.name) : ""}`)));
+  el.addEventListener("click", () => go("detail", { kind: "series", id: x.m.id, video: x.v.id }));
+  return el;
+}
+
+async function renderCalendar(view, params) {
+  document.body.classList.add("dim");
+  const now = new Date();
+  const year = params.y ?? now.getFullYear();
+  const month = params.mo ?? now.getMonth();
+  const shift = (d) => { const t = new Date(year, month + d, 1); go("calendar", { y: t.getFullYear(), mo: t.getMonth() }); };
+  const head = h("div", { class: "cal-head" },
+    h("h1", {}, `Tháng ${month + 1}, ${year}`),
+    h("div", { class: "cal-nav" },
+      h("button", { class: "pill focusable", html: ICON.left, "aria-label": "Tháng trước", onclick: () => shift(-1) }),
+      h("button", { class: "pill focusable", onclick: () => go("calendar", {}) }, "Hôm nay"),
+      h("button", { class: "pill focusable", html: ICON.right, "aria-label": "Tháng sau", onclick: () => shift(1) })));
+  const body = h("div", {}, h("div", { class: "spinner" }));
+  const page = h("div", { class: "page plain cal" }, head, body);
+  view.append(page);
+  $(".cal-nav .pill:nth-child(2)", page)?.focus({ preventScroll: true });
+  if (!app.user) { body.replaceChildren(h("div", { class: "empty" }, "Đăng nhập tài khoản Stremio để xem lịch các phim bộ trong Thư viện.")); return; }
+  await refreshLibrary();
+  const status = h("p", { class: "hint", style: "text-align:center" });
+  body.replaceChildren(h("div", { class: "spinner" }), status);
+  const metas = await seriesMetas((d, n) => { status.textContent = `Đang đọc lịch phát ${d}/${n} phim bộ…`; });
+  if (!view.contains(page)) return;
+  if (!metas.length) { body.replaceChildren(h("div", { class: "empty" }, "Thư viện chưa có phim bộ nào. Thêm phim bộ vào Thư viện để theo dõi lịch phát.")); return; }
+  const eps = metas.flatMap((m) => (m.videos || [])
+    .filter((v) => v.released && (v.season ?? 0) > 0)
+    .map((v) => ({ m, v, d: new Date(v.released) })))
+    .filter((x) => !isNaN(x.d))
+    .sort((a, b) => a.d - b.d || epSort(a.v, b.v));
+  const byDay = new Map();
+  for (const x of eps) {
+    const k = dayKey(x.d);
+    if (!byDay.has(k)) byDay.set(k, []);
+    byDay.get(k).push(x);
+  }
+  const first = new Date(year, month, 1);
+  const lead = (first.getDay() + 6) % 7;
+  const days = new Date(year, month + 1, 0).getDate();
+  const cells = [];
+  for (let i = 0; i < lead; i++) cells.push(h("div", { class: "cal-cell blank" }));
+  for (let d = 1; d <= days; d++) {
+    const date = new Date(year, month, d);
+    const list = byDay.get(dayKey(date)) || [];
+    const today = dayKey(date) === dayKey(now);
+    cells.push(h("div", { class: `cal-cell ${today ? "today" : ""} ${list.length ? "has" : ""}` },
+      h("div", { class: "cal-day" }, d),
+      list.slice(0, 3).map((x) => calEpisode(x)),
+      list.length > 3 ? h("div", { class: "cal-more" }, `+${list.length - 3} tập`) : null));
+  }
+  while (cells.length % 7) cells.push(h("div", { class: "cal-cell blank" }));
+  const grid = h("div", { class: "cal-grid" }, WEEKDAYS.map((w) => h("div", { class: "cal-wd" }, w)), cells);
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const upcoming = eps.filter((x) => x.d >= start).slice(0, 24);
+  const recent = eps.filter((x) => x.d < start && start - x.d <= 14 * 86400000).reverse().slice(0, 24);
+  const listOf = (title, items) => items.length ? h("section", { class: "cal-list" }, h("h2", { class: "shelf-title" }, title),
+    items.map((x) => h("div", { class: "cal-row" }, h("span", { class: "cal-date" }, x.d.toLocaleDateString("vi-VN", { weekday: "short", day: "2-digit", month: "2-digit" })), calEpisode(x, "cal-ep wide")))) : null;
+  body.replaceChildren(grid, h("div", { class: "cal-lists" }, listOf("Sắp chiếu", upcoming), listOf("Mới ra trong 2 tuần", recent)));
+}
+
+const addonBase = (url) => String(url || "").replace(/\/manifest\.json$/, "").replace(/\/+$/, "");
+const TYPE_FILTERS = [["", "Tất cả"], ["movie", "Phim"], ["series", "Phim bộ"], ["anime", "Anime"], ["tv", "Truyền hình"], ["channel", "Kênh"], ["other", "Khác"]];
+
+function addonRow(a, actions) {
+  const mf = a.manifest || {};
+  const types = (mf.types || []).map((t) => TYPE_LABEL[t] || t).join(" · ");
+  const res = (mf.resources || []).map((r) => (typeof r === "string" ? r : r.name)).filter(Boolean);
+  const caps = [res.includes("stream") ? "Nguồn phát" : "", res.includes("catalog") || (mf.catalogs || []).length ? "Danh mục" : "", res.includes("subtitles") ? "Phụ đề" : ""].filter(Boolean).join(" · ");
+  const ph = h("div", { class: "ph" });
+  const letter = () => { ph.textContent = (mf.name || "?")[0]; };
+  if (mf.logo) ph.append(image(mf.logo, "", letter)); else letter();
+  return h("div", { class: "addon" },
+    ph,
+    h("div", { class: "addon-text" },
+      h("b", {}, mf.name || a.transportUrl, mf.version ? h("span", { class: "ver" }, ` v${mf.version}`) : null),
+      mf.description ? h("p", {}, mf.description) : null,
+      types || caps ? h("small", {}, [types, caps].filter(Boolean).join("  ·  ")) : null),
+    h("div", { class: "addon-actions" }, actions));
+}
+
+async function renderAddons(view) {
+  document.body.classList.add("dim");
+  const busy = async (btn, fn) => {
+    if (btn.disabled) return;
+    btn.disabled = true;
+    try { await fn(); } catch (e) { toast(e, true); } finally { if (btn.isConnected) btn.disabled = false; }
+  };
+  const configure = (url) => call("open_url", { url: `${addonBase(url)}/configure` }).catch((e) => toast(e, true));
+  const installedPanel = h("div", { class: "panel wide-panel" });
+  const discoverList = h("div", { class: "addon-list" }, h("div", { class: "spinner" }));
+  const input = h("input", { class: "field", placeholder: "Dán link addon: https://…/manifest.json hoặc stremio://…", spellcheck: "false" });
+  const installBtn = h("button", { class: "btn primary focusable" }, "Cài addon");
+  const install = (url, btn) => busy(btn, async () => {
+    app.addons = await call("addon_install", { url });
+    const added = app.addons.find((a) => a.transportUrl === url.trim().replace(/^stremio:\/\//, "https://"));
+    toast(`Đã cài ${added?.manifest?.name || "addon"}`);
+    input.value = "";
+    drawInstalled();
+    drawDiscover();
+  });
+  installBtn.addEventListener("click", () => input.value.trim() && install(input.value, installBtn));
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter" && input.value.trim()) install(input.value, installBtn); });
+  const installPanel = h("div", { class: "panel wide-panel" }, h("h3", {}, "Cài từ đường link"),
+    h("div", { class: "install-row" }, input, installBtn),
+    h("p", { class: "hint" }, "Lấy link từ trang cấu hình của addon (ví dụ Torrentio: bấm Cấu hình, chọn xong thì sao chép link manifest) hoặc cài thẳng từ mục Khám phá bên dưới. Danh sách addon đồng bộ với tài khoản Stremio, nên Stremio trên các máy khác cũng thấy."));
+
+  const drawInstalled = () => {
+    const n = app.addons.length;
+    installedPanel.replaceChildren(h("h3", {}, `Đã cài (${n})`),
+      h("p", { class: "hint", style: "margin:-4px 0 6px" }, "Addon ở trên được hỏi nguồn phát trước. Dùng nút mũi tên để đổi thứ tự."),
+      ...app.addons.map((a, i) => {
+        const prot = a.flags?.protected === true;
+        const mf = a.manifest || {};
+        const acts = [];
+        const up = h("button", { class: "pl-mini focusable", html: ICON.up, title: "Lên trên", disabled: i === 0 || null });
+        const down = h("button", { class: "pl-mini focusable", html: ICON.down, title: "Xuống dưới", disabled: i === n - 1 || null });
+        up.addEventListener("click", () => busy(up, async () => { app.addons = await call("addon_move", { url: a.transportUrl, delta: -1 }); drawInstalled(); }));
+        down.addEventListener("click", () => busy(down, async () => { app.addons = await call("addon_move", { url: a.transportUrl, delta: 1 }); drawInstalled(); }));
+        acts.push(up, down);
+        if (mf.behaviorHints?.configurable) acts.push(h("button", { class: "pl-mini focusable", html: ICON.cog, title: "Cấu hình", onclick: () => configure(a.transportUrl) }));
+        if (prot) acts.push(h("span", { class: "tag" }, "Mặc định"));
+        else {
+          const rm = h("button", { class: "pill focusable danger" }, "Gỡ");
+          let armed = null;
+          rm.addEventListener("click", () => {
+            if (!armed) {
+              rm.textContent = "Bấm lần nữa để gỡ";
+              armed = setTimeout(() => { armed = null; if (rm.isConnected) rm.textContent = "Gỡ"; }, 3500);
+              return;
+            }
+            clearTimeout(armed);
+            busy(rm, async () => {
+              app.addons = await call("addon_remove", { url: a.transportUrl });
+              toast(`Đã gỡ ${mf.name || "addon"}`);
+              drawInstalled();
+              drawDiscover();
+            });
+          });
+          acts.push(rm);
+        }
+        return addonRow(a, acts);
+      }),
+      h("div", { style: "margin-top:14px" },
+        h("button", { class: "btn focusable", onclick: (e) => busy(e.currentTarget, async () => { app.addons = await call("addons", { refresh: true }); drawInstalled(); drawDiscover(); toast("Đã đồng bộ với Stremio"); }) }, "Đồng bộ lại")));
+  };
+
+  let filter = "", term = "";
+  const pills = h("div", { class: "seasons" });
+  const search = h("input", { class: "field", placeholder: "Tìm addon…", spellcheck: "false", style: "max-width:320px;margin:0" });
+  search.addEventListener("input", () => { term = search.value.trim().toLowerCase(); drawDiscover(); });
+  const drawPills = () => pills.replaceChildren(...TYPE_FILTERS.map(([k, label]) => h("button", { class: `pill focusable ${filter === k ? "on" : ""}`, onclick: () => { filter = k; drawPills(); drawDiscover(); } }, label)));
+  drawPills();
+  const discoverPanel = h("div", { class: "panel wide-panel" }, h("h3", {}, "Khám phá"),
+    h("div", { class: "discover-tools" }, pills, search), discoverList);
+
+  const drawDiscover = () => {
+    if (!app.discover) return;
+    const have = new Set(app.addons.map((a) => a.transportUrl));
+    const haveIds = new Set(app.addons.map((a) => a.manifest?.id));
+    const known = new Set(TYPE_FILTERS.map(([k]) => k).filter((k) => k && k !== "other"));
+    const items = app.discover.filter((a) => {
+      const mf = a.manifest || {};
+      const types = mf.types || [];
+      if (filter === "other" ? types.some((t) => known.has(t)) : filter && !types.includes(filter)) return false;
+      if (term && !`${mf.name} ${mf.description}`.toLowerCase().includes(term)) return false;
+      return true;
+    });
+    discoverList.replaceChildren(...items.slice(0, 150).map((a) => {
+      const mf = a.manifest || {};
+      const acts = [];
+      const installed = have.has(a.transportUrl) || haveIds.has(mf.id);
+      const needsConfig = mf.behaviorHints?.configurationRequired;
+      if (mf.behaviorHints?.configurable || needsConfig) acts.push(h("button", { class: "pill focusable", onclick: () => configure(a.transportUrl) }, "Cấu hình"));
+      if (installed) acts.push(h("span", { class: "tag on" }, "Đã cài"));
+      else if (!needsConfig) {
+        const b = h("button", { class: "pill focusable on" }, "Cài");
+        b.addEventListener("click", () => install(a.transportUrl, b));
+        acts.push(b);
+      }
+      return addonRow(a, acts);
+    }));
+    if (!items.length) discoverList.replaceChildren(h("div", { class: "empty" }, "Không có addon nào khớp."));
+  };
+
+  view.append(h("div", { class: "page plain" }, h("h1", {}, "Addon"), installPanel, installedPanel, discoverPanel));
+  drawInstalled();
+  input.focus({ preventScroll: true });
+  if (!app.discover) {
+    try { app.discover = await call("addon_discover"); }
+    catch (e) { discoverList.replaceChildren(h("div", { class: "empty" }, `Không tải được danh sách addon: ${e}`)); return; }
+  }
+  drawDiscover();
+}
 
 function render() {
   const { route, params } = app.stack[app.stack.length - 1];
@@ -635,22 +1291,21 @@ function render() {
   const view = $("#view");
   view.replaceChildren();
   view.scrollTop = 0;
-  const top = ["home", "movie", "series", "library", "search", "settings"];
   $("#topbar").hidden = route === "login";
   $$("[data-route]", $("#topbar")).forEach((b) => b.classList.toggle("active", b.dataset.route === route));
   ROUTES[route](view, params || {});
-  if (!top.includes(route)) $$(".tab").forEach((t) => t.classList.remove("active"));
+  if (!TOP_ROUTES.includes(route)) $$(".tab").forEach((t) => t.classList.remove("active"));
 }
 
 function go(route, params = {}, replace = false) {
-  const tops = ["home", "movie", "series", "library", "search", "settings", "login"];
-  if (tops.includes(route)) app.stack = [];
+  if (TOP_ROUTES.includes(route) || route === "login") app.stack = [];
   else if (replace) app.stack.pop();
   app.stack.push({ route, params });
   render();
 }
 
 function back() {
+  if (pl.open) { closePlayer(); return; }
   if (!$("#sheet").hidden) { closeSheet(); return; }
   if (app.stack.length > 1) { app.stack.pop(); render(); return; }
   const cur = app.stack[0]?.route;
@@ -703,6 +1358,7 @@ function moveFocus(dir) {
 }
 
 document.addEventListener("keydown", (e) => {
+  if (pl.open) { playerKey(e); return; }
   const inInput = e.target instanceof HTMLInputElement;
   const dirs = { ArrowLeft: "l", ArrowRight: "r", ArrowUp: "u", ArrowDown: "d" };
   if (dirs[e.key]) {
@@ -725,16 +1381,88 @@ $$("[data-route]", $("#topbar")).forEach((b) => b.addEventListener("click", () =
 $("#view").addEventListener("scroll", () => $("#topbar").classList.toggle("solid", $("#view").scrollTop > 40), { passive: true });
 document.addEventListener("mouseup", (e) => { if (e.button === 3) back(); });
 
+(() => {
+  let d = null;
+  let suppressUntil = 0;
+  const glide = (row, v) => {
+    v = Math.max(-3, Math.min(3, v));
+    const step = () => {
+      if (Math.abs(v) < 0.03 || !row.isConnected) { row.classList.remove("dragging"); return; }
+      row.scrollLeft += v * 16;
+      v *= 0.93;
+      row._glide = requestAnimationFrame(step);
+    };
+    step();
+  };
+  document.addEventListener("pointerdown", (e) => {
+    if (e.pointerType !== "mouse" || e.button !== 0) return;
+    const row = e.target.closest(".row");
+    if (!row || row.scrollWidth <= row.clientWidth + 2) return;
+    cancelAnimationFrame(row._glide);
+    row.classList.remove("dragging");
+    d = { row, id: e.pointerId, x: e.clientX, left: row.scrollLeft, lastX: e.clientX, lastT: performance.now(), v: 0, moved: false };
+  });
+  document.addEventListener("pointermove", (e) => {
+    if (!d || e.pointerId !== d.id) return;
+    const dx = e.clientX - d.x;
+    if (!d.moved) {
+      if (Math.abs(dx) < 6) return;
+      d.moved = true;
+      d.row.classList.add("dragging");
+      try { d.row.setPointerCapture(e.pointerId); } catch (err) {}
+    }
+    const t = performance.now();
+    const dt = t - d.lastT;
+    if (dt >= 8) {
+      d.v = 0.7 * ((d.lastX - e.clientX) / dt) + 0.3 * d.v;
+      d.lastX = e.clientX;
+      d.lastT = t;
+    }
+    d.row.scrollLeft = d.left - dx;
+    e.preventDefault();
+  });
+  const end = (e) => {
+    if (!d || e.pointerId !== d.id) return;
+    const { row, moved } = d;
+    const v = performance.now() - d.lastT > 80 ? 0 : d.v;
+    d = null;
+    if (!moved) return;
+    suppressUntil = performance.now() + 120;
+    glide(row, v);
+  };
+  document.addEventListener("pointerup", end);
+  document.addEventListener("pointercancel", end);
+  document.addEventListener("click", (e) => {
+    if (performance.now() < suppressUntil) { e.preventDefault(); e.stopPropagation(); suppressUntil = 0; }
+  }, true);
+  document.addEventListener("dragstart", (e) => { if (e.target.closest?.(".row")) e.preventDefault(); });
+})();
+
 if (TAURI) {
+  TAURI.event.listen("player-state", ({ payload }) => onPlayerState(payload));
   TAURI.event.listen("player-ended", ({ payload }) => {
+    if (!pl.open || payload.session !== pl.session) return;
     if (payload.error) toast(`Trình phát: ${payload.error}`, true);
+    if (payload.ended && nextEpisode()) { playNext(true); return; }
+    closePlayer(false);
   });
   TAURI.event.listen("library-changed", async ({ payload }) => {
     if (payload && payload.error) toast(`Không lưu được tiến độ: ${payload.error}`, true);
     await refreshLibrary();
     const cur = app.stack[app.stack.length - 1];
-    if (cur && cur.route === "home") render();
+    if (cur && !pl.open && $("#sheet").hidden && (cur.route === "home" || cur.route === "detail" || cur.route === "library")) {
+      const scroll = $("#view").scrollTop;
+      render();
+      if (cur.route === "detail") requestAnimationFrame(() => { $("#view").scrollTop = scroll; });
+    }
   });
+}
+
+async function startupOpen() {
+  let url = null;
+  try { url = await call("startup_open"); } catch (e) { url = null; }
+  if (!url) return;
+  startPlayback({ id: "local:open", type: "movie", name: "Kiểm tra trình phát" }, "local:open", "", { url }, 0);
 }
 
 async function boot() {
@@ -753,4 +1481,5 @@ async function boot() {
   try { app.user = await call("session"); } catch (e) { app.user = null; }
   if (app.user) await boot();
   else go("login");
+  startupOpen();
 })();

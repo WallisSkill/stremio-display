@@ -10,6 +10,8 @@ pub struct Addon {
     pub transport_url: String,
     #[serde(default)]
     pub manifest: Value,
+    #[serde(default)]
+    pub flags: Value,
 }
 
 fn strs(v: &Value) -> Option<Vec<&str>> {
@@ -97,5 +99,6 @@ pub async fn guest(http: &reqwest::Client) -> Result<Vec<Addon>, String> {
     Ok(vec![Addon {
         transport_url: CINEMETA.to_string(),
         manifest,
+        flags: serde_json::json!({ "official": true, "protected": true }),
     }])
 }

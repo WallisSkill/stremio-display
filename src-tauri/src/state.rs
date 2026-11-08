@@ -3,8 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, Manager};
 
@@ -30,7 +29,7 @@ pub struct AppState {
     pub session: Mutex<Option<Session>>,
     pub addons: Mutex<Vec<Addon>>,
     pub library: Mutex<Vec<Value>>,
-    pub player_stop: Mutex<Option<Arc<AtomicBool>>>,
+    pub player: crate::player::Player,
 }
 
 impl AppState {
@@ -59,7 +58,7 @@ impl AppState {
             session: Mutex::new(session),
             addons: Mutex::new(Vec::new()),
             library: Mutex::new(Vec::new()),
-            player_stop: Mutex::new(None),
+            player: crate::player::Player::new(),
         })
     }
 

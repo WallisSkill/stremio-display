@@ -6,9 +6,7 @@ use crate::state::{AppState, Session};
 use crate::util::now_iso;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 
 type R<T> = Result<T, String>;
 
@@ -71,6 +69,7 @@ pub async fn catalog(
     let addon = Addon {
         transport_url: url,
         manifest: Value::Null,
+        flags: Value::Null,
     };
     let u = addon.resource_url("catalog", &kind, &id, &extra.unwrap_or_default());
     let v = addons::get_json(&st.http, &u).await?;
@@ -198,6 +197,8 @@ pub struct PlayCtx {
     pub poster: Option<String>,
     pub video: String,
     pub start: Option<u64>,
+    #[serde(default)]
+    pub session: u64,
 }
 
 fn open_external(url: &str) -> R<()> {
@@ -229,7 +230,13 @@ async fn resolve(st: &AppState, stream: &Value) -> R<String> {
 }
 
 #[tauri::command]
-pub async fn play(app: AppHandle, st: State<'_, AppState>, stream: Value, ctx: PlayCtx) -> R<()> {
+pub async fn play(
+    app: AppHandle,
+    window: WebviewWindow,
+    st: State<'_, AppState>,
+    stream: Value,
+    ctx: PlayCtx,
+) -> R<()> {
     if let Some(ext) = stream["externalUrl"].as_str() {
         return open_external(ext);
     }
@@ -242,41 +249,217 @@ pub async fn play(app: AppHandle, st: State<'_, AppState>, stream: Value, ctx: P
                 .collect()
         })
         .unwrap_or_default();
-    let stop = Arc::new(AtomicBool::new(false));
-    if let Some(prev) = st.player_stop.lock().unwrap().replace(stop.clone()) {
-        prev.store(true, Ordering::SeqCst);
-    }
     let req = player::Request {
         url,
         title: ctx.name.clone(),
         start_ms: ctx.start.unwrap_or(0),
         headers,
+        hwnd: window.hwnd().map(|h| h.0 as isize).map_err(|e| e.to_string())?,
     };
-    player::play(req, stop, move |out| {
-        let _ = app.emit(
-            "player-ended",
-            json!({
-                "id": ctx.id,
-                "video": ctx.video,
-                "position": out.position_ms,
-                "duration": out.duration_ms,
-                "error": out.error,
-            }),
-        );
-        tauri::async_runtime::spawn(async move {
-            let st = app.state::<AppState>();
-            let saved = save_progress(&st, &ctx, &out).await;
-            let _ = app.emit("library-changed", json!({ "ok": saved.is_ok(), "error": saved.err() }));
+    let state_app = app.clone();
+    let session = ctx.session;
+    st.player.start(
+        req,
+        move |mut s| {
+            s["session"] = json!(session);
+            let _ = state_app.emit("player-state", s);
+        },
+        move |out| {
+            let _ = app.emit(
+                "player-ended",
+                json!({
+                    "session": ctx.session,
+                    "id": ctx.id,
+                    "video": ctx.video,
+                    "position": out.position_ms,
+                    "duration": out.duration_ms,
+                    "ended": out.ended,
+                    "error": out.error,
+                }),
+            );
+            tauri::async_runtime::spawn(async move {
+                let st = app.state::<AppState>();
+                let saved = save_progress(&st, &ctx, &out).await;
+                let _ = app.emit("library-changed", json!({ "ok": saved.is_ok(), "error": saved.err() }));
+            });
+        },
+    )
+}
+
+#[tauri::command]
+pub fn player_command(st: State<'_, AppState>, args: Vec<String>) -> R<()> {
+    st.player.command(&args)
+}
+
+#[tauri::command]
+pub fn player_set(st: State<'_, AppState>, name: String, value: String) -> R<()> {
+    st.player.set(&name, &value)
+}
+
+#[tauri::command]
+pub fn player_stop(st: State<'_, AppState>) {
+    st.player.stop();
+}
+
+#[tauri::command]
+pub fn player_fullscreen(window: WebviewWindow, on: Option<bool>) -> R<bool> {
+    let cur = window.is_fullscreen().map_err(|e| e.to_string())?;
+    let next = on.unwrap_or(!cur);
+    if next != cur {
+        window.set_fullscreen(next).map_err(|e| e.to_string())?;
+    }
+    Ok(next)
+}
+
+#[tauri::command]
+pub fn open_url(url: String) -> R<()> {
+    open_external(&url)
+}
+
+#[tauri::command]
+pub fn startup_open() -> Option<String> {
+    std::env::var("WISTV_OPEN")
+        .ok()
+        .filter(|u| u.starts_with("http://") || u.starts_with("https://"))
+}
+
+#[tauri::command]
+pub async fn subtitles(st: State<'_, AppState>, kind: String, id: String) -> R<Vec<Value>> {
+    let list = load_addons(&st, false).await?;
+    let http = st.http.clone();
+    let jobs = list
+        .into_iter()
+        .filter(|a| a.supports("subtitles", &kind, &id))
+        .map(|a| {
+            let http = http.clone();
+            let url = a.resource_url("subtitles", &kind, &id, &[]);
+            async move { (a.name(), addons::get_json(&http, &url).await) }
         });
+    let mut out = Vec::new();
+    for (name, res) in futures::future::join_all(jobs).await {
+        let Ok(v) = res else { continue };
+        for s in v["subtitles"].as_array().into_iter().flatten() {
+            if let Some(url) = s["url"].as_str() {
+                out.push(json!({ "addon": name, "url": url, "lang": s["lang"], "id": s["id"] }));
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn manifest_url(raw: &str) -> R<String> {
+    let u = raw.trim();
+    let u = match u.strip_prefix("stremio://") {
+        Some(rest) => format!("https://{rest}"),
+        None => u.to_string(),
+    };
+    if !(u.starts_with("https://") || u.starts_with("http://")) {
+        return Err("Địa chỉ addon phải bắt đầu bằng https:// hoặc stremio://".into());
+    }
+    Ok(u)
+}
+
+fn position_of(list: &[Value], url: &str) -> R<usize> {
+    list.iter()
+        .position(|a| a["transportUrl"].as_str() == Some(url))
+        .ok_or_else(|| "Không tìm thấy addon này".to_string())
+}
+
+fn is_protected(a: &Value) -> bool {
+    a["flags"]["protected"].as_bool() == Some(true)
+}
+
+#[tauri::command]
+pub async fn addon_install(st: State<'_, AppState>, url: String) -> R<Vec<Addon>> {
+    let key = st.auth_key().ok_or("Đăng nhập tài khoản Stremio để cài addon")?;
+    let url = manifest_url(&url)?;
+    let manifest = addons::get_json(&st.http, &url)
+        .await
+        .map_err(|e| format!("Không đọc được manifest: {e}"))?;
+    let id = manifest["id"]
+        .as_str()
+        .ok_or("Địa chỉ này không phải manifest của addon Stremio")?
+        .to_string();
+    let mut list = api::addon_collection_raw(&st.http, &key).await?;
+    if list.iter().any(|a| a["transportUrl"].as_str() == Some(url.as_str())) {
+        return Err(format!("{} đã được cài", manifest["name"].as_str().unwrap_or(&id)));
+    }
+    let entry = json!({
+        "transportUrl": url,
+        "transportName": "",
+        "manifest": manifest,
+        "flags": { "official": false, "protected": false },
     });
-    Ok(())
+    match list.iter().position(|a| a["manifest"]["id"].as_str() == Some(id.as_str())) {
+        Some(i) if is_protected(&list[i]) => return Err("Không thay được addon gốc của Stremio".into()),
+        Some(i) => list[i] = entry,
+        None => list.push(entry),
+    }
+    api::addon_collection_set(&st.http, &key, &list).await?;
+    load_addons(&st, true).await
+}
+
+#[tauri::command]
+pub async fn addon_remove(st: State<'_, AppState>, url: String) -> R<Vec<Addon>> {
+    let key = st.auth_key().ok_or("Đăng nhập tài khoản Stremio để gỡ addon")?;
+    let mut list = api::addon_collection_raw(&st.http, &key).await?;
+    let pos = position_of(&list, &url)?;
+    if is_protected(&list[pos]) {
+        return Err("Đây là addon gốc của Stremio, không gỡ được".into());
+    }
+    list.remove(pos);
+    api::addon_collection_set(&st.http, &key, &list).await?;
+    load_addons(&st, true).await
+}
+
+#[tauri::command]
+pub async fn addon_move(st: State<'_, AppState>, url: String, delta: i64) -> R<Vec<Addon>> {
+    let key = st.auth_key().ok_or("Đăng nhập tài khoản Stremio để sắp xếp addon")?;
+    let mut list = api::addon_collection_raw(&st.http, &key).await?;
+    let pos = position_of(&list, &url)?;
+    let target = (pos as i64 + delta).clamp(0, list.len() as i64 - 1) as usize;
+    if target != pos {
+        let item = list.remove(pos);
+        list.insert(target, item);
+        api::addon_collection_set(&st.http, &key, &list).await?;
+    }
+    load_addons(&st, true).await
+}
+
+#[tauri::command]
+pub async fn addon_discover(st: State<'_, AppState>) -> R<Vec<Value>> {
+    let urls = [
+        "https://api.strem.io/addonsofficialcollection.json",
+        "https://api.strem.io/addonscollection.json",
+    ];
+    let results = futures::future::join_all(urls.iter().map(|u| addons::get_json(&st.http, u))).await;
+    let mut out: Vec<Value> = Vec::new();
+    let mut last_err = None;
+    for res in results {
+        match res {
+            Ok(Value::Array(list)) => {
+                for a in list {
+                    let ok = a["transportUrl"].as_str().is_some_and(|u| u.starts_with("http"));
+                    if ok && !out.iter().any(|o| o["transportUrl"] == a["transportUrl"]) {
+                        out.push(a);
+                    }
+                }
+            }
+            Ok(_) => {}
+            Err(e) => last_err = Some(e),
+        }
+    }
+    if out.is_empty() {
+        return Err(last_err.unwrap_or_else(|| "Không tải được danh sách addon".into()));
+    }
+    Ok(out)
 }
 
 async fn save_progress(st: &AppState, ctx: &PlayCtx, out: &player::Outcome) -> R<()> {
     let Some(key) = st.auth_key() else {
         return Ok(());
     };
-    if out.duration_ms == 0 || out.error.is_some() {
+    if ctx.id.starts_with("local:") || out.duration_ms == 0 || out.error.is_some() {
         return Ok(());
     }
     let lib = api::library_get(&st.http, &key).await?;

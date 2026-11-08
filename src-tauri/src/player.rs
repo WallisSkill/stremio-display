@@ -1,13 +1,16 @@
 use crate::server::stremio_dirs;
 use libloading::os::windows::{Library, LOAD_WITH_ALTERED_SEARCH_PATH};
+use serde_json::{json, Value};
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::path::PathBuf;
 use std::ptr;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 const EVENT_SHUTDOWN: c_int = 1;
 const EVENT_END_FILE: c_int = 7;
+const EVENT_FILE_LOADED: c_int = 8;
 const END_REASON_EOF: c_int = 0;
 const END_REASON_ERROR: c_int = 4;
 
@@ -32,6 +35,7 @@ struct Mpv {
     create: unsafe extern "C" fn() -> Handle,
     initialize: unsafe extern "C" fn(Handle) -> c_int,
     set_option_string: unsafe extern "C" fn(Handle, *const c_char, *const c_char) -> c_int,
+    set_property_string: unsafe extern "C" fn(Handle, *const c_char, *const c_char) -> c_int,
     command: unsafe extern "C" fn(Handle, *mut *const c_char) -> c_int,
     get_property_string: unsafe extern "C" fn(Handle, *const c_char) -> *mut c_char,
     free: unsafe extern "C" fn(*mut c_void),
@@ -74,6 +78,10 @@ impl Mpv {
                     "mpv_set_option_string",
                     unsafe extern "C" fn(Handle, *const c_char, *const c_char) -> c_int
                 ),
+                set_property_string: sym!(
+                    "mpv_set_property_string",
+                    unsafe extern "C" fn(Handle, *const c_char, *const c_char) -> c_int
+                ),
                 command: sym!("mpv_command", unsafe extern "C" fn(Handle, *mut *const c_char) -> c_int),
                 get_property_string: sym!(
                     "mpv_get_property_string",
@@ -88,28 +96,47 @@ impl Mpv {
         }
     }
 
-    unsafe fn set(&self, ctx: Handle, key: &str, value: &str) {
+    unsafe fn set_option(&self, ctx: Handle, key: &str, value: &str) {
         let (Ok(k), Ok(v)) = (CString::new(key), CString::new(value)) else {
             return;
         };
         (self.set_option_string)(ctx, k.as_ptr(), v.as_ptr());
     }
 
+    unsafe fn set_property(&self, ctx: Handle, key: &str, value: &str) -> c_int {
+        let (Ok(k), Ok(v)) = (CString::new(key), CString::new(value)) else {
+            return -4;
+        };
+        (self.set_property_string)(ctx, k.as_ptr(), v.as_ptr())
+    }
+
     unsafe fn cmd(&self, ctx: Handle, args: &[&str]) -> c_int {
         let owned: Vec<CString> = args.iter().filter_map(|a| CString::new(*a).ok()).collect();
+        if owned.len() != args.len() {
+            return -4;
+        }
         let mut ptrs: Vec<*const c_char> = owned.iter().map(|c| c.as_ptr()).collect();
         ptrs.push(ptr::null());
         (self.command)(ctx, ptrs.as_mut_ptr())
     }
 
-    unsafe fn prop_f64(&self, ctx: Handle, name: &CStr) -> Option<f64> {
+    unsafe fn prop(&self, ctx: Handle, name: &str) -> Option<String> {
+        let name = CString::new(name).ok()?;
         let raw = (self.get_property_string)(ctx, name.as_ptr());
         if raw.is_null() {
             return None;
         }
-        let v = CStr::from_ptr(raw).to_str().ok().and_then(|s| s.parse::<f64>().ok());
+        let v = CStr::from_ptr(raw).to_string_lossy().into_owned();
         (self.free)(raw as *mut c_void);
-        v
+        Some(v)
+    }
+
+    unsafe fn prop_f64(&self, ctx: Handle, name: &str) -> Option<f64> {
+        self.prop(ctx, name).and_then(|s| s.parse::<f64>().ok())
+    }
+
+    unsafe fn prop_flag(&self, ctx: Handle, name: &str) -> bool {
+        self.prop(ctx, name).as_deref() == Some("yes")
     }
 
     unsafe fn err(&self, code: c_int) -> String {
@@ -121,117 +148,286 @@ impl Mpv {
     }
 }
 
+fn mpv() -> Result<&'static Mpv, String> {
+    static LIB: OnceLock<Result<Mpv, String>> = OnceLock::new();
+    LIB.get_or_init(Mpv::load).as_ref().map_err(Clone::clone)
+}
+
+mod win {
+    type Hwnd = isize;
+    type EnumProc = extern "system" fn(Hwnd, isize) -> i32;
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn EnumChildWindows(parent: Hwnd, proc_: EnumProc, lparam: isize) -> i32;
+        fn GetClassNameW(hwnd: Hwnd, buf: *mut u16, max: i32) -> i32;
+        fn SetWindowPos(hwnd: Hwnd, after: Hwnd, x: i32, y: i32, cx: i32, cy: i32, flags: u32) -> i32;
+        fn GetWindow(hwnd: Hwnd, cmd: u32) -> Hwnd;
+    }
+
+    const HWND_BOTTOM: Hwnd = 1;
+    const GW_HWNDNEXT: u32 = 2;
+    const SWP_NOSIZE: u32 = 0x1;
+    const SWP_NOMOVE: u32 = 0x2;
+    const SWP_NOACTIVATE: u32 = 0x10;
+
+    extern "system" fn sink(hwnd: Hwnd, _: isize) -> i32 {
+        let mut buf = [0u16; 16];
+        let n = unsafe { GetClassNameW(hwnd, buf.as_mut_ptr(), buf.len() as i32) };
+        if n > 0 && String::from_utf16_lossy(&buf[..n as usize]) == "mpv" && unsafe { GetWindow(hwnd, GW_HWNDNEXT) } != 0 {
+            unsafe { SetWindowPos(hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE) };
+        }
+        1
+    }
+
+    pub fn video_below_ui(parent: Hwnd) {
+        unsafe { EnumChildWindows(parent, sink, 0) };
+    }
+}
+
 pub struct Request {
     pub url: String,
     pub title: String,
     pub start_ms: u64,
     pub headers: Vec<String>,
+    pub hwnd: isize,
 }
 
 pub struct Outcome {
     pub position_ms: u64,
     pub duration_ms: u64,
     pub error: Option<String>,
+    pub ended: bool,
 }
 
-pub fn play(req: Request, stop: Arc<AtomicBool>, done: impl FnOnce(Outcome) + Send + 'static) {
-    std::thread::spawn(move || {
-        let out = run(&req, &stop).unwrap_or_else(|e| Outcome {
-            position_ms: 0,
-            duration_ms: 0,
-            error: Some(e),
-        });
-        done(out);
-    });
+struct Live {
+    ctx: usize,
+    generation: u64,
 }
 
-fn run(req: &Request, stop: &AtomicBool) -> Result<Outcome, String> {
-    let mpv = Mpv::load()?;
-    unsafe {
-        let ctx = (mpv.create)();
+pub struct Player {
+    live: Arc<Mutex<Option<Live>>>,
+    generation: AtomicU64,
+}
+
+fn checked(lib: &Mpv, rc: c_int) -> Result<(), String> {
+    if rc < 0 {
+        Err(unsafe { lib.err(rc) })
+    } else {
+        Ok(())
+    }
+}
+
+impl Player {
+    pub fn new() -> Self {
+        Self {
+            live: Arc::new(Mutex::new(None)),
+            generation: AtomicU64::new(0),
+        }
+    }
+
+    fn with(&self, f: impl FnOnce(&Mpv, Handle) -> c_int) -> Result<(), String> {
+        let lib = mpv()?;
+        let live = self.live.lock().unwrap();
+        let live = live.as_ref().ok_or("Trình phát chưa chạy")?;
+        checked(lib, f(lib, live.ctx as Handle))
+    }
+
+    pub fn command(&self, args: &[String]) -> Result<(), String> {
+        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        self.with(|m, ctx| unsafe { m.cmd(ctx, &refs) })
+    }
+
+    pub fn set(&self, name: &str, value: &str) -> Result<(), String> {
+        self.with(|m, ctx| unsafe { m.set_property(ctx, name, value) })
+    }
+
+    pub fn stop(&self) {
+        let _ = self.command(&["quit".to_string()]);
+    }
+
+    pub fn start(
+        &self,
+        req: Request,
+        state: impl Fn(Value) + Send + 'static,
+        done: impl FnOnce(Outcome) + Send + 'static,
+    ) -> Result<(), String> {
+        self.stop();
+        let lib = mpv()?;
+        let ctx = unsafe { (lib.create)() };
         if ctx.is_null() {
             return Err("Không tạo được trình phát mpv".into());
         }
-        for (k, v) in [
-            ("force-window", "yes"),
-            ("fullscreen", "yes"),
-            ("osc", "yes"),
-            ("input-default-bindings", "yes"),
-            ("input-vo-keyboard", "yes"),
-            ("hwdec", "auto-safe"),
-            ("ytdl", "no"),
-            ("terminal", "no"),
-            ("idle", "yes"),
-            ("keep-open", "no"),
-            ("cache", "yes"),
-            ("demuxer-max-bytes", "400MiB"),
-            ("osd-font", "Segoe UI"),
-            ("sub-font", "Segoe UI"),
-            ("slang", "vi,vie,en,eng"),
-        ] {
-            mpv.set(ctx, k, v);
-        }
-        mpv.set(ctx, "title", &format!("{} — WiS TV", req.title));
-        if req.start_ms > 0 {
-            mpv.set(ctx, "start", &format!("{:.3}", req.start_ms as f64 / 1000.0));
-        }
-        if !req.headers.is_empty() {
-            mpv.set(ctx, "http-header-fields", &req.headers.join(","));
-        }
-        let rc = (mpv.initialize)(ctx);
-        if rc < 0 {
-            let e = mpv.err(rc);
-            (mpv.terminate_destroy)(ctx);
-            return Err(format!("mpv không khởi động được: {e}"));
-        }
-        let rc = mpv.cmd(ctx, &["loadfile", &req.url]);
-        if rc < 0 {
-            let e = mpv.err(rc);
-            (mpv.terminate_destroy)(ctx);
-            return Err(format!("mpv không mở được nguồn: {e}"));
-        }
-        let time_pos = c"time-pos";
-        let duration = c"duration";
-        let mut pos = req.start_ms as f64 / 1000.0;
-        let mut dur = 0.0f64;
-        let mut error = None;
-        let mut quitting = false;
-        loop {
-            if !quitting && stop.load(Ordering::SeqCst) {
-                quitting = true;
-                mpv.cmd(ctx, &["quit"]);
+        let wid = req.hwnd.to_string();
+        unsafe {
+            for (k, v) in [
+                ("wid", wid.as_str()),
+                ("force-window", "yes"),
+                ("osc", "no"),
+                ("osd-level", "0"),
+                ("input-default-bindings", "no"),
+                ("input-vo-keyboard", "no"),
+                ("input-cursor", "no"),
+                ("cursor-autohide", "no"),
+                ("hwdec", "auto-safe"),
+                ("ytdl", "no"),
+                ("terminal", "no"),
+                ("idle", "yes"),
+                ("keep-open", "no"),
+                ("cache", "yes"),
+                ("demuxer-max-bytes", "400MiB"),
+                ("demuxer-max-back-bytes", "100MiB"),
+                ("sub-font", "Segoe UI Semibold"),
+                ("sub-font-size", "44"),
+                ("sub-border-size", "2.4"),
+                ("sub-shadow-offset", "1"),
+                ("sub-margin-y", "60"),
+                ("slang", "vi,vie,vn,en,eng"),
+                ("alang", "vi,vie,ja,jpn,en,eng"),
+                ("volume-max", "150"),
+            ] {
+                lib.set_option(ctx, k, v);
             }
-            let ev = (mpv.wait_event)(ctx, 0.5);
-            if let Some(p) = mpv.prop_f64(ctx, time_pos) {
-                pos = p;
+            lib.set_option(ctx, "title", &req.title);
+            if req.start_ms > 0 {
+                lib.set_option(ctx, "start", &format!("{:.3}", req.start_ms as f64 / 1000.0));
             }
-            if let Some(d) = mpv.prop_f64(ctx, duration) {
-                dur = d;
+            if !req.headers.is_empty() {
+                lib.set_option(ctx, "http-header-fields", &req.headers.join(","));
             }
-            if ev.is_null() {
-                continue;
+            let rc = (lib.initialize)(ctx);
+            if rc < 0 {
+                let e = lib.err(rc);
+                (lib.terminate_destroy)(ctx);
+                return Err(format!("mpv không khởi động được: {e}"));
             }
+            let rc = lib.cmd(ctx, &["loadfile", &req.url]);
+            if rc < 0 {
+                let e = lib.err(rc);
+                (lib.terminate_destroy)(ctx);
+                return Err(format!("mpv không mở được nguồn: {e}"));
+            }
+        }
+        let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        *self.live.lock().unwrap() = Some(Live {
+            ctx: ctx as usize,
+            generation,
+        });
+        let ctx_addr = ctx as usize;
+        let start_ms = req.start_ms;
+        let hwnd = req.hwnd;
+        let shared = self.live.clone();
+        std::thread::spawn(move || {
+            let ctx = ctx_addr as Handle;
+            let out = unsafe { run(lib, ctx, start_ms, hwnd, &state) };
+            {
+                let mut live = shared.lock().unwrap();
+                if live.as_ref().map(|l| l.generation) == Some(generation) {
+                    *live = None;
+                }
+            }
+            unsafe { (lib.terminate_destroy)(ctx) };
+            done(out);
+        });
+        Ok(())
+    }
+}
+
+unsafe fn tracks(lib: &Mpv, ctx: Handle) -> Vec<Value> {
+    let n = lib.prop(ctx, "track-list/count").and_then(|s| s.parse::<usize>().ok()).unwrap_or(0);
+    (0..n)
+        .map(|i| {
+            let p = |k: &str| lib.prop(ctx, &format!("track-list/{i}/{k}"));
+            json!({
+                "id": p("id").and_then(|s| s.parse::<i64>().ok()),
+                "type": p("type"),
+                "title": p("title"),
+                "lang": p("lang"),
+                "codec": p("codec"),
+                "channels": p("demux-channel-count"),
+                "external": p("external").as_deref() == Some("yes"),
+                "selected": p("selected").as_deref() == Some("yes"),
+            })
+        })
+        .collect()
+}
+
+unsafe fn run(lib: &Mpv, ctx: Handle, start_ms: u64, hwnd: isize, state: &dyn Fn(Value)) -> Outcome {
+    let mut pos = start_ms as f64 / 1000.0;
+    let mut dur = 0.0f64;
+    let mut error = None;
+    let mut ended = false;
+    let mut last_emit = Instant::now() - Duration::from_secs(1);
+    let mut last_tracks = String::new();
+    let mut loaded = false;
+    loop {
+        let ev = (lib.wait_event)(ctx, 0.2);
+        win::video_below_ui(hwnd);
+        if let Some(p) = lib.prop_f64(ctx, "time-pos") {
+            pos = p;
+        }
+        if let Some(d) = lib.prop_f64(ctx, "duration") {
+            dur = d;
+        }
+        let mut stop = false;
+        if !ev.is_null() {
             match (*ev).event_id {
-                EVENT_SHUTDOWN => break,
+                EVENT_SHUTDOWN => stop = true,
+                EVENT_FILE_LOADED => loaded = true,
                 EVENT_END_FILE => {
                     let data = (*ev).data as *const MpvEndFile;
                     if !data.is_null() {
                         match (*data).reason {
-                            END_REASON_EOF => pos = dur,
-                            END_REASON_ERROR => error = Some(mpv.err((*data).error)),
+                            END_REASON_EOF => {
+                                pos = dur;
+                                ended = true;
+                            }
+                            END_REASON_ERROR => error = Some(lib.err((*data).error)),
                             _ => {}
                         }
                     }
-                    break;
+                    stop = true;
                 }
                 _ => {}
             }
         }
-        (mpv.terminate_destroy)(ctx);
-        Ok(Outcome {
-            position_ms: (pos.max(0.0) * 1000.0) as u64,
-            duration_ms: (dur.max(0.0) * 1000.0) as u64,
-            error,
-        })
+        if stop {
+            break;
+        }
+        if last_emit.elapsed() >= Duration::from_millis(240) {
+            last_emit = Instant::now();
+            let mut s = json!({
+                "loaded": loaded,
+                "time": pos,
+                "duration": dur,
+                "paused": lib.prop_flag(ctx, "pause"),
+                "buffering": lib.prop_flag(ctx, "paused-for-cache") || lib.prop_flag(ctx, "seeking") || !loaded,
+                "cache": lib.prop_f64(ctx, "demuxer-cache-time"),
+                "cachePercent": lib.prop_f64(ctx, "cache-buffering-state"),
+                "volume": lib.prop_f64(ctx, "volume"),
+                "mute": lib.prop_flag(ctx, "mute"),
+                "speed": lib.prop_f64(ctx, "speed"),
+                "sid": lib.prop(ctx, "sid"),
+                "aid": lib.prop(ctx, "aid"),
+                "subDelay": lib.prop_f64(ctx, "sub-delay"),
+            });
+            let sig = format!(
+                "{}|{}|{}",
+                lib.prop(ctx, "track-list/count").unwrap_or_default(),
+                lib.prop(ctx, "sid").unwrap_or_default(),
+                lib.prop(ctx, "aid").unwrap_or_default()
+            );
+            if sig != last_tracks {
+                last_tracks = sig;
+                s["tracks"] = Value::Array(tracks(lib, ctx));
+            }
+            state(s);
+        }
+    }
+    Outcome {
+        position_ms: (pos.max(0.0) * 1000.0) as u64,
+        duration_ms: (dur.max(0.0) * 1000.0) as u64,
+        error,
+        ended,
     }
 }

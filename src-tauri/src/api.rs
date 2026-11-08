@@ -46,6 +46,26 @@ pub async fn addon_collection(http: &reqwest::Client, auth_key: &str) -> Result<
     serde_json::from_value(res["addons"].clone()).map_err(|e| format!("Danh sách addon lỗi: {e}"))
 }
 
+pub async fn addon_collection_raw(http: &reqwest::Client, auth_key: &str) -> Result<Vec<Value>, String> {
+    let res = call(
+        http,
+        "addonCollectionGet",
+        json!({ "type": "AddonCollectionGet", "authKey": auth_key, "update": true }),
+    )
+    .await?;
+    Ok(res["addons"].as_array().cloned().unwrap_or_default())
+}
+
+pub async fn addon_collection_set(http: &reqwest::Client, auth_key: &str, addons: &[Value]) -> Result<(), String> {
+    call(
+        http,
+        "addonCollectionSet",
+        json!({ "type": "AddonCollectionSet", "authKey": auth_key, "addons": addons }),
+    )
+    .await
+    .map(|_| ())
+}
+
 pub async fn library_get(http: &reqwest::Client, auth_key: &str) -> Result<Vec<Value>, String> {
     let res = call(
         http,
