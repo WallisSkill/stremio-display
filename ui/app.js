@@ -607,11 +607,15 @@ function buildPlayer() {
   let center = null;
   let bottom;
   if (TOUCH) {
-    for (const [btn, text] of [[ui.eps, "Các tập"], [ui.cc, "Âm thanh và phụ đề"], [ui.next, "Tập tiếp"]]) {
+    for (const [btn, text] of [[ui.eps, "Các tập"], [ui.cc, "Phụ đề"], [ui.next, "Tập tiếp"]]) {
       btn.classList.add("act");
       btn.append(h("span", { class: "pl-label" }, text));
     }
     ui.speed.classList.add("act");
+    ui.fillIcon = h("span", { html: ICON[fillMode ? "fit" : "fill"] });
+    ui.fillLabel = h("span", { class: "pl-label" }, fillMode ? "Vừa hình" : "Dãn hình");
+    ui.fill.classList.add("act");
+    ui.fill.replaceChildren(ui.fillIcon, ui.fillLabel);
     ui.lock = iconBtn("lock", "Khoá màn hình", () => setLock(true));
     ui.lock.classList.add("act");
     ui.lock.append(h("span", { class: "pl-label" }, "Khoá"));
@@ -620,13 +624,13 @@ function buildPlayer() {
     back10.classList.add("big");
     fwd10.classList.add("big");
     center = h("div", { class: "pl-center" }, back10, ui.play, fwd10);
-    bottom = h("div", { class: "pl-bottom" }, seekRow, h("div", { class: "pl-actions" }, ui.lock, ui.speed, ui.eps, ui.cc, ui.next));
+    bottom = h("div", { class: "pl-bottom" }, seekRow, h("div", { class: "pl-actions" }, ui.lock, ui.fill, ui.speed, ui.eps, ui.cc, ui.next));
   } else {
     bottom = h("div", { class: "pl-bottom" },
       seekRow,
       h("div", { class: "pl-row" },
         h("div", { class: "pl-group" }, ui.play, back10, fwd10, ui.next, h("div", { class: "pl-volwrap" }, ui.volBtn, ui.vol)),
-        h("div", { class: "pl-group" }, ui.eps, ui.cc, ui.speed, ui.fill, ui.fs)));
+        h("div", { class: "pl-group" }, ui.fill, ui.eps, ui.cc, ui.speed, ui.fs)));
   }
   for (const el of [bottom, center].filter(Boolean)) {
     el.addEventListener("click", (e) => e.stopPropagation());
@@ -810,12 +814,16 @@ function setLock(on) {
   } else wake();
 }
 
-let fillMode = (() => { try { return localStorage.getItem("wistv.fill") !== "0"; } catch (e) { return true; } })();
+let fillMode = (() => { try { const v = localStorage.getItem("wistv.fill"); return v == null ? TOUCH : v === "1"; } catch (e) { return TOUCH; } })();
 function setFill(on, announce) {
   fillMode = on;
   try { localStorage.setItem("wistv.fill", on ? "1" : "0"); } catch (e) {}
   if (pl.open) quietSet("keepaspect", on ? "no" : "yes");
-  if (pl.ui) { pl.ui.fill.innerHTML = ICON[on ? "fit" : "fill"]; pl.ui.fill.title = on ? "Giữ đúng tỉ lệ (Z)" : "Dãn kín màn hình (Z)"; }
+  if (pl.ui) {
+    pl.ui.fill.title = on ? "Giữ đúng tỉ lệ (Z)" : "Dãn kín màn hình (Z)";
+    if (pl.ui.fillIcon) { pl.ui.fillIcon.innerHTML = ICON[on ? "fit" : "fill"]; pl.ui.fillLabel.textContent = on ? "Vừa hình" : "Dãn hình"; }
+    else pl.ui.fill.innerHTML = ICON[on ? "fit" : "fill"];
+  }
   if (announce) toast(on ? "Dãn kín màn hình" : "Giữ đúng tỉ lệ hình");
 }
 
@@ -1436,7 +1444,9 @@ async function renderSettings(view) {
     h("div", { class: "pl-pick", style: "display:flex;gap:8px;flex-wrap:wrap;margin-top:12px" },
       SUB_LANGS.map(([code, label]) => h("button", { class: `btn focusable ${subLang === code ? "primary" : ""}`, onclick: () => { setSubLang(code); paintSubs(); } }, label))));
   paintSubs();
-  view.append(h("div", { class: "page plain" }, h("h1", {}, "Cài đặt"), account, ios, pc, subs, list, TOUCH ? h("div", { class: "panel" }, h("h3", {}, "Điều khiển"), touchHelp) : help));
+  const version = h("p", { class: "hint", style: "margin-top:18px" });
+  if (TAURI?.app?.getVersion) TAURI.app.getVersion().then((v) => { version.textContent = `WiS TV phiên bản ${v}`; }).catch(() => {});
+  view.append(h("div", { class: "page plain" }, h("h1", {}, "Cài đặt"), account, ios, pc, subs, list, TOUCH ? h("div", { class: "panel" }, h("h3", {}, "Điều khiển"), touchHelp) : help, version));
   $(".panel .btn")?.focus({ preventScroll: true });
 }
 
