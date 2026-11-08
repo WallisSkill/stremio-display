@@ -38,7 +38,9 @@ jobs:
 
       - name: Install tools
         run: |
-          brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
+          for f in xcodegen libimobiledevice; do brew list "$f" >/dev/null 2>&1 || brew install "$f"; done
+          pod --version || brew install cocoapods
+          file "$(command -v cargo-tauri)"
           cargo tauri --version
 
       - name: Create Xcode project
