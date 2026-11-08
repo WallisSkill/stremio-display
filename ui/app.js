@@ -1,44 +1,8 @@
-const TAURI = window.__TAURI__;
-const CINEMETA = "https://v3-cinemeta.strem.io/manifest.json";
+import { web, onWebEvent } from "./web.js";
 
-const web = {
-  _addons: null,
-  async session() { return null; },
-  async login() { throw "Đăng nhập chỉ có trong ứng dụng WiS TV"; },
-  async logout() {},
-  async addons() {
-    if (!this._addons) {
-      const manifest = await (await fetch(CINEMETA)).json();
-      this._addons = [{ transportUrl: CINEMETA, manifest }];
-    }
-    return this._addons;
-  },
-  async catalog({ url, kind, id, extra }) {
-    const base = url.replace(/\/manifest\.json$/, "");
-    const ex = extra && extra.length ? "/" + extra.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join("&") : "";
-    const r = await (await fetch(`${base}/catalog/${encodeURIComponent(kind)}/${encodeURIComponent(id)}${ex}.json`)).json();
-    return r.metas || [];
-  },
-  async meta({ kind, id }) {
-    const r = await (await fetch(`https://v3-cinemeta.strem.io/meta/${kind}/${id}.json`)).json();
-    if (!r.meta) throw "Không tìm thấy thông tin phim";
-    return r.meta;
-  },
-  async streams() { return []; },
-  async library() { return []; },
-  async library_toggle() { throw "Thư viện chỉ có trong ứng dụng WiS TV"; },
-  async play() { throw "Phát phim chỉ có trong ứng dụng WiS TV"; },
-  async startup_open() { return null; },
-  async subtitles() { return []; },
-  async addon_discover() {
-    const lists = await Promise.all(["https://api.strem.io/addonsofficialcollection.json", "https://api.strem.io/addonscollection.json"].map((u) => fetch(u).then((r) => r.json()).catch(() => [])));
-    return lists.flat().filter((a, i, all) => a.transportUrl && all.findIndex((b) => b.transportUrl === a.transportUrl) === i);
-  },
-  async addon_install() { throw "Cài addon chỉ có trong ứng dụng WiS TV"; },
-  async addon_remove() { throw "Gỡ addon chỉ có trong ứng dụng WiS TV"; },
-  async addon_move() { throw "Sắp xếp addon chỉ có trong ứng dụng WiS TV"; },
-  async open_url({ url }) { window.open(url, "_blank", "noopener"); },
-};
+const TAURI = window.__TAURI__;
+const TOUCH = window.matchMedia("(hover: none) and (pointer: coarse)").matches;
+const listen = (name, fn) => (TAURI ? TAURI.event.listen(name, fn) : onWebEvent(name, fn));
 
 const JUNK = new Set(["null", "undefined", ""]);
 const junk = (v) => typeof v === "string" && JUNK.has(v.trim().toLowerCase());
@@ -527,7 +491,7 @@ async function openStreams(m, vid, label) {
   catch (e) { body.replaceChildren(h("div", { class: "empty" }, String(e))); return; }
   if (sheet.hidden) return;
   if (!groups.length) {
-    body.replaceChildren(h("div", { class: "empty" }, TAURI ? "Không addon nào trả về nguồn cho mục này.\nHãy cài addon nguồn phát trong Stremio." : "Mở bằng ứng dụng WiS TV để xem nguồn phát."));
+    body.replaceChildren(h("div", { class: "empty" }, "Không addon nào trả về nguồn cho mục này.\nHãy cài addon nguồn phát trong mục Addon."));
     return;
   }
   body.replaceChildren();
@@ -599,8 +563,28 @@ function buildPlayer() {
   bottom.addEventListener("click", (e) => e.stopPropagation());
   bottom.addEventListener("dblclick", (e) => e.stopPropagation());
   ui.root = h("div", { id: "player", hidden: true }, ui.bg, ui.hit, h("div", { class: "pl-shade" }), ui.spin, ui.flash, top, bottom, ui.nextUp, ui.menu);
-  ui.hit.addEventListener("click", () => { if (pl.menu) toggleMenu(null); else togglePause(); });
-  ui.hit.addEventListener("dblclick", toggleFullscreen);
+  let lastTap = 0;
+  let tapTimer = null;
+  ui.hit.addEventListener("click", (e) => {
+    if (pl.menu) { toggleMenu(null); return; }
+    if (!TOUCH) { togglePause(); return; }
+    const now = Date.now();
+    const x = e.clientX / window.innerWidth;
+    if (now - lastTap < 300) {
+      clearTimeout(tapTimer);
+      lastTap = 0;
+      if (x < 0.35) seekBy(-10);
+      else if (x > 0.65) seekBy(10);
+      else togglePause();
+      return;
+    }
+    lastTap = now;
+    tapTimer = setTimeout(() => {
+      if (ui.root.classList.contains("idle")) wake();
+      else { clearTimeout(pl.hideTimer); ui.root.classList.add("idle"); }
+    }, 280);
+  });
+  ui.hit.addEventListener("dblclick", () => { if (!TOUCH) toggleFullscreen(); });
   ui.root.addEventListener("mousemove", wake);
   ui.root.addEventListener("mouseleave", () => {
     if (!pl.open || pl.menu || pl.drag != null) return;
@@ -1036,13 +1020,16 @@ function closePlayer(stop = true) {
 
 async function startPlayback(m, vid, label, stream, start, addon) {
   const ctx = (session) => ({ id: m.id, kind: m.type, name: m.type === "series" && label ? `${m.name} · ${label}` : m.name, poster: m.poster || null, video: vid, start: Math.floor(start || 0), session });
-  if (stream.externalUrl && !stream.url && !stream.infoHash) {
+  if ((stream.externalUrl || (!TAURI && stream.ytId)) && !stream.url && !stream.infoHash) {
     try { await call("play", { stream, ctx: ctx(0) }); closeSheet(); } catch (e) { toast(e, true); }
     return;
   }
   closeSheet();
   const session = ++pl.session;
   openPlayer({ m, vid, label, stream, addon });
+  if (TOUCH && !pl.fs) {
+    call("player_fullscreen", { on: true }).then((on) => { pl.fs = on; pl.ui.fs.innerHTML = on ? ICON.unfull : ICON.full; }).catch(() => {});
+  }
   try {
     await call("play", { stream, ctx: ctx(session) });
     if (pl.session === session) applySubStyle();
@@ -1135,7 +1122,29 @@ async function renderSettings(view) {
     h("div", { class: "hint" },
       "Mũi tên để di chuyển, Enter để chọn, Esc hoặc Backspace để quay lại. Giữ chuột trái và kéo để cuộn các hàng phim.", h("br"),
       "Trong trình phát: Space hoặc bấm vào hình để dừng/tiếp, ← → tua 10 giây (Shift: 1 phút), ↑ ↓ hoặc lăn chuột chỉnh âm lượng, M tắt tiếng, F hoặc bấm đúp để toàn màn hình, C chọn âm thanh và phụ đề, N tập tiếp, Esc quay lại."));
-  view.append(h("div", { class: "page plain" }, h("h1", {}, "Cài đặt"), account, list, help));
+  const pc = TAURI ? null : h("div", { class: "panel" }, h("h3", {}, "Máy tính phát phim"));
+  if (pc) {
+    const status = h("div", { class: "pc-status" }, h("div", { class: "spinner small" }));
+    const check = async (force) => {
+      status.replaceChildren(h("div", { class: "spinner small" }));
+      let s = { linked: false, online: false };
+      try { s = await call("server_status", { force }); } catch (e) {}
+      const dot = h("i", { class: `pc-dot ${s.online ? "on" : ""}` });
+      const msg = s.online
+        ? "Đã kết nối. Xem được torrent và mọi định dạng phim qua máy tính."
+        : s.linked
+          ? "Máy tính đã đăng ký nhưng không trả lời. Kiểm tra máy còn bật và WiS TV Relay đang chạy."
+          : app.user
+            ? "Chưa thấy máy tính. Bật máy, đăng nhập app WiS TV trên máy tính và chạy WiS TV Relay."
+            : "Đăng nhập tài khoản Stremio để kết nối với máy tính.";
+      status.replaceChildren(dot, h("span", {}, msg));
+    };
+    pc.append(status, h("div", { style: "margin-top:14px" }, h("button", { class: "btn focusable", onclick: () => check(true) }, "Kiểm tra lại")),
+      h("p", { class: "hint" }, "Không có máy tính thì vẫn xem được các nguồn có link trực tiếp mà trình duyệt phát được (MP4, HLS)."));
+    check(false);
+  }
+  const touchHelp = h("div", { class: "hint" }, "Trên điện thoại: chạm vào hình để hiện/ẩn điều khiển, chạm đúp bên trái/phải để tua 10 giây, chạm đúp giữa để dừng/tiếp.");
+  view.append(h("div", { class: "page plain" }, h("h1", {}, "Cài đặt"), account, pc, list, TOUCH ? h("div", { class: "panel" }, h("h3", {}, "Điều khiển"), touchHelp) : help));
   $(".panel .btn")?.focus({ preventScroll: true });
 }
 
@@ -1577,15 +1586,15 @@ document.addEventListener("mouseup", (e) => { if (e.button === 3) back(); });
   document.addEventListener("dragstart", (e) => { if (e.target.closest?.(".row")) e.preventDefault(); });
 })();
 
-if (TAURI) {
-  TAURI.event.listen("player-state", ({ payload }) => onPlayerState(payload));
-  TAURI.event.listen("player-ended", ({ payload }) => {
+{
+  listen("player-state", ({ payload }) => onPlayerState(payload));
+  listen("player-ended", ({ payload }) => {
     if (!pl.open || payload.session !== pl.session) return;
     if (payload.error) toast(`Trình phát: ${payload.error}`, true);
     if (payload.ended && nextEpisode()) { playNext(true); return; }
     closePlayer(false);
   });
-  TAURI.event.listen("library-changed", async ({ payload }) => {
+  listen("library-changed", async ({ payload }) => {
     if (payload && payload.error) toast(`Không lưu được tiến độ: ${payload.error}`, true);
     if (payload && payload.quiet) return;
     await refreshLibrary();
