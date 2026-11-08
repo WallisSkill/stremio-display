@@ -48,10 +48,7 @@ jobs:
           adb shell input keyevent KEYCODE_HOME
           sleep 5
           adb shell am start -n tv.wis.app/.MainActivity
-          sleep 8
-          shot 3-after-home-8s
-          sleep 15
-          shot 3-after-home-23s
+          for t in 4 8 12 16 20 24; do sleep 4; shot "3-after-home-${t}s"; done
           adb shell input keyevent KEYCODE_BACK
           sleep 4
           adb shell dumpsys window | grep -E "mCurrentFocus|mFocusedApp" | head -3

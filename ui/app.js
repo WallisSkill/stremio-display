@@ -2,6 +2,7 @@ import { web, onWebEvent } from "./web.js";
 
 const TAURI = window.__TAURI__;
 const TOUCH = window.matchMedia("(hover: none) and (pointer: coarse)").matches;
+const ANDROID = /Android/i.test(navigator.userAgent);
 const listen = (name, fn) => (TAURI ? TAURI.event.listen(name, fn) : onWebEvent(name, fn));
 
 const JUNK = new Set(["null", "undefined", ""]);
@@ -1661,7 +1662,7 @@ if (TAURI) document.addEventListener("visibilitychange", async () => {
   if (await syncAddons(120000) && (route === "home" || route === "movie" || route === "series")) render();
 });
 
-if (TAURI && TOUCH) document.addEventListener("visibilitychange", () => {
+if (TAURI && TOUCH && !ANDROID) document.addEventListener("visibilitychange", () => {
   if (!pl.open) return;
   if (document.hidden) { pl.bgVideo = true; quietSet("vid", "no"); }
   else if (pl.bgVideo) { pl.bgVideo = false; quietSet("vid", "auto"); }
