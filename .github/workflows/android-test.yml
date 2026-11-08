@@ -25,7 +25,7 @@ jobs:
           set -e
           command -v ffmpeg >/dev/null || (sudo apt-get update -q && sudo apt-get install -y -q ffmpeg)
           mkdir -p media
-          ffmpeg -loglevel error -f lavfi -i "testsrc2=size=1920x800:rate=25" -t 90 -vf "pad=1920:1080:0:140:black" -c:v libx264 -preset veryfast -pix_fmt yuv420p -g 50 media/letterbox.mp4
+          ffmpeg -loglevel error -f lavfi -i "testsrc2=size=1920x800:rate=25" -t 90 -vf "pad=1920:1080:0:140:black" -c:v libx264 -preset veryfast -pix_fmt yuv420p -g 50 -movflags +faststart media/letterbox.mp4
           ls -la media
           (cd media && nohup python3 -m http.server 8000 >/dev/null 2>&1 &)
 
