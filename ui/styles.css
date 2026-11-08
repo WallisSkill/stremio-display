@@ -391,6 +391,9 @@ html:has(body.see-through), body.see-through { background: transparent; }
   animation: page-in 260ms var(--ease);
 }
 .pl-menu.narrow { grid-template-columns: 200px; }
+.pl-menu-x { position: absolute; top: 8px; right: 8px; z-index: 1; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: rgba(255,255,255,0.12); outline: none; transition: background 160ms; }
+.pl-menu-x:hover { background: rgba(255,255,255,0.24); }
+.pl-menu-x svg { width: 18px; height: 18px; }
 .pl-menu h4 { margin: 4px 10px 8px; font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint); }
 .pl-col { overflow-y: auto; max-height: calc(100vh - 230px); scrollbar-width: thin; padding-right: 4px; }
 .pl-item { width: 100%; display: grid; grid-template-columns: 20px 1fr; align-items: center; gap: 8px; text-align: left; padding: 9px 10px; border-radius: 10px; font-size: 14px; outline: none; transition: background 160ms; }
@@ -585,6 +588,7 @@ body.web-playing #wv { display: block; }
   .pl-speed { min-width: 40px; font-size: 13px; padding: 0 6px; }
   .pl-menu { left: 8px; right: 8px; bottom: 8px; grid-template-columns: 1fr; max-height: 70vh; overflow-y: auto; }
   .pl-menu.narrow, .pl-menu.episodes { grid-template-columns: 1fr; }
+  .pl-menu-x { position: sticky; top: 0; justify-self: end; align-self: flex-end; margin-bottom: -40px; width: 40px; height: 40px; background: rgba(60,60,66,0.95); }
   .pl-col { max-height: none; overflow: visible; }
   .pl-eps { max-height: 52vh; }
   .pl-nextup { bottom: 96px; height: 42px; padding: 0 16px; font-size: 14px; }
@@ -592,7 +596,8 @@ body.web-playing #wv { display: block; }
 }
 
 @media (max-width: 760px) and (orientation: landscape), (hover: none) and (pointer: coarse) and (max-height: 520px) {
-  .pl-menu { max-height: 86vh; }
+  .pl-menu { top: 8px; bottom: 8px; left: auto; right: max(8px, env(safe-area-inset-right)); width: min(380px, 58vw); max-height: none; }
+  .pl-menu.narrow { bottom: auto; max-height: calc(100% - 16px); }
   .hero { height: auto; min-height: 0; padding-top: calc(76px + env(safe-area-inset-top)); }
   .hero .desc { -webkit-line-clamp: 2; }
   .detail-top { min-height: 0; padding-top: calc(76px + env(safe-area-inset-top)); }
