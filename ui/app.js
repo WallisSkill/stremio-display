@@ -1538,6 +1538,186 @@ async function renderLibrary(view) {
   renderGridPage(view, "Thư viện", items, app.user ? "Thư viện trống. Bấm “Thư viện” ở trang phim để thêm." : "Đăng nhập tài khoản Stremio để dùng Thư viện.");
 }
 
+const DISCOVER_KEY = "wistv.discover";
+const WIDE = window.matchMedia("(min-width: 1100px)");
+
+function discoverCatalogs() {
+  const out = [];
+  for (const addon of app.addons) {
+    for (const cat of addon.manifest.catalogs || []) {
+      const extras = cat.extra || [];
+      const required = [...extras.filter((e) => e.isRequired).map((e) => e.name), ...(cat.extraRequired || [])];
+      if (required.some((n) => n !== "genre")) continue;
+      const genres = (extras.find((e) => e.name === "genre")?.options || cat.genres || []).filter((g) => typeof g === "string" && g);
+      const genreRequired = required.includes("genre");
+      if (genreRequired && !genres.length) continue;
+      const pages = extras.some((e) => e.name === "skip") || (cat.extraSupported || []).includes("skip");
+      out.push({ addon, cat, key: `${addon.transportUrl}|${cat.type}|${cat.id}`, genres, genreRequired, pages });
+    }
+  }
+  return out;
+}
+
+function renderDiscover(view) {
+  document.body.classList.add("dim");
+  const page = h("div", { class: "page plain discover" });
+  view.append(page);
+  const all = discoverCatalogs();
+  if (!all.length) { page.append(h("div", { class: "empty" }, "Chưa có addon nào có danh mục để khám phá.")); return; }
+
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(DISCOVER_KEY) || "{}") || {}; } catch (e) {}
+  const types = [...new Set(all.map((c) => c.cat.type))];
+  const state = { type: types.includes(saved.type) ? saved.type : types.includes("movie") ? "movie" : types[0], key: saved.key, genre: saved.genre || "" };
+
+  const select = (label) => h("select", { class: "dc-select focusable", "aria-label": label });
+  const selType = select("Loại");
+  const selCat = select("Danh mục");
+  const selGenre = select("Thể loại");
+  const grid = h("div", { class: "grid dc-grid" });
+  const more = h("div", { class: "dc-more" });
+  const panel = h("aside", { class: "dc-panel" });
+  page.append(
+    h("div", { class: "dc-filters" }, selType, selCat, selGenre),
+    h("div", { class: "dc-body" }, h("div", { class: "dc-main" }, grid, more), panel));
+
+  const option = (value, label, on) => { const o = h("option", { value }, label); o.selected = on; return o; };
+  let cur = null;
+  const fill = () => {
+    selType.replaceChildren(...types.map((t) => option(t, TYPE_LABEL[t] || t, t === state.type)));
+    const cats = all.filter((c) => c.cat.type === state.type);
+    if (!cats.some((c) => c.key === state.key)) state.key = cats[0].key;
+    selCat.replaceChildren(...cats.map((c) => option(c.key, `${c.cat.name || c.cat.id} · ${c.addon.manifest.name}`, c.key === state.key)));
+    cur = cats.find((c) => c.key === state.key);
+    if (!cur.genres.includes(state.genre)) state.genre = cur.genreRequired ? cur.genres[0] : "";
+    selGenre.replaceChildren(...(cur.genreRequired ? [] : [option("", "Mọi thể loại", !state.genre)]), ...cur.genres.map((g) => option(g, g, g === state.genre)));
+    selGenre.hidden = !cur.genres.length;
+    try { localStorage.setItem(DISCOVER_KEY, JSON.stringify(state)); } catch (e) {}
+  };
+
+  let token = 0;
+  let items = [];
+  let seen = new Set();
+  let done = false;
+  let busy = false;
+  let picked = null;
+
+  const io = new IntersectionObserver((ents) => { if (ents.some((e) => e.isIntersecting)) loadPage(token); }, { rootMargin: "800px" });
+  const recheck = () => { io.unobserve(more); if (!done) io.observe(more); };
+
+  const loadPage = async (my) => {
+    if (busy || done || my !== token) return;
+    busy = true;
+    more.replaceChildren(h("div", { class: "spinner small" }));
+    const extra = [];
+    if (state.genre) extra.push(["genre", state.genre]);
+    if (items.length) extra.push(["skip", String(items.length)]);
+    try {
+      const list = await call("catalog", { url: cur.addon.transportUrl, kind: cur.cat.type, id: cur.cat.id, extra });
+      if (my !== token) return;
+      const fresh = (list || []).filter((m) => m?.id && !seen.has(m.id));
+      fresh.forEach((m) => seen.add(m.id));
+      if (!fresh.length || !cur.pages) done = true;
+      if (!items.length) grid.replaceChildren();
+      items.push(...fresh);
+      grid.append(...fresh.map(discoverCard));
+      if (!items.length) grid.replaceChildren(h("div", { class: "empty" }, "Danh mục này chưa có gì."));
+      else if (!picked && WIDE.matches) pick(items[0], grid.firstElementChild, false);
+    } catch (e) {
+      if (my !== token) return;
+      done = true;
+      if (!items.length) grid.replaceChildren(h("div", { class: "empty" }, String(e)));
+    } finally {
+      if (my === token) { busy = false; more.replaceChildren(); recheck(); }
+    }
+  };
+
+  const restart = () => {
+    token++;
+    items = [];
+    seen = new Set();
+    done = false;
+    busy = false;
+    picked = null;
+    grid.replaceChildren(...skeletonRow("poster", 12));
+    panel.replaceChildren();
+    page.classList.remove("has-pick");
+    view.scrollTo({ top: 0 });
+    loadPage(token);
+  };
+
+  function discoverCard(m) {
+    const el = card(m, "poster", {
+      onClick: () => {
+        if (!WIDE.matches || picked?.id === m.id) go("detail", { kind: m.type, id: m.id });
+        else pick(m, el, true);
+      },
+    });
+    el.addEventListener("focus", () => { if (WIDE.matches && el.matches(":focus-visible")) pick(m, el, false); });
+    return el;
+  }
+
+  function pick(m, el, fromTap) {
+    picked = m;
+    $$(".card.picked", grid).forEach((c) => c.classList.remove("picked"));
+    el?.classList.add("picked");
+    page.classList.add("has-pick");
+    paintPanel(m);
+    app.metaCache = app.metaCache || new Map();
+    const key = `${m.type}:${m.id}`;
+    const have = app.metaCache.get(key);
+    if (have) { paintPanel(have); return; }
+    call("meta", { kind: m.type, id: m.id })
+      .then((full) => { app.metaCache.set(key, full); if (picked === m && panel.isConnected) paintPanel({ ...m, ...full }); })
+      .catch(() => {});
+    if (fromTap) panel.scrollTop = 0;
+  }
+
+  function chips(title, list) {
+    const names = (list || []).filter(Boolean).slice(0, 8);
+    return names.length ? h("div", { class: "dc-chips" }, h("h5", {}, title), h("div", {}, names.map((n) => h("span", { class: "dc-chip" }, n)))) : null;
+  }
+
+  function paintPanel(m) {
+    const libBtn = h("button", { class: "btn focusable dc-icon", title: "Thư viện" });
+    const sync = () => {
+      const on = inLibrary(m.id);
+      libBtn.innerHTML = on ? ICON.check : ICON.plus;
+      libBtn.title = on ? "Bỏ khỏi Thư viện" : "Thêm vào Thư viện";
+    };
+    sync();
+    libBtn.addEventListener("click", async () => {
+      try {
+        const now = await call("library_toggle", { meta: { id: m.id, name: m.name, type: m.type, poster: m.poster } });
+        await refreshLibrary();
+        sync();
+        toast(now ? "Đã thêm vào Thư viện" : "Đã xóa khỏi Thư viện");
+      } catch (e) { toast(e, true); }
+    });
+    const facts = [m.runtime, yearOf(m), m.imdbRating ? `IMDb ${m.imdbRating}` : ""].filter(Boolean);
+    panel.replaceChildren(
+      titleBlock(m, "dc-title"),
+      facts.length ? h("div", { class: "dc-facts" }, facts.map((f) => h("span", { class: f.startsWith("IMDb") ? "imdb" : "" }, f))) : null,
+      m.description ? h("p", { class: "dc-desc" }, m.description) : null,
+      chips("Thể loại", m.genres || m.genre),
+      chips("Diễn viên", m.cast),
+      chips("Đạo diễn", m.director),
+      chips("Biên kịch", m.writer),
+      h("div", { class: "dc-actions" },
+        libBtn,
+        h("button", { class: "btn focusable", html: `${ICON.info}<span>Chi tiết</span>`, onclick: () => go("detail", { kind: m.type, id: m.id }) }),
+        h("button", { class: "btn primary focusable", html: `${ICON.play}<span>Xem</span>`, onclick: () => go("detail", { kind: m.type, id: m.id, autoplay: true }) })));
+    showArt(m);
+  }
+
+  selType.addEventListener("change", () => { state.type = selType.value; state.key = null; state.genre = ""; fill(); restart(); });
+  selCat.addEventListener("change", () => { state.key = selCat.value; state.genre = ""; fill(); restart(); });
+  selGenre.addEventListener("change", () => { state.genre = selGenre.value; fill(); restart(); });
+
+  fill();
+  restart();
+}
+
 let addonsAt = 0;
 const addonKey = (list) => JSON.stringify((list || []).map((a) => a.transportUrl));
 async function syncAddons(maxAge) {
@@ -1705,13 +1885,14 @@ const ROUTES = {
   series: (v) => renderBrowse(v, "series"),
   detail: renderDetail,
   library: renderLibrary,
+  discover: renderDiscover,
   search: renderSearch,
   settings: renderSettings,
   calendar: renderCalendar,
   addons: renderAddons,
 };
 
-const TOP_ROUTES = ["home", "movie", "series", "calendar", "library", "addons", "search", "settings"];
+const TOP_ROUTES = ["home", "discover", "movie", "series", "calendar", "library", "addons", "search", "settings"];
 
 async function seriesMetas(onProgress) {
   const ids = libItems().filter((i) => i.type === "series").map((i) => i._id);
