@@ -375,7 +375,12 @@ pub async fn play(
                 .collect()
         })
         .unwrap_or_default();
-    let (wid, extra) = video_target(&app, &st).await?;
+    let (wid, mut extra) = video_target(&app, &st).await?;
+    let spill = st.cache_dir.join("mpv-cache");
+    if std::fs::create_dir_all(&spill).is_ok() {
+        extra.push(("cache-on-disk".to_string(), "yes".to_string()));
+        extra.push(("demuxer-cache-dir".to_string(), spill.to_string_lossy().into_owned()));
+    }
     let req = player::Request {
         url,
         title: ctx.name.clone(),
@@ -509,6 +514,7 @@ pub async fn player_background(app: AppHandle, hidden: bool) -> R<()> {
 #[tauri::command]
 pub fn player_stop(st: State<'_, AppState>) {
     st.player.stop();
+    tauri::async_runtime::spawn(crate::torrent::release());
 }
 
 #[cfg(mobile)]

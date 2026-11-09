@@ -46,6 +46,12 @@ pub async fn engine(dir: PathBuf) -> Result<Arc<Engine>, String> {
         .cloned()
 }
 
+pub async fn release() {
+    if let Some(e) = ENGINE.get() {
+        e.clear().await;
+    }
+}
+
 fn magnet(hash: &str, sources: &[String]) -> String {
     let mut m = format!("magnet:?xt=urn:btih:{hash}");
     for s in sources {
