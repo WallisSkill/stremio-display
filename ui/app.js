@@ -70,6 +70,7 @@ const ICON = {
   unfull: '<svg viewBox="0 0 24 24"><path d="M9 4v3.5A1.5 1.5 0 0 1 7.5 9H4M20 9h-3.5A1.5 1.5 0 0 1 15 7.5V4M15 20v-3.5a1.5 1.5 0 0 1 1.5-1.5H20M4 15h3.5A1.5 1.5 0 0 1 9 16.5V20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   up: '<svg viewBox="0 0 24 24"><path d="m6 15 6-6 6 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   down: '<svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  source: '<svg viewBox="0 0 24 24"><rect x="3.5" y="4" width="17" height="6" rx="1.8" fill="none" stroke="currentColor" stroke-width="2"/><rect x="3.5" y="14" width="17" height="6" rx="1.8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M7 7h.01M7 17h.01" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>',
   list: '<svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="12" height="8.5" rx="1.8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M18.5 7v9.5a2 2 0 0 1-2 2H6.5M3.5 17h0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   close: '<svg viewBox="0 0 24 24"><path d="m6.5 6.5 11 11m0-11-11 11" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>',
   cog: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2.8v2.6M12 18.6v2.6M21.2 12h-2.6M5.4 12H2.8M18.5 5.5l-1.8 1.8M7.3 16.7l-1.8 1.8M18.5 18.5l-1.8-1.8M7.3 7.3 5.5 5.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
@@ -598,6 +599,7 @@ function buildPlayer() {
   ui.vol.addEventListener("pointerdown", (e) => e.stopPropagation());
   ui.cc = iconBtn("cc", "Âm thanh và phụ đề (C)", () => toggleMenu("tracks"));
   ui.eps = iconBtn("list", "Các tập (E)", () => toggleMenu("episodes"));
+  ui.src = iconBtn("source", "Nguồn phát (S)", () => toggleMenu("sources"));
   ui.nextUp = h("button", { class: "pl-nextup", tabindex: "-1", hidden: true, onclick: (e) => { e.stopPropagation(); playNext(false); } });
   ui.speedVal = h("span", {}, "1×");
   ui.speed = h("button", { class: "pl-btn pl-speed", tabindex: "-1", title: "Tốc độ", onclick: (e) => { e.stopPropagation(); toggleMenu("speed"); } }, ...(TOUCH ? [h("span", { html: ICON.speed }), h("span", { class: "pl-label" }, "Tốc độ (", ui.speedVal, ")")] : [ui.speedVal]));
@@ -615,7 +617,7 @@ function buildPlayer() {
   let center = null;
   let bottom;
   if (TOUCH) {
-    for (const [btn, text] of [[ui.eps, "Các tập"], [ui.cc, "Phụ đề"], [ui.next, "Tập tiếp"]]) {
+    for (const [btn, text] of [[ui.eps, "Các tập"], [ui.src, "Nguồn"], [ui.cc, "Phụ đề"], [ui.next, "Tập tiếp"]]) {
       btn.classList.add("act");
       btn.append(h("span", { class: "pl-label" }, text));
     }
@@ -632,13 +634,13 @@ function buildPlayer() {
     back10.classList.add("big");
     fwd10.classList.add("big");
     center = h("div", { class: "pl-center" }, back10, ui.play, fwd10);
-    bottom = h("div", { class: "pl-bottom" }, seekRow, h("div", { class: "pl-actions" }, ui.lock, ui.stretch, ui.speed, ui.eps, ui.cc, ui.next));
+    bottom = h("div", { class: "pl-bottom" }, seekRow, h("div", { class: "pl-actions" }, ui.lock, ui.stretch, ui.speed, ui.eps, ui.src, ui.cc, ui.next));
   } else {
     bottom = h("div", { class: "pl-bottom" },
       seekRow,
       h("div", { class: "pl-row" },
         h("div", { class: "pl-group" }, ui.play, back10, fwd10, ui.next, h("div", { class: "pl-volwrap" }, ui.volBtn, ui.vol)),
-        h("div", { class: "pl-group" }, ui.stretch, ui.eps, ui.cc, ui.speed, ui.fs)));
+        h("div", { class: "pl-group" }, ui.stretch, ui.eps, ui.src, ui.cc, ui.speed, ui.fs)));
   }
   for (const el of [bottom, center].filter(Boolean)) {
     el.addEventListener("click", (e) => e.stopPropagation());
@@ -722,15 +724,16 @@ function buildPlayer() {
       return;
     }
     lastTap = now;
+    const hidden = ui.root.classList.contains("idle");
     tapTimer = setTimeout(() => {
-      if (ui.root.classList.contains("idle")) wake();
+      if (hidden) wake();
       else { clearTimeout(pl.hideTimer); ui.root.classList.add("idle"); }
     }, 280);
   });
   ui.hit.addEventListener("dblclick", () => { if (!TOUCH) toggleFullscreen(); });
-  ui.root.addEventListener("mousemove", wake);
-  ui.root.addEventListener("mouseleave", () => {
-    if (!pl.open || pl.menu || pl.drag != null) return;
+  ui.root.addEventListener("pointermove", (e) => { if (e.pointerType === "mouse") wake(); });
+  ui.root.addEventListener("pointerleave", (e) => {
+    if (e.pointerType !== "mouse" || !pl.open || pl.menu || pl.drag != null) return;
     clearTimeout(pl.hideTimer);
     ui.root.classList.add("idle");
   });
@@ -772,7 +775,7 @@ function wake() {
   pl.ui.root.classList.remove("idle");
   clearTimeout(pl.hideTimer);
   pl.hideTimer = setTimeout(() => {
-    if (pl.open && !pl.s.paused && !pl.menu && pl.drag == null && !pl.ui.root.querySelector(".pl-bottom:hover, .pl-top:hover")) pl.ui.root.classList.add("idle");
+    if (pl.open && !pl.s.paused && !pl.menu && pl.drag == null && (TOUCH || !pl.ui.root.querySelector(".pl-bottom:hover, .pl-top:hover"))) pl.ui.root.classList.add("idle");
     else wake();
   }, 3000);
 }
@@ -1171,8 +1174,12 @@ function renderEpisodes(box) {
     const date = v.released ? new Date(v.released) : null;
     const future = date && date > now;
     const note = cur ? "Đang xem" : future ? `Ra ngày ${date.toLocaleDateString("vi-VN")}` : date && !isNaN(date) ? date.toLocaleDateString("vi-VN") : "";
-    return h("button", { class: `pl-ep ${cur ? "on" : ""}`, tabindex: "-1", disabled: future || null, onclick: () => { if (!cur) playEpisode(v, false); } },
-      h("span", { class: "pl-ep-n" }, v.episode ?? v.number ?? "?"),
+    const num = v.episode ?? v.number ?? "?";
+    const thumb = v.thumbnail
+      ? h("span", { class: "pl-ep-thumb" }, h("img", { src: v.thumbnail, alt: "", loading: "lazy", onerror: (e) => e.target.remove() }), h("span", { class: "pl-ep-badge" }, num))
+      : h("span", { class: "pl-ep-n" }, num);
+    return h("button", { class: `pl-ep ${v.thumbnail ? "thumb" : ""} ${cur ? "on" : ""}`, tabindex: "-1", disabled: future || null, onclick: () => { if (!cur) playEpisode(v, false); } },
+      thumb,
       h("div", {}, h("b", {}, v.title || v.name || `Tập ${v.episode ?? ""}`), note ? h("small", {}, note) : null));
   }));
   box.className = "pl-menu episodes";
@@ -1186,6 +1193,7 @@ function renderEpisodes(box) {
 function toggleMenu(kind) {
   pl.menu = kind && pl.menu !== kind ? kind : null;
   if (pl.menu === "tracks" && pl.subs === null) loadAddonSubs();
+  if (pl.menu === "sources") loadSources();
   renderMenu();
   wake();
 }
@@ -1226,8 +1234,55 @@ function renderMenu() {
   box.prepend(h("button", { class: "pl-menu-x", tabindex: "-1", "aria-label": "Đóng", title: "Đóng", html: ICON.close, onclick: () => toggleMenu(null) }));
 }
 
+async function loadSources() {
+  const c = pl.ctx;
+  if (!c || (pl.sources && pl.sources.vid === c.vid)) return;
+  const vid = c.vid;
+  pl.sources = { vid, groups: null };
+  let groups = [];
+  let error = "";
+  try { groups = await call("streams", { kind: c.m.type, id: vid }); } catch (e) { error = String(e); }
+  if (pl.ctx !== c || pl.sources?.vid !== vid) return;
+  pl.sources = { vid, groups, error };
+  if (pl.menu === "sources") renderMenu();
+}
+
+const sameStream = (a, b) => !!a && !!b && (a.url ? a.url === b.url : !!a.infoHash && a.infoHash === b.infoHash && (a.fileIdx ?? null) === (b.fileIdx ?? null));
+
+function switchSource(stream, addon) {
+  const c = pl.ctx;
+  if (!c || sameStream(stream, c.stream)) { toggleMenu(null); return; }
+  const at = Math.floor(curTime() * 1000);
+  pl.sources = null;
+  startPlayback(c.m, c.vid, c.label, stream, at, addon);
+}
+
+function renderSources(box) {
+  const c = pl.ctx;
+  box.className = "pl-menu episodes sources";
+  const head = h("h4", {}, "Nguồn phát");
+  const data = pl.sources;
+  if (!data || data.groups === null) { box.replaceChildren(head, h("div", { class: "spinner small" })); return; }
+  if (data.error || !data.groups.length) { box.replaceChildren(head, h("p", { class: "pl-none" }, data.error || "Không addon nào trả về nguồn cho mục này")); return; }
+  const list = h("div", { class: "pl-eps" });
+  for (const g of data.groups) {
+    list.append(h("div", { class: "pl-src-group" }, g.addon));
+    for (const s of g.streams) {
+      const q = quality(s);
+      const on = sameStream(s, c.stream);
+      const meta = [q.size, q.seeds ? `${q.seeds} seed` : "", s.infoHash ? "Torrent" : ""].filter(Boolean).join(" · ");
+      list.append(h("button", { class: `pl-src ${on ? "on" : ""}`, tabindex: "-1", disabled: (s.externalUrl && !s.url && !s.infoHash) || null, onclick: () => switchSource(s, g.addon) },
+        h("div", { class: "pl-src-name" }, q.tags.map(([t, solid]) => h("span", { class: `badge ${solid ? "solid" : ""}` }, t)), h("span", {}, (s.name || g.addon).replace(/\n/g, " "))),
+        h("small", {}, on ? `Đang phát${meta ? " · " + meta : ""}` : meta || (s.title || s.description || "").split("\n")[0])));
+    }
+  }
+  box.replaceChildren(head, h("p", { class: "pl-note" }, "Đổi nguồn sẽ phát tiếp từ đúng chỗ đang xem."), list);
+  requestAnimationFrame(() => list.querySelector(".pl-src.on")?.scrollIntoView({ block: "center" }));
+}
+
 function fillMenu(box) {
   if (pl.menu === "episodes") { renderEpisodes(box); return; }
+  if (pl.menu === "sources") { renderSources(box); return; }
   if (pl.menu === "fullscreen") {
     box.className = "pl-menu narrow";
     box.replaceChildren(h("h4", {}, "Toàn màn hình"),
@@ -1363,6 +1418,7 @@ function playerKey(e) {
   if (k === "n" || k === "N" || k === "MediaTrackNext") { playNext(false); return handled(); }
   if (k === "c" || k === "C") { toggleMenu("tracks"); return handled(); }
   if ((k === "e" || k === "E") && !pl.ui.eps.hidden) { toggleMenu("episodes"); return handled(); }
+  if (k === "s" || k === "S") { toggleMenu("sources"); return handled(); }
   if (k === "Escape") {
     if (pl.menu) toggleMenu(null);
     else if (pl.fs) toggleFullscreen();
