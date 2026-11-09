@@ -1958,7 +1958,7 @@ const ROOM_WS = ROOM_API.replace(/^http/, "ws");
 const ROOM_CODE_RE = /^[A-HJ-NP-Z2-9]{6}$/;
 const ROOM_REACTIONS = ["❤️", "😂", "😮", "😢", "👏", "🔥"];
 const ROOM_HOLD_MS = 30000;
-const ROOM_BEAT_MS = 4000;
+const ROOM_BEAT_MS = 15000;
 const ROOM_SITE = !TAURI && /^https?:$/.test(location.protocol) ? location.origin + location.pathname : "https://film.wis237.online/";
 const randomId = (n) => [...crypto.getRandomValues(new Uint8Array(n))].map((b) => "abcdefghijklmnopqrstuvwxyz0123456789"[b % 36]).join("");
 
