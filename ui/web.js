@@ -873,6 +873,19 @@ export const web = {
     const saved = await profileApi("profilesSet", { authKey: key, profiles: list, tokens: tokens || {} });
     return profileList(Array.isArray(saved) ? saved : []);
   },
+  async prefs_get() {
+    const key = authKey();
+    if (!key) return null;
+    const p = activeProfile();
+    return profileApi("prefsGet", { authKey: key, profile: p.id, token: p.token });
+  },
+  async prefs_set({ prefs, profile }) {
+    const key = authKey();
+    if (!key) return;
+    const p = activeProfile();
+    if (profile && profile !== p.id) throw "Hồ sơ đã đổi";
+    await profileApi("prefsSet", { authKey: key, profile: p.id, token: p.token, prefs });
+  },
   async profile_unlock({ id, pin }) {
     const key = needKey("Đăng nhập tài khoản Stremio để dùng hồ sơ");
     const res = await profileApi("profileUnlock", { authKey: key, profile: id, pin });

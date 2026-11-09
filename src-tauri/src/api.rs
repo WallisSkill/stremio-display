@@ -61,6 +61,16 @@ pub async fn profiles_set(http: &reqwest::Client, auth_key: &str, profiles: &Val
     Ok(res.as_array().cloned().unwrap_or_default())
 }
 
+pub async fn prefs_get(http: &reqwest::Client, auth_key: &str, profile: &Profile) -> Result<Value, String> {
+    let body = json!({ "authKey": auth_key, "profile": profile.id, "token": profile.token });
+    call_at(http, PROFILE_API, "máy chủ hồ sơ", "prefsGet", body).await
+}
+
+pub async fn prefs_set(http: &reqwest::Client, auth_key: &str, profile: &Profile, prefs: &Value) -> Result<(), String> {
+    let body = json!({ "authKey": auth_key, "profile": profile.id, "token": profile.token, "prefs": prefs });
+    call_at(http, PROFILE_API, "máy chủ hồ sơ", "prefsSet", body).await.map(|_| ())
+}
+
 pub async fn profile_unlock(http: &reqwest::Client, auth_key: &str, id: &str, pin: &str) -> Result<String, String> {
     let body = json!({ "authKey": auth_key, "profile": id, "pin": pin });
     let res = call_at(http, PROFILE_API, "máy chủ hồ sơ", "profileUnlock", body).await?;

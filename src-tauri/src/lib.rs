@@ -45,6 +45,8 @@ pub fn run() {
             commands::profiles_save,
             commands::profile_use,
             commands::profile_unlock,
+            commands::prefs_get,
+            commands::prefs_set,
             commands::play,
             commands::player_command,
             commands::player_set,

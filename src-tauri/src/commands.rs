@@ -199,6 +199,26 @@ pub async fn profiles_save(st: State<'_, AppState>, list: Value, tokens: Option<
 }
 
 #[tauri::command]
+pub async fn prefs_get(st: State<'_, AppState>) -> R<Value> {
+    let Some(key) = st.auth_key() else {
+        return Ok(Value::Null);
+    };
+    api::prefs_get(&st.http, &key, &st.profile()).await
+}
+
+#[tauri::command]
+pub async fn prefs_set(st: State<'_, AppState>, prefs: Value, profile: Option<String>) -> R<()> {
+    let Some(key) = st.auth_key() else {
+        return Ok(());
+    };
+    let active = st.profile();
+    if profile.is_some_and(|p| p != active.id) {
+        return Err("Hồ sơ đã đổi".into());
+    }
+    api::prefs_set(&st.http, &key, &active, &prefs).await
+}
+
+#[tauri::command]
 pub async fn profile_unlock(st: State<'_, AppState>, id: String, pin: String) -> R<String> {
     let key = st.auth_key().ok_or("Đăng nhập tài khoản Stremio để dùng hồ sơ")?;
     api::profile_unlock(&st.http, &key, &id, &pin).await

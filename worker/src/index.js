@@ -54,7 +54,8 @@ const MAX_ITEMS = 5000;
 const MAX_ITEM_BYTES = 64 * 1024;
 const MAX_CHANGES = 200;
 const MAX_IDS = 500;
-const METHODS = new Set(["profilesGet", "profilesSet", "profileUnlock", "datastoreGet", "datastorePut"]);
+const MAX_PREFS_BYTES = 64 * 1024;
+const METHODS = new Set(["profilesGet", "profilesSet", "profileUnlock", "datastoreGet", "datastorePut", "prefsGet", "prefsSet"]);
 
 const fail = (message, status = 400) => reply({ error: { message } }, status);
 const enc = (s) => new TextEncoder().encode(s);
@@ -101,6 +102,7 @@ export class ProfileStore extends DurableObject {
     this.sql = ctx.storage.sql;
     this.sql.exec("CREATE TABLE IF NOT EXISTS profiles (id TEXT PRIMARY KEY, name TEXT NOT NULL, color INTEGER NOT NULL, pos INTEGER NOT NULL, salt TEXT, hash TEXT)");
     this.sql.exec("CREATE TABLE IF NOT EXISTS items (profile TEXT NOT NULL, id TEXT NOT NULL, mtime TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY (profile, id))");
+    this.sql.exec("CREATE TABLE IF NOT EXISTS prefs (profile TEXT PRIMARY KEY, at INTEGER NOT NULL, data TEXT NOT NULL)");
   }
 
   rows() {
@@ -122,6 +124,31 @@ export class ProfileStore extends DurableObject {
     if (!row) throw new Refused("Hồ sơ này không còn");
     if (!(await this.allowed(row, token))) throw new Refused("Hồ sơ đang khoá, hãy chọn lại hồ sơ và nhập mã PIN");
     return profile;
+  }
+
+  async member(profile, token) {
+    const row = this.rows().find((r) => r.id === profile);
+    if (!row && !(profile === MAIN && !this.rows().length)) throw new Refused("Hồ sơ này không còn");
+    if (row && !(await this.allowed(row, token))) throw new Refused("Hồ sơ đang khoá, hãy chọn lại hồ sơ và nhập mã PIN");
+    return profile;
+  }
+
+  async prefsGet({ profile, token }) {
+    const pid = await this.member(profile, token);
+    const row = this.sql.exec("SELECT data FROM prefs WHERE profile = ?", pid).toArray()[0];
+    return row ? JSON.parse(row.data) : null;
+  }
+
+  async prefsSet({ profile, token, prefs }) {
+    const pid = await this.member(profile, token);
+    if (!prefs || typeof prefs !== "object" || Array.isArray(prefs)) throw new Refused("Cài đặt không hợp lệ");
+    const data = JSON.stringify(prefs);
+    if (data.length > MAX_PREFS_BYTES) throw new Refused("Cài đặt quá lớn");
+    const at = Number.isFinite(prefs._at) ? prefs._at : Date.now();
+    const old = this.sql.exec("SELECT at FROM prefs WHERE profile = ?", pid).toArray()[0];
+    if (old && old.at > at) return { success: false, stale: true };
+    this.sql.exec("INSERT OR REPLACE INTO prefs (profile, at, data) VALUES (?, ?, ?)", pid, at, data);
+    return { success: true };
   }
 
   async run(method, body) {
@@ -175,7 +202,10 @@ export class ProfileStore extends DurableObject {
     }
     const keep = new Set(next.map((p) => p.id));
     this.ctx.storage.transactionSync(() => {
-      for (const o of old) if (!keep.has(o.id)) this.sql.exec("DELETE FROM items WHERE profile = ?", o.id);
+      for (const o of old) if (!keep.has(o.id)) {
+        this.sql.exec("DELETE FROM items WHERE profile = ?", o.id);
+        this.sql.exec("DELETE FROM prefs WHERE profile = ?", o.id);
+      }
       this.sql.exec("DELETE FROM profiles");
       for (const p of next) this.sql.exec("INSERT INTO profiles (id, name, color, pos, salt, hash) VALUES (?, ?, ?, ?, ?, ?)", p.id, p.name, p.color, p.pos, p.salt, p.hash);
     });

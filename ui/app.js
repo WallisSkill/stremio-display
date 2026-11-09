@@ -322,11 +322,13 @@ function pinPrompt({ face, title, check }) {
 const unlockPrompt = (p, title) => pinPrompt({ face: p, title: title || `Nhập mã PIN của ${profileName(p)}`, check: (pin) => call("profile_unlock", { id: p.id, pin }) });
 
 async function switchProfile(p, token, startup) {
+  await flushPrefs();
   try { await call("profile_use", { id: p.id, token }); }
   catch (e) { toast(e, true); return false; }
   app.profiles.active = p.id;
   cacheSet(profilesKey(), app.profiles);
   paintAvatar();
+  syncPrefs();
   if (startup) return true;
   if (pl.open) closePlayer();
   const hit = cacheGet(bootKey());
@@ -363,7 +365,10 @@ function openProfiles({ startup = false, manage = false } = {}) {
           h("span", { class: "pf-face add" }, "+"), h("span", { class: "pf-name" }, "Thêm hồ sơ")));
       }
       const actions = [h("button", { class: "btn focusable", onclick: () => { managing = !managing; draw(); } }, managing ? "Xong" : "Quản lý hồ sơ")];
-      if (!startup) actions.push(h("button", { class: "btn focusable", onclick: () => close(false) }, "Đóng"));
+      if (startup) actions.push(h("button", { class: "btn focusable", onclick: async () => { await logout(); close(false); } }, "Đăng xuất"));
+      else actions.push(
+        h("button", { class: "btn focusable", onclick: () => { close(false); go("settings"); } }, "Cài đặt"),
+        h("button", { class: "btn focusable", onclick: () => close(false) }, "Đóng"));
       put(box, h("div", { class: "pf-screen" },
         h("h1", {}, managing ? "Quản lý hồ sơ" : "Ai đang xem?"),
         managing ? h("p", { class: "hint" }, "Các hồ sơ dùng chung addon, mỗi hồ sơ có Thư viện và lịch sử xem riêng.") : null,
@@ -457,9 +462,25 @@ function editProfile(p) {
   });
 }
 
+async function logout() {
+  if (pl.open) closePlayer();
+  await flushPrefs();
+  try { await call("logout"); } catch (e) {}
+  cacheClear();
+  app.user = null;
+  app.profiles = NO_PROFILES();
+  app.library = [];
+  app.addons = [];
+  paintAvatar();
+  loadPrefs();
+  go("login", {}, true);
+}
+
 async function startSignedIn() {
   await loadProfiles();
   if (hasProfiles()) await openProfiles({ startup: true });
+  if (!app.user) return;
+  syncPrefs();
   await boot();
 }
 
@@ -1116,16 +1137,9 @@ const SUB_BASE = 20;
 const SUB_DEFAULT = { scale: 1, height: SUB_BASE, color: "#FFFFFF", box: false, font: "Segoe UI Semibold", bold: false, italic: false, outline: 2.4, shadow: 1 };
 const SUB_FONTS = [["Segoe UI Semibold", "Segoe"], ["Arial", "Arial"], ["Tahoma", "Tahoma"], ["Verdana", "Verdana"], ["Calibri", "Calibri"], ["Times New Roman", "Times"], ["Georgia", "Georgia"]];
 const SUB_COLORS = [["#FFFFFF", "Trắng"], ["#FFE14D", "Vàng"], ["#7FE3FF", "Xanh"]];
-const subPrefs = (() => {
-  try {
-    const saved = JSON.parse(localStorage.getItem("wistv.sub") || "{}");
-    if (saved.height == null && saved.pos != null) saved.height = SUB_BASE + (100 - saved.pos);
-    delete saved.pos;
-    return { ...SUB_DEFAULT, ...saved };
-  } catch (e) { return { ...SUB_DEFAULT }; }
-})();
+const subPrefs = { ...SUB_DEFAULT };
 const subPlacement = (v) => (v <= SUB_BASE ? { pos: 100, margin: Math.round((v / SUB_BASE) * 60) } : { pos: 100 - (v - SUB_BASE), margin: 60 });
-const saveSubPrefs = () => { try { localStorage.setItem("wistv.sub", JSON.stringify(subPrefs)); } catch (e) {} };
+const saveSubPrefs = () => setPref("sub", { ...subPrefs });
 const quietSet = (name, value) => call("player_set", { name, value: String(value) }).then(() => true, () => false);
 
 let unlockTimer = null;
@@ -1149,10 +1163,10 @@ function setLock(on) {
   } else wake();
 }
 
-let fillMode = (() => { try { const v = localStorage.getItem("wistv.fill"); return v == null ? TOUCH : v === "1"; } catch (e) { return TOUCH; } })();
+let fillMode = TOUCH;
 function setFill(on, announce) {
   fillMode = on;
-  try { localStorage.setItem("wistv.fill", on ? "1" : "0"); } catch (e) {}
+  setPref("fill", !!on);
   const applied = pl.open ? applyFill(on) : Promise.resolve(null);
   if (pl.ui) {
     pl.ui.stretch.title = on ? "Giữ đúng tỉ lệ (Z)" : "Dãn kín màn hình (Z)";
@@ -1199,11 +1213,90 @@ function startStatus() {
   battTimer = setInterval(() => { if (pl.open) paintStatus(); else clearInterval(battTimer); }, 15000);
 }
 
+const LEGACY_PREFS = [["sub", "wistv.sub", "json"], ["fill", "wistv.fill", "flag"], ["sublang", "wistv.sublang", "text"], ["subpick", "wistv.subpick", "json"], ["discover", "wistv.discover", "json"], ["searches", "wistv.searches", "json"]];
+let prefs = {};
+let prefsPush = null;
+const prefsKey = () => `wistv.prefs:${app.user?._id || app.user?.email || "guest"}:${app.user ? app.profiles.active : "main"}`;
+const pref = (k, fallback) => (prefs[k] === undefined || prefs[k] === null ? fallback : prefs[k]);
+
+function legacyPrefs() {
+  const out = {};
+  for (const [name, key, kind] of LEGACY_PREFS) {
+    try {
+      const v = localStorage.getItem(key);
+      if (v == null) continue;
+      out[name] = kind === "json" ? JSON.parse(v) : kind === "flag" ? v === "1" : v;
+    } catch (e) {}
+  }
+  if (Object.keys(out).length) out._at = 1;
+  return out;
+}
+
+function storePrefsLocal() {
+  try { localStorage.setItem(prefsKey(), JSON.stringify(prefs)); } catch (e) {}
+}
+
+function setPref(k, v) {
+  prefs = { ...prefs, [k]: v, _at: Date.now() };
+  storePrefsLocal();
+  if (!app.user) return;
+  clearTimeout(prefsPush?.timer);
+  const job = { profile: app.profiles.active, prefs };
+  job.timer = setTimeout(() => flushPrefs(), 1500);
+  prefsPush = job;
+}
+
+async function flushPrefs() {
+  const job = prefsPush;
+  if (!job) return;
+  clearTimeout(job.timer);
+  prefsPush = null;
+  try { await call("prefs_set", { prefs: job.prefs, profile: job.profile }); } catch (e) {}
+}
+
+function loadPrefs() {
+  let local = null;
+  try { local = JSON.parse(localStorage.getItem(prefsKey())); } catch (e) {}
+  const mainish = !app.user || app.profiles.active === "main";
+  prefs = local && typeof local === "object" ? local : mainish ? legacyPrefs() : {};
+  applyPrefs();
+}
+
+async function syncPrefs() {
+  loadPrefs();
+  if (!app.user) return;
+  const profile = app.profiles.active;
+  let remote = null;
+  try { remote = await call("prefs_get"); } catch (e) { return; }
+  if (profile !== app.profiles.active) return;
+  const mine = prefs._at || 0;
+  const theirs = remote && typeof remote === "object" ? remote._at || 0 : -1;
+  if (theirs > mine) {
+    prefs = remote;
+    storePrefsLocal();
+    applyPrefs();
+  } else if (mine > theirs && mine > 0) {
+    prefsPush = { profile, prefs };
+    flushPrefs();
+  }
+}
+
+function applyPrefs() {
+  const saved = pref("sub", {});
+  const sub = saved && typeof saved === "object" ? { ...saved } : {};
+  if (sub.height == null && sub.pos != null) sub.height = SUB_BASE + (100 - sub.pos);
+  delete sub.pos;
+  for (const k of Object.keys(subPrefs)) delete subPrefs[k];
+  Object.assign(subPrefs, SUB_DEFAULT, sub);
+  fillMode = !!pref("fill", TOUCH);
+  subLang = String(pref("sublang", "vi"));
+}
+
 const SUB_LANGS = [["", "Tắt"], ["vi", "Tiếng Việt"], ["en", "English"], ["zh", "中文"], ["ko", "한국어"], ["ja", "日本語"]];
 const sameLang = (a, b) => !!a && !!b && langName(a) === langName(b);
-let subLang = (() => { try { const v = localStorage.getItem("wistv.sublang"); return v == null ? "vi" : v; } catch (e) { return "vi"; } })();
-const setSubLang = (v) => { subLang = v; try { localStorage.setItem("wistv.sublang", v); } catch (e) {} };
-const subPicks = () => { try { return JSON.parse(localStorage.getItem("wistv.subpick") || "{}"); } catch (e) { return {}; } };
+let subLang = "vi";
+const setSubLang = (v) => { subLang = v; setPref("sublang", v); };
+const subPicks = () => { const v = pref("subpick", {}); return v && typeof v === "object" ? { ...v } : {}; };
 function rememberSub(choice) {
   const id = pl.ctx?.m?.id;
   if (!id) return;
@@ -1212,7 +1305,7 @@ function rememberSub(choice) {
   all[id] = { ...choice, at: Date.now() };
   const keys = Object.keys(all);
   for (const k of keys.slice(0, Math.max(0, keys.length - 300))) delete all[k];
-  try { localStorage.setItem("wistv.subpick", JSON.stringify(all)); } catch (e) {}
+  setPref("subpick", all);
 }
 
 const subStore = new Map();
@@ -1862,7 +1955,6 @@ async function renderLibrary(view) {
   renderGridPage(view, "Thư viện", items, app.user ? "Thư viện trống. Bấm “Thư viện” ở trang phim để thêm." : "Đăng nhập tài khoản Stremio để dùng Thư viện.");
 }
 
-const DISCOVER_KEY = "wistv.discover";
 const WIDE = window.matchMedia("(min-width: 1100px)");
 
 function discoverCatalogs() {
@@ -1890,7 +1982,7 @@ function renderDiscover(view) {
   if (!all.length) { page.append(h("div", { class: "empty" }, "Chưa có addon nào có danh mục để khám phá.")); return; }
 
   let saved = {};
-  try { saved = JSON.parse(localStorage.getItem(DISCOVER_KEY) || "{}") || {}; } catch (e) {}
+  saved = pref("discover", {}) || {};
   const types = [...new Set(all.map((c) => c.cat.type))];
   const state = { type: types.includes(saved.type) ? saved.type : types.includes("movie") ? "movie" : types[0], key: saved.key, genre: saved.genre || "" };
 
@@ -1916,7 +2008,7 @@ function renderDiscover(view) {
     if (!cur.genres.includes(state.genre)) state.genre = cur.genreRequired ? cur.genres[0] : "";
     put(selGenre, ...(cur.genreRequired ? [] : [option("", "Mọi thể loại", !state.genre)]), ...cur.genres.map((g) => option(g, g, g === state.genre)));
     selGenre.hidden = !cur.genres.length;
-    try { localStorage.setItem(DISCOVER_KEY, JSON.stringify(state)); } catch (e) {}
+    setPref("discover", { ...state });
   };
 
   let token = 0;
@@ -2055,8 +2147,8 @@ async function syncAddons(maxAge) {
   } catch (e) { return false; }
 }
 
-const searchHistory = () => { try { const v = JSON.parse(localStorage.getItem("wistv.searches") || "[]"); return Array.isArray(v) ? v.filter((x) => typeof x === "string") : []; } catch (e) { return []; } };
-const saveSearches = (list) => { try { localStorage.setItem("wistv.searches", JSON.stringify(list.slice(0, 10))); } catch (e) {} };
+const searchHistory = () => { const v = pref("searches", []); return Array.isArray(v) ? v.filter((x) => typeof x === "string") : []; };
+const saveSearches = (list) => setPref("searches", list.slice(0, 10));
 function rememberSearch(term) {
   const t = String(term || "").trim();
   if (t.length < 2) return;
@@ -2109,7 +2201,7 @@ async function renderSettings(view) {
       h("div", { class: "avatar" }, initial()),
       h("div", { class: "who" }, h("b", {}, name), h("span", {}, app.user ? "Đã đồng bộ với Stremio" : "Chế độ khách · chỉ có Cinemeta")),
       app.user
-        ? h("button", { class: "btn focusable", onclick: async () => { await call("logout"); cacheClear(); app.user = null; app.profiles = NO_PROFILES(); app.library = []; app.addons = []; paintAvatar(); go("login", {}, true); } }, "Đăng xuất")
+        ? h("button", { class: "btn focusable", onclick: () => logout() }, "Đăng xuất")
         : h("button", { class: "btn primary focusable", onclick: () => go("login", {}, true) }, "Đăng nhập")));
   const me = currentProfile();
   const people = app.user ? h("div", { class: "panel" }, h("h3", {}, "Hồ sơ người xem"),
@@ -2154,6 +2246,7 @@ async function renderSettings(view) {
     h("p", { class: "hint" }, "Cài từ máy tính bằng Sideloadly với Apple ID của bạn. Mỗi 7 ngày ký lại một lần, app và dữ liệu vẫn giữ nguyên."));
   const touchHelp = h("div", { class: "hint" }, "Trên điện thoại: chạm vào hình để hiện/ẩn điều khiển, chạm đúp bên trái/phải để tua 10 giây, chạm đúp giữa để dừng/tiếp.");
   const subs = h("div", { class: "panel" }, h("h3", {}, "Phụ đề"));
+  const own = app.user && hasProfiles() ? h("p", { class: "hint", style: "margin:-6px 0 18px" }, `Phụ đề, kiểu chữ phụ đề, chế độ dãn hình, bộ lọc Khám phá và lịch sử tìm kiếm bên dưới là của hồ sơ ${profileName(currentProfile())}, đồng bộ trên mọi máy.`) : null;
   const paintSubs = () => put(subs, h("h3", {}, "Phụ đề"),
     h("p", { class: "hint" }, "Ngôn ngữ phụ đề mặc định. Phim có sẵn phụ đề ngôn ngữ này thì dùng luôn, không có thì tự lấy từ addon. Phụ đề bạn chọn trong lúc xem được nhớ riêng cho từng phim."),
     h("div", { class: "pl-pick", style: "display:flex;gap:8px;flex-wrap:wrap;margin-top:12px" },
@@ -2161,7 +2254,7 @@ async function renderSettings(view) {
   paintSubs();
   const version = h("p", { class: "hint", style: "margin-top:18px" });
   if (TAURI?.app?.getVersion) TAURI.app.getVersion().then((v) => { version.textContent = `WiS TV phiên bản ${v}`; }).catch(() => {});
-  view.append(h("div", { class: "page plain" }, h("h1", {}, "Cài đặt"), account, people, ios, pc, subs, list, TOUCH ? h("div", { class: "panel" }, h("h3", {}, "Điều khiển"), touchHelp) : help, version));
+  view.append(h("div", { class: "page plain" }, h("h1", {}, "Cài đặt"), account, people, own, subs, ios, pc, list, TOUCH ? h("div", { class: "panel" }, h("h3", {}, "Điều khiển"), touchHelp) : help, version));
   $(".panel .btn")?.focus({ preventScroll: true });
 }
 
@@ -2189,7 +2282,7 @@ async function renderLogin(view) {
       submit.textContent = "Đăng nhập";
     }
   });
-  const guest = h("button", { class: "link focusable", onclick: async () => { app.guest = true; await boot(); } }, "Dùng thử không cần tài khoản");
+  const guest = h("button", { class: "link focusable", onclick: async () => { app.guest = true; loadPrefs(); await boot(); } }, "Dùng thử không cần tài khoản");
   view.append(h("div", { class: "login page" }, wall,
     h("div", { class: "login-card" },
       h("div", { class: "brand" }, h("span", { class: "brand-w" }, "WiS"), h("span", { class: "brand-tv" }, "TV")),
