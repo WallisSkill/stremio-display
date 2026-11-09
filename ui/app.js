@@ -29,6 +29,11 @@ const call = (cmd, args = {}) => {
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
+function put(el, ...kids) {
+  el.replaceChildren(...kids.flat().filter((k) => k != null && k !== false));
+  return el;
+}
+
 function h(tag, attrs = {}, ...kids) {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
@@ -148,7 +153,7 @@ function image(src, alt, onFail) {
 
 function titleBlock(m, cls = "title-text") {
   const wrap = h("div");
-  const fallback = () => wrap.replaceChildren(h("h1", { class: cls }, m.name));
+  const fallback = () => put(wrap, h("h1", { class: cls }, m.name));
   const src = logoOf(m);
   if (src) {
     const img = h("img", { class: "logo-img", alt: m.name, draggable: "false" });
@@ -276,7 +281,7 @@ function shelf(title, sub, shape, load, opts = {}) {
     try {
       const items = await load();
       if (!items.length) { sec.remove(); return; }
-      row.replaceChildren(...items.map((m) => (opts.render ? opts.render(m) : card(m, shape, opts))));
+      put(row, ...items.map((m) => (opts.render ? opts.render(m) : card(m, shape, opts))));
       opts.onLoaded && opts.onLoaded(items);
     } catch (e) {
       sec.remove();
@@ -305,7 +310,7 @@ function setHero(m, info, dots, idx) {
   info.classList.add("fade");
   setTimeout(() => {
     const focusedIdx = $$(".btn", info).indexOf(document.activeElement);
-    info.replaceChildren(
+    put(info, 
       h("div", { class: "kicker" }, TYPE_LABEL[m.type] || "Nổi bật"),
       titleBlock(m),
       metaLine(m),
@@ -405,7 +410,7 @@ function renderBrowse(view, filterType) {
       onLoaded: i === 0 ? (items) => {
         featured = items.filter((m) => m.description || m.background).slice(0, 7);
         if (!featured.length) featured = items.slice(0, 7);
-        dots.replaceChildren(...featured.map((m, k) => h("button", { class: "hero-dot", tabindex: "-1", "aria-label": m.name || `Phim ${k + 1}`, onclick: () => showFeatured(k) }, h("i"))));
+        put(dots, ...featured.map((m, k) => h("button", { class: "hero-dot", tabindex: "-1", "aria-label": m.name || `Phim ${k + 1}`, onclick: () => showFeatured(k) }, h("i"))));
         fi = 0;
         setHero(featured[0], info, dots, 0);
         rotate();
@@ -426,7 +431,7 @@ async function renderDetail(view, { kind, id, video, autoplay }) {
   view.append(page);
   let m;
   try { m = await call("meta", { kind, id }); }
-  catch (e) { page.replaceChildren(h("div", { class: "empty", style: "padding-top:40vh" }, String(e))); return; }
+  catch (e) { put(page, h("div", { class: "empty", style: "padding-top:40vh" }, String(e))); return; }
   if (!view.contains(page)) return;
   showArt(m);
 
@@ -465,7 +470,7 @@ async function renderDetail(view, { kind, id, video, autoplay }) {
     m.description ? h("p", { class: "desc" }, m.description) : null,
     cast || dir ? h("div", { class: "credits" }, cast ? h("div", {}, h("b", {}, "Diễn viên "), cast) : null, dir ? h("div", {}, h("b", {}, "Đạo diễn "), dir) : null) : null,
     h("div", { class: "actions" }, playBtn, libBtn));
-  page.replaceChildren(top);
+  put(page, top);
 
   if (isSeries && videos.length) {
     const seasons = [...new Set(videos.map((v) => v.season ?? 0))].sort((a, b) => (a === 0) - (b === 0) || a - b);
@@ -473,9 +478,9 @@ async function renderDetail(view, { kind, id, video, autoplay }) {
     const pills = h("div", { class: "seasons" });
     const row = h("div", { class: "row" });
     const drawSeason = () => {
-      pills.replaceChildren(...seasons.map((s) => h("button", { class: `pill focusable ${s === cur ? "on" : ""}`, onclick: () => { cur = s; drawSeason(); } }, s === 0 ? "Đặc biệt" : `Mùa ${s}`)));
+      put(pills, ...seasons.map((s) => h("button", { class: `pill focusable ${s === cur ? "on" : ""}`, onclick: () => { cur = s; drawSeason(); } }, s === 0 ? "Đặc biệt" : `Mùa ${s}`)));
       const eps = videos.filter((v) => (v.season ?? 0) === cur).sort(epSort);
-      row.replaceChildren(...eps.map((v) => episodeCard(m, v, entry)));
+      put(row, ...eps.map((v) => episodeCard(m, v, entry)));
       row.scrollLeft = 0;
       const curEl = $$(".card", row).find((c) => c.dataset.vid === target.vid);
       if (curEl) setTimeout(() => curEl.scrollIntoView({ inline: "center", block: "nearest" }), 50);
@@ -549,7 +554,7 @@ async function openStreams(m, vid, label) {
   let resume = resumeMs > 0;
   const tools = h("div", { class: "sheet-tools" });
   const drawTools = () => {
-    tools.replaceChildren();
+    put(tools, );
     if (resumeMs > 0) {
       tools.append(
         h("button", { class: `pill focusable ${resume ? "on" : ""}`, onclick: () => { resume = true; drawTools(); } }, `Tiếp tục từ ${fmtTime(resumeMs)}`),
@@ -557,22 +562,16 @@ async function openStreams(m, vid, label) {
     }
   };
   drawTools();
-  sheet.replaceChildren(h("div", { class: "sheet-head" }, h("h2", {}, "Chọn nguồn phát"), h("p", {}, label || m.name), tools), body);
+  put(sheet, h("div", { class: "sheet-head" }, h("h2", {}, "Chọn nguồn phát"), h("p", {}, label || m.name), tools), body);
   sheet.hidden = false;
   $("#scrim").hidden = false;
   navSync();
 
-  let groups;
-  try { groups = await call("streams", { kind: m.type, id: vid }); }
-  catch (e) { body.replaceChildren(h("div", { class: "empty" }, String(e))); return; }
-  if (sheet.hidden) return;
-  if (!groups.length) {
-    body.replaceChildren(h("div", { class: "empty" }, "Không addon nào trả về nguồn cho mục này.\nHãy cài addon nguồn phát trong mục Addon."));
-    return;
-  }
-  body.replaceChildren();
-  for (const g of groups) {
-    body.append(h("div", { class: "group-title" }, g.logo ? h("img", { src: g.logo, alt: "" }) : null, g.addon));
+  let slots = null;
+  let shown = 0;
+  const painted = [];
+  const fill = (slot, g) => {
+    put(slot, h("div", { class: "group-title" }, g.logo ? h("img", { src: g.logo, alt: "" }) : null, g.addon));
     for (const s of g.streams) {
       const q = quality(s);
       const firstLine = (s.name || g.addon).replace(/\n/g, " ");
@@ -583,11 +582,67 @@ async function openStreams(m, vid, label) {
         h("div", { class: "s-meta" }, metaBits || (s.infoHash ? "Torrent" : s.externalUrl ? "Mở ngoài" : "")),
         sub ? h("div", { class: "s-sub" }, sub) : null);
       btn.addEventListener("click", () => startPlayback(m, vid, label, s, resume ? resumeMs : 0, g.addon));
-      body.append(btn);
+      slot.append(btn);
     }
-  }
-  $(".stream", body)?.focus({ preventScroll: true });
+  };
+  await watchStreams(m.type, vid, (e) => {
+    if (sheet.hidden || !e.addons) return;
+    if (e.error) { put(body, h("div", { class: "empty" }, e.error)); return; }
+    if (!e.addons.length) { put(body, h("div", { class: "empty" }, "Chưa có addon nguồn phát nào cho mục này.\nHãy cài addon nguồn phát trong mục Addon.")); return; }
+    if (!slots) {
+      slots = e.addons.map((a) => h("div", { class: "stream-group" },
+        h("div", { class: "group-title" }, a.logo ? h("img", { src: a.logo, alt: "" }) : null, a.addon, h("span", { class: "group-wait" }, h("i", { class: "spinner tiny" }), "đang tải"))));
+      put(body, ...slots);
+    }
+    e.slots.forEach((g, i) => {
+      if (g === undefined || painted[i]) return;
+      painted[i] = true;
+      if (!g) { slots[i].remove(); return; }
+      fill(slots[i], g);
+      shown++;
+    });
+    if (shown && !body.contains(document.activeElement)) $(".stream", body)?.focus({ preventScroll: true });
+    if (e.done && !shown) put(body, h("div", { class: "empty" }, "Không addon nào trả về nguồn cho mục này.\nHãy cài addon nguồn phát trong mục Addon."));
+  });
 }
+
+const LIST_TTL = 30 * 60e3;
+const streamStore = new Map();
+const addonSig = () => (app.addons || []).map((a) => a.transportUrl).join(" ");
+
+function streamLoad(kind, id) {
+  const key = `${kind}|${id}`;
+  const sig = addonSig();
+  const have = streamStore.get(key);
+  if (have && have.sig === sig && (!have.done || Date.now() - have.at < LIST_TTL)) return have;
+  const e = { sig, at: Date.now(), addons: null, slots: [], done: false, error: "", subs: new Set() };
+  streamStore.set(key, e);
+  const emit = () => e.subs.forEach((f) => f(e));
+  e.job = (async () => {
+    try { e.addons = await call("stream_addons", { kind, id }); }
+    catch (err) { e.error = String(err); e.addons = []; }
+    e.slots = new Array(e.addons.length).fill(undefined);
+    emit();
+    await Promise.all(e.addons.map((a, i) => call("streams_from", { url: a.url, kind, id })
+      .then((g) => (g?.streams?.length ? g : null), () => null)
+      .then((g) => { e.slots[i] = g; emit(); })));
+    e.done = true;
+    e.at = Date.now();
+    if (streamStore.get(key) === e && (e.error || !e.slots.some(Boolean))) streamStore.delete(key);
+    emit();
+    e.subs.clear();
+  })();
+  return e;
+}
+
+function watchStreams(kind, id, fn) {
+  const e = streamLoad(kind, id);
+  if (!e.done) e.subs.add(fn);
+  fn(e);
+  return e.job.then(() => e);
+}
+
+const loadedGroups = (e) => e.slots.filter(Boolean);
 
 const pl = { session: 0, open: false, s: {}, tracks: [], subs: null, added: new Set(), menu: null, fs: false, drag: null, seekUntil: 0, seekTarget: 0, hideTimer: null, ctx: null, ui: null, returnFocus: null };
 
@@ -650,7 +705,7 @@ function buildPlayer() {
     ui.fillIcon = h("span", { html: ICON[fillMode ? "fit" : "fill"] });
     ui.fillLabel = h("span", { class: "pl-label" }, fillMode ? "Vừa hình" : "Dãn hình");
     ui.stretch.classList.add("act");
-    ui.stretch.replaceChildren(ui.fillIcon, ui.fillLabel);
+    put(ui.stretch, ui.fillIcon, ui.fillLabel);
     ui.lock = iconBtn("lock", "Khoá màn hình", () => setLock(true));
     ui.lock.classList.add("act");
     ui.lock.append(h("span", { class: "pl-label" }, "Khoá"));
@@ -892,7 +947,7 @@ async function paintStatus() {
   const pct = Math.round(Math.min(1, Math.max(0, b.level)) * 100);
   el.hidden = false;
   el.classList.toggle("low", pct <= 20 && !b.charging);
-  el.replaceChildren(h("span", {}, `${pct}%`), h("i", { class: "pl-cell" }, h("b", { style: `width:${pct}%` }), b.charging ? h("em", { html: '<svg viewBox="0 0 10 14"><path d="M6 0 0 8h4l-1 6 6-8H5z" fill="currentColor"/></svg>' }) : null));
+  put(el, h("span", {}, `${pct}%`), h("i", { class: "pl-cell" }, h("b", { style: `width:${pct}%` }), b.charging ? h("em", { html: '<svg viewBox="0 0 10 14"><path d="M6 0 0 8h4l-1 6 6-8H5z" fill="currentColor"/></svg>' }) : null));
 }
 function startStatus() {
   clearInterval(battTimer);
@@ -916,13 +971,27 @@ function rememberSub(choice) {
   try { localStorage.setItem("wistv.subpick", JSON.stringify(all)); } catch (e) {}
 }
 
+const subStore = new Map();
+
+function subsLoad(kind, id) {
+  const key = `${kind}|${id}`;
+  const sig = addonSig();
+  const have = subStore.get(key);
+  if (have && have.sig === sig && Date.now() - have.at < LIST_TTL) return have.job;
+  const e = { sig, at: Date.now() };
+  const drop = () => { if (subStore.get(key) === e) subStore.delete(key); };
+  e.job = call("subtitles", { kind, id }).then((list) => { e.at = Date.now(); if (!list.length) drop(); return list; }, (err) => { drop(); throw err; });
+  subStore.set(key, e);
+  return e.job;
+}
+
 function loadAddonSubs() {
   if (pl.subs !== null && pl.subs !== "loading") return Promise.resolve(pl.subs);
   if (pl.subsJob) return pl.subsJob;
   if (!pl.ctx?.m?.type || String(pl.ctx.vid).startsWith("local:")) { pl.subs = []; return Promise.resolve(pl.subs); }
   pl.subs = "loading";
   const session = pl.session;
-  pl.subsJob = call("subtitles", { kind: pl.ctx.m.type, id: pl.ctx.vid })
+  pl.subsJob = subsLoad(pl.ctx.m.type, pl.ctx.vid)
     .then((list) => { if (pl.session === session) { pl.subs = list; pl.subsJob = null; if (pl.menu === "tracks") renderMenu(); } return list; })
     .catch(() => { if (pl.session === session) { pl.subs = []; pl.subsJob = null; } return []; });
   return pl.subsJob;
@@ -1172,9 +1241,19 @@ async function playEpisode(v, auto) {
   pl.ui.title.textContent = c.m.name;
   pl.ui.sub.textContent = epName(v);
   paintState();
-  let groups = [];
-  try { groups = await call("streams", { kind: c.m.type, id: v.id }); } catch (e) { groups = []; }
-  if (pl.session !== session) return true;
+  let early = null;
+  const e = await watchStreams(c.m.type, v.id, (e) => {
+    if (early || pl.session !== session) return;
+    const hit = sameSource(loadedGroups(e), c);
+    if (hit && (e.done || !c.stream?.behaviorHints?.bingeGroup || hit.stream.behaviorHints?.bingeGroup === c.stream.behaviorHints.bingeGroup)) {
+      early = hit;
+      const entry = libEntry(c.m.id);
+      const resume = entry?.state?.video_id === v.id ? entry.state.timeOffset || 0 : 0;
+      startPlayback(c.m, v.id, epName(v), hit.stream, resume, hit.addon);
+    }
+  });
+  if (pl.session !== session || early) return true;
+  const groups = loadedGroups(e);
   const pick = sameSource(groups, c);
   if (pick) {
     const entry = libEntry(c.m.id);
@@ -1210,7 +1289,7 @@ function renderEpisodes(box) {
       h("div", {}, h("b", {}, v.title || v.name || `Tập ${v.episode ?? ""}`), note ? h("small", {}, note) : null));
   }));
   box.className = "pl-menu episodes";
-  box.replaceChildren(
+  put(box, 
     h("h4", {}, "Các tập"),
     seasons.length > 1 ? h("div", { class: "pl-seasons" }, seasons.map((s) => h("button", { class: `pl-mini ${s === pl.epSeason ? "on" : ""}`, tabindex: "-1", onclick: () => { pl.epSeason = s; renderMenu(); } }, s === 0 ? "Đặc biệt" : `Mùa ${s}`))) : null,
     list);
@@ -1318,22 +1397,21 @@ function pickSub(id) {
 function renderMenu() {
   const box = pl.ui.menu;
   box.hidden = !pl.menu;
-  if (!pl.menu) { box.replaceChildren(); return; }
+  if (!pl.menu) { put(box, ); return; }
   fillMenu(box);
   box.prepend(h("button", { class: "pl-menu-x", tabindex: "-1", "aria-label": "Đóng", title: "Đóng", html: ICON.close, onclick: () => toggleMenu(null) }));
 }
 
-async function loadSources() {
+function loadSources() {
   const c = pl.ctx;
   if (!c || (pl.sources && pl.sources.vid === c.vid)) return;
   const vid = c.vid;
-  pl.sources = { vid, groups: null };
-  let groups = [];
-  let error = "";
-  try { groups = await call("streams", { kind: c.m.type, id: vid }); } catch (e) { error = String(e); }
-  if (pl.ctx !== c || pl.sources?.vid !== vid) return;
-  pl.sources = { vid, groups, error };
-  if (pl.menu === "sources") renderMenu();
+  pl.sources = { vid, groups: null, pending: true };
+  watchStreams(c.m.type, vid, (e) => {
+    if (pl.ctx !== c || pl.sources?.vid !== vid) return;
+    pl.sources = { vid, groups: loadedGroups(e), pending: !e.done, error: e.done ? e.error : "" };
+    if (pl.menu === "sources") renderMenu();
+  });
 }
 
 const sameStream = (a, b) => !!a && !!b && (a.url ? a.url === b.url : !!a.infoHash && a.infoHash === b.infoHash && (a.fileIdx ?? null) === (b.fileIdx ?? null));
@@ -1342,7 +1420,6 @@ function switchSource(stream, addon) {
   const c = pl.ctx;
   if (!c || sameStream(stream, c.stream)) { toggleMenu(null); return; }
   const at = Math.floor(curTime() * 1000);
-  pl.sources = null;
   startPlayback(c.m, c.vid, c.label, stream, at, addon);
 }
 
@@ -1351,8 +1428,8 @@ function renderSources(box) {
   box.className = "pl-menu episodes sources";
   const head = h("h4", {}, "Nguồn phát");
   const data = pl.sources;
-  if (!data || data.groups === null) { box.replaceChildren(head, h("div", { class: "spinner small" })); return; }
-  if (data.error || !data.groups.length) { box.replaceChildren(head, h("p", { class: "pl-none" }, data.error || "Không addon nào trả về nguồn cho mục này")); return; }
+  if (!data || (data.pending && !data.groups?.length)) { put(box, head, h("div", { class: "spinner small" })); return; }
+  if (data.error || !data.groups.length) { put(box, head, h("p", { class: "pl-none" }, data.error || "Không addon nào trả về nguồn cho mục này")); return; }
   const list = h("div", { class: "pl-eps" });
   for (const g of data.groups) {
     list.append(h("div", { class: "pl-src-group" }, g.addon));
@@ -1365,8 +1442,11 @@ function renderSources(box) {
         h("small", {}, on ? `Đang phát${meta ? " · " + meta : ""}` : meta || (s.title || s.description || "").split("\n")[0])));
     }
   }
-  box.replaceChildren(head, h("p", { class: "pl-note" }, "Đổi nguồn sẽ phát tiếp từ đúng chỗ đang xem."), list);
-  requestAnimationFrame(() => list.querySelector(".pl-src.on")?.scrollIntoView({ block: "center" }));
+  if (data.pending) list.append(h("div", { class: "spinner small" }));
+  const keep = box.querySelector(".pl-eps")?.scrollTop;
+  put(box, head, h("p", { class: "pl-note" }, "Đổi nguồn sẽ phát tiếp từ đúng chỗ đang xem."), list);
+  if (keep != null) list.scrollTop = keep;
+  else requestAnimationFrame(() => list.querySelector(".pl-src.on")?.scrollIntoView({ block: "center" }));
 }
 
 function fillMenu(box) {
@@ -1374,7 +1454,7 @@ function fillMenu(box) {
   if (pl.menu === "sources") { renderSources(box); return; }
   if (pl.menu === "fullscreen") {
     box.className = "pl-menu narrow";
-    box.replaceChildren(h("h4", {}, "Toàn màn hình"),
+    put(box, h("h4", {}, "Toàn màn hình"),
       h("p", { class: "pl-note" }, STANDALONE
         ? "Bạn đang mở WiS TV từ Màn hình chính: chỉ cần xoay ngang điện thoại là phim kín màn hình, phụ đề vẫn theo kiểu bạn đã chỉnh."
         : "Safari trên iPhone không cho trang web tự vào toàn màn hình. Muốn kín màn hình mà vẫn giữ kiểu phụ đề của bạn: bấm nút Chia sẻ của Safari → Thêm vào MH chính, mở WiS TV từ biểu tượng đó rồi xoay ngang điện thoại."),
@@ -1384,7 +1464,7 @@ function fillMenu(box) {
   if (pl.menu === "speed") {
     const cur = pl.s.speed || 1;
     box.className = "pl-menu narrow";
-    box.replaceChildren(h("h4", {}, "Tốc độ phát"),
+    put(box, h("h4", {}, "Tốc độ phát"),
       ...[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map((v) => menuItem(v === 1 ? "Bình thường" : `${v}×`, Math.abs(cur - v) < 0.01, () => { pl.s.speed = v; setProp("speed", v); renderMenu(); paintState(); })));
     return;
   }
@@ -1424,7 +1504,7 @@ function fillMenu(box) {
       }, [creditEl, subLabel(s) ? h("small", { class: "pl-label-note" }, subLabel(s)) : null, [releaseSummary(s), s.addon].filter(Boolean).join(" · "), file ? h("small", { class: "pl-file" }, file) : null]);
     }));
   }
-  box.replaceChildren(audioCol, subCol, addonCol);
+  put(box, audioCol, subCol, addonCol);
 }
 
 function openPlayer(c) {
@@ -1584,13 +1664,13 @@ function renderDiscover(view) {
   const option = (value, label, on) => { const o = h("option", { value }, label); o.selected = on; return o; };
   let cur = null;
   const fill = () => {
-    selType.replaceChildren(...types.map((t) => option(t, TYPE_LABEL[t] || t, t === state.type)));
+    put(selType, ...types.map((t) => option(t, TYPE_LABEL[t] || t, t === state.type)));
     const cats = all.filter((c) => c.cat.type === state.type);
     if (!cats.some((c) => c.key === state.key)) state.key = cats[0].key;
-    selCat.replaceChildren(...cats.map((c) => option(c.key, `${c.cat.name || c.cat.id} · ${c.addon.manifest.name}`, c.key === state.key)));
+    put(selCat, ...cats.map((c) => option(c.key, `${c.cat.name || c.cat.id} · ${c.addon.manifest.name}`, c.key === state.key)));
     cur = cats.find((c) => c.key === state.key);
     if (!cur.genres.includes(state.genre)) state.genre = cur.genreRequired ? cur.genres[0] : "";
-    selGenre.replaceChildren(...(cur.genreRequired ? [] : [option("", "Mọi thể loại", !state.genre)]), ...cur.genres.map((g) => option(g, g, g === state.genre)));
+    put(selGenre, ...(cur.genreRequired ? [] : [option("", "Mọi thể loại", !state.genre)]), ...cur.genres.map((g) => option(g, g, g === state.genre)));
     selGenre.hidden = !cur.genres.length;
     try { localStorage.setItem(DISCOVER_KEY, JSON.stringify(state)); } catch (e) {}
   };
@@ -1608,7 +1688,7 @@ function renderDiscover(view) {
   const loadPage = async (my) => {
     if (busy || done || my !== token) return;
     busy = true;
-    more.replaceChildren(h("div", { class: "spinner small" }));
+    put(more, h("div", { class: "spinner small" }));
     const extra = [];
     if (state.genre) extra.push(["genre", state.genre]);
     if (items.length) extra.push(["skip", String(items.length)]);
@@ -1618,17 +1698,17 @@ function renderDiscover(view) {
       const fresh = (list || []).filter((m) => m?.id && !seen.has(m.id));
       fresh.forEach((m) => seen.add(m.id));
       if (!fresh.length || !cur.pages) done = true;
-      if (!items.length) grid.replaceChildren();
+      if (!items.length) put(grid, );
       items.push(...fresh);
       grid.append(...fresh.map(discoverCard));
-      if (!items.length) grid.replaceChildren(h("div", { class: "empty" }, "Danh mục này chưa có gì."));
+      if (!items.length) put(grid, h("div", { class: "empty" }, "Danh mục này chưa có gì."));
       else if (!picked && WIDE.matches) pick(items[0], grid.firstElementChild, false);
     } catch (e) {
       if (my !== token) return;
       done = true;
-      if (!items.length) grid.replaceChildren(h("div", { class: "empty" }, String(e)));
+      if (!items.length) put(grid, h("div", { class: "empty" }, String(e)));
     } finally {
-      if (my === token) { busy = false; more.replaceChildren(); recheck(); }
+      if (my === token) { busy = false; put(more, ); recheck(); }
     }
   };
 
@@ -1639,8 +1719,8 @@ function renderDiscover(view) {
     done = false;
     busy = false;
     picked = null;
-    grid.replaceChildren(...skeletonRow("poster", 12));
-    panel.replaceChildren();
+    put(grid, ...skeletonRow("poster", 12));
+    put(panel, );
     page.classList.remove("has-pick");
     view.scrollTo({ top: 0 });
     loadPage(token);
@@ -1695,7 +1775,7 @@ function renderDiscover(view) {
       } catch (e) { toast(e, true); }
     });
     const facts = [m.runtime, yearOf(m), m.imdbRating ? `IMDb ${m.imdbRating}` : ""].filter(Boolean);
-    panel.replaceChildren(
+    put(panel, 
       titleBlock(m, "dc-title"),
       facts.length ? h("div", { class: "dc-facts" }, facts.map((f) => h("span", { class: f.startsWith("IMDb") ? "imdb" : "" }, f))) : null,
       m.description ? h("p", { class: "dc-desc" }, m.description) : null,
@@ -1752,18 +1832,18 @@ function renderSearch(view, { q = "" } = {}) {
     if (app.stack.length) app.stack[app.stack.length - 1].params = { q: term };
     if (term.length < 2) { showHistory(); return; }
     const cats = catalogsOf(null, { search: true });
-    if (!cats.length) { results.replaceChildren(h("div", { class: "empty" }, "Không addon nào hỗ trợ tìm kiếm.")); return; }
-    results.replaceChildren(...cats.map(({ addon, cat }) =>
+    if (!cats.length) { put(results, h("div", { class: "empty" }, "Không addon nào hỗ trợ tìm kiếm.")); return; }
+    put(results, ...cats.map(({ addon, cat }) =>
       shelf(`${TYPE_LABEL[cat.type] || cat.type}`, `${cat.name || cat.id} · ${addon.manifest.name}`, "poster",
         async () => (mine === token ? call("catalog", { url: addon.transportUrl, kind: cat.type, id: cat.id, extra: [["search", term]] }) : []),
         { eager: true })));
   };
   const showHistory = () => {
     const list = searchHistory();
-    if (!list.length) { results.replaceChildren(h("div", { class: "empty" }, "Nhập ít nhất 2 ký tự để tìm.")); return; }
+    if (!list.length) { put(results, h("div", { class: "empty" }, "Nhập ít nhất 2 ký tự để tìm.")); return; }
     const pick = (t) => { input.value = t; clearTimeout(timer); rememberSearch(t); run(); };
     const drop = (t) => { saveSearches(searchHistory().filter((x) => x !== t)); showHistory(); };
-    results.replaceChildren(h("div", { class: "search-history" },
+    put(results, h("div", { class: "search-history" },
       h("div", { class: "sh-head" }, h("h3", {}, "Tìm kiếm gần đây"), h("button", { class: "link focusable", onclick: () => { saveSearches([]); showHistory(); } }, "Xoá hết")),
       ...list.map((t) => h("div", { class: "sh-row" },
         h("button", { class: "sh-term focusable", onclick: () => pick(t) }, h("span", { html: ICON.search }), h("span", {}, t)),
@@ -1799,7 +1879,7 @@ async function renderSettings(view) {
   if (pc) {
     const status = h("div", { class: "pc-status" }, h("div", { class: "spinner small" }));
     const check = async (force) => {
-      status.replaceChildren(h("div", { class: "spinner small" }));
+      put(status, h("div", { class: "spinner small" }));
       let s = { linked: false, online: false };
       try { s = await call("server_status", { force }); } catch (e) {}
       const dot = h("i", { class: `pc-dot ${s.online ? "on" : ""}` });
@@ -1810,7 +1890,7 @@ async function renderSettings(view) {
           : app.user
             ? "Chưa thấy máy tính. Bật máy, đăng nhập app WiS TV trên máy tính và chạy WiS TV Relay."
             : "Đăng nhập tài khoản Stremio để kết nối với máy tính.";
-      status.replaceChildren(dot, h("span", {}, msg));
+      put(status, dot, h("span", {}, msg));
     };
     pc.append(status, h("div", { style: "margin-top:14px" }, h("button", { class: "btn focusable", onclick: () => check(true) }, "Kiểm tra lại")),
       h("p", { class: "hint" }, "Không có máy tính thì vẫn xem được các nguồn có link trực tiếp mà trình duyệt phát được (MP4, HLS)."));
@@ -1823,7 +1903,7 @@ async function renderSettings(view) {
     h("p", { class: "hint" }, "Cài từ máy tính bằng Sideloadly với Apple ID của bạn. Mỗi 7 ngày ký lại một lần, app và dữ liệu vẫn giữ nguyên."));
   const touchHelp = h("div", { class: "hint" }, "Trên điện thoại: chạm vào hình để hiện/ẩn điều khiển, chạm đúp bên trái/phải để tua 10 giây, chạm đúp giữa để dừng/tiếp.");
   const subs = h("div", { class: "panel" }, h("h3", {}, "Phụ đề"));
-  const paintSubs = () => subs.replaceChildren(h("h3", {}, "Phụ đề"),
+  const paintSubs = () => put(subs, h("h3", {}, "Phụ đề"),
     h("p", { class: "hint" }, "Ngôn ngữ phụ đề mặc định. Phim có sẵn phụ đề ngôn ngữ này thì dùng luôn, không có thì tự lấy từ addon. Phụ đề bạn chọn trong lúc xem được nhớ riêng cho từng phim."),
     h("div", { class: "pl-pick", style: "display:flex;gap:8px;flex-wrap:wrap;margin-top:12px" },
       SUB_LANGS.map(([code, label]) => h("button", { class: `btn focusable ${subLang === code ? "primary" : ""}`, onclick: () => { setSubLang(code); paintSubs(); } }, label))));
@@ -1869,7 +1949,7 @@ async function renderLogin(view) {
     const addons = await web.addons();
     const cat = addons[0].manifest.catalogs.find((c) => c.type === "movie" && !(c.extra || []).some((e) => e.isRequired));
     const metas = await web.catalog({ url: addons[0].transportUrl, kind: cat.type, id: cat.id, extra: [] });
-    wall.replaceChildren(...metas.concat(metas).slice(0, 64).map((m) => h("img", { src: m.poster, alt: "" })));
+    put(wall, ...metas.concat(metas).slice(0, 64).map((m) => h("img", { src: m.poster, alt: "" })));
   } catch (e) {}
 }
 
@@ -1942,13 +2022,13 @@ async function renderCalendar(view, params) {
   const page = h("div", { class: "page plain cal" }, head, body);
   view.append(page);
   $(".cal-nav .pill:nth-child(2)", page)?.focus({ preventScroll: true });
-  if (!app.user) { body.replaceChildren(h("div", { class: "empty" }, "Đăng nhập tài khoản Stremio để xem lịch các phim bộ trong Thư viện.")); return; }
+  if (!app.user) { put(body, h("div", { class: "empty" }, "Đăng nhập tài khoản Stremio để xem lịch các phim bộ trong Thư viện.")); return; }
   await refreshLibrary();
   const status = h("p", { class: "hint", style: "text-align:center" });
-  body.replaceChildren(h("div", { class: "spinner" }), status);
+  put(body, h("div", { class: "spinner" }), status);
   const metas = await seriesMetas((d, n) => { status.textContent = `Đang đọc lịch phát ${d}/${n} phim bộ…`; });
   if (!view.contains(page)) return;
-  if (!metas.length) { body.replaceChildren(h("div", { class: "empty" }, "Thư viện chưa có phim bộ nào. Thêm phim bộ vào Thư viện để theo dõi lịch phát.")); return; }
+  if (!metas.length) { put(body, h("div", { class: "empty" }, "Thư viện chưa có phim bộ nào. Thêm phim bộ vào Thư viện để theo dõi lịch phát.")); return; }
   const eps = metas.flatMap((m) => (m.videos || [])
     .filter((v) => v.released && (v.season ?? 0) > 0)
     .map((v) => ({ m, v, d: new Date(v.released) })))
@@ -1981,7 +2061,7 @@ async function renderCalendar(view, params) {
   const recent = eps.filter((x) => x.d < start && start - x.d <= 14 * 86400000).reverse().slice(0, 24);
   const listOf = (title, items) => items.length ? h("section", { class: "cal-list" }, h("h2", { class: "shelf-title" }, title),
     items.map((x) => h("div", { class: "cal-row" }, h("span", { class: "cal-date" }, x.d.toLocaleDateString("vi-VN", { weekday: "short", day: "2-digit", month: "2-digit" })), calEpisode(x, "cal-ep wide")))) : null;
-  body.replaceChildren(grid, h("div", { class: "cal-lists" }, listOf("Sắp chiếu", upcoming), listOf("Mới ra trong 2 tuần", recent)));
+  put(body, grid, h("div", { class: "cal-lists" }, listOf("Sắp chiếu", upcoming), listOf("Mới ra trong 2 tuần", recent)));
 }
 
 const addonBase = (url) => String(url || "").replace(/\/manifest\.json$/, "").replace(/\/+$/, "");
@@ -2032,7 +2112,7 @@ async function renderAddons(view) {
 
   const drawInstalled = () => {
     const n = app.addons.length;
-    installedPanel.replaceChildren(h("h3", {}, `Đã cài (${n})`),
+    put(installedPanel, h("h3", {}, `Đã cài (${n})`),
       h("p", { class: "hint", style: "margin:-4px 0 6px" }, "Addon ở trên được hỏi nguồn phát trước. Dùng nút mũi tên để đổi thứ tự."),
       ...app.addons.map((a, i) => {
         const prot = a.flags?.protected === true;
@@ -2074,7 +2154,7 @@ async function renderAddons(view) {
   const pills = h("div", { class: "seasons" });
   const search = h("input", { class: "field", placeholder: "Tìm addon…", spellcheck: "false", style: "max-width:320px;margin:0" });
   search.addEventListener("input", () => { term = search.value.trim().toLowerCase(); drawDiscover(); });
-  const drawPills = () => pills.replaceChildren(...TYPE_FILTERS.map(([k, label]) => h("button", { class: `pill focusable ${filter === k ? "on" : ""}`, onclick: () => { filter = k; drawPills(); drawDiscover(); } }, label)));
+  const drawPills = () => put(pills, ...TYPE_FILTERS.map(([k, label]) => h("button", { class: `pill focusable ${filter === k ? "on" : ""}`, onclick: () => { filter = k; drawPills(); drawDiscover(); } }, label)));
   drawPills();
   const discoverPanel = h("div", { class: "panel wide-panel" }, h("h3", {}, "Khám phá"),
     h("div", { class: "discover-tools" }, pills, search), discoverList);
@@ -2091,7 +2171,7 @@ async function renderAddons(view) {
       if (term && !`${mf.name} ${mf.description}`.toLowerCase().includes(term)) return false;
       return true;
     });
-    discoverList.replaceChildren(...items.slice(0, 150).map((a) => {
+    put(discoverList, ...items.slice(0, 150).map((a) => {
       const mf = a.manifest || {};
       const acts = [];
       const installed = have.has(a.transportUrl) || haveIds.has(mf.id);
@@ -2105,7 +2185,7 @@ async function renderAddons(view) {
       }
       return addonRow(a, acts);
     }));
-    if (!items.length) discoverList.replaceChildren(h("div", { class: "empty" }, "Không có addon nào khớp."));
+    if (!items.length) put(discoverList, h("div", { class: "empty" }, "Không có addon nào khớp."));
   };
 
   view.append(h("div", { class: "page plain" }, h("h1", {}, "Addon"), installPanel, installedPanel, discoverPanel));
@@ -2113,7 +2193,7 @@ async function renderAddons(view) {
   input.focus({ preventScroll: true });
   if (!app.discover) {
     try { app.discover = await call("addon_discover"); }
-    catch (e) { discoverList.replaceChildren(h("div", { class: "empty" }, `Không tải được danh sách addon: ${e}`)); return; }
+    catch (e) { put(discoverList, h("div", { class: "empty" }, `Không tải được danh sách addon: ${e}`)); return; }
   }
   drawDiscover();
 }
@@ -2124,7 +2204,7 @@ function render() {
   clearTimeout(app.previewTimer);
   if (!$("#sheet").hidden) closeSheet();
   const view = $("#view");
-  view.replaceChildren();
+  put(view, );
   view.scrollTop = 0;
   $("#topbar").hidden = route === "login";
   $$("[data-route]", $("#topbar")).forEach((b) => b.classList.toggle("active", b.dataset.route === route));

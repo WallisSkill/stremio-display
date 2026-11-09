@@ -143,34 +143,25 @@ pub async fn meta(st: State<'_, AppState>, kind: String, id: String) -> R<Value>
 }
 
 #[tauri::command]
-pub async fn streams(st: State<'_, AppState>, kind: String, id: String) -> R<Vec<Value>> {
+pub async fn stream_addons(st: State<'_, AppState>, kind: String, id: String) -> R<Vec<Value>> {
     let list = load_addons(&st, false).await?;
-    let http = st.http.clone();
-    let jobs = list
+    Ok(list
         .into_iter()
         .filter(|a| a.supports("stream", &kind, &id))
-        .map(|a| {
-            let http = http.clone();
-            let url = a.resource_url("stream", &kind, &id, &[]);
-            async move {
-                let res = addons::get_json(&http, &url).await;
-                (a, res)
-            }
-        });
-    let results = futures::future::join_all(jobs).await;
-    let mut out = Vec::new();
-    for (a, res) in results {
-        let Ok(v) = res else { continue };
-        let Some(list) = v["streams"].as_array().filter(|s| !s.is_empty()) else {
-            continue;
-        };
-        out.push(json!({
-            "addon": a.name(),
-            "logo": a.manifest["logo"],
-            "streams": list,
-        }));
-    }
-    Ok(out)
+        .map(|a| json!({ "url": a.transport_url, "addon": a.name(), "logo": a.manifest["logo"] }))
+        .collect())
+}
+
+#[tauri::command]
+pub async fn streams_from(st: State<'_, AppState>, url: String, kind: String, id: String) -> R<Value> {
+    let list = load_addons(&st, false).await?;
+    let a = list
+        .into_iter()
+        .find(|a| a.transport_url == url && a.supports("stream", &kind, &id))
+        .ok_or("Addon này không còn được cài")?;
+    let v = addons::get_json(&st.http, &a.resource_url("stream", &kind, &id, &[])).await?;
+    let streams = v["streams"].as_array().cloned().unwrap_or_default();
+    Ok(json!({ "addon": a.name(), "logo": a.manifest["logo"], "streams": streams }))
 }
 
 #[tauri::command]

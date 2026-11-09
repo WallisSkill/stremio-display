@@ -797,12 +797,14 @@ export const web = {
     }
     throw lastErr || "Không tìm thấy thông tin phim";
   },
-  async streams({ kind, id }) {
-    const list = (await loadAddons()).filter((a) => supports(a, "stream", kind, id));
-    const results = await Promise.all(list.map((a) => getJson(resourceUrl(a, "stream", kind, id)).then((v) => [a, v], () => [a, null])));
-    return results
-      .filter(([, v]) => v && Array.isArray(v.streams) && v.streams.length)
-      .map(([a, v]) => ({ addon: addonName(a), logo: a.manifest?.logo, streams: v.streams }));
+  async stream_addons({ kind, id }) {
+    return (await loadAddons()).filter((a) => supports(a, "stream", kind, id)).map((a) => ({ url: a.transportUrl, addon: addonName(a), logo: a.manifest?.logo }));
+  },
+  async streams_from({ url, kind, id }) {
+    const a = (await loadAddons()).find((x) => x.transportUrl === url && supports(x, "stream", kind, id));
+    if (!a) throw "Addon này không còn được cài";
+    const v = await getJson(resourceUrl(a, "stream", kind, id));
+    return { addon: addonName(a), logo: a.manifest?.logo, streams: Array.isArray(v?.streams) ? v.streams : [] };
   },
   async subtitles({ kind, id }) {
     const list = (await loadAddons()).filter((a) => supports(a, "subtitles", kind, id));
