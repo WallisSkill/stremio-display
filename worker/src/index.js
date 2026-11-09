@@ -247,6 +247,257 @@ export class ProfileStore extends DurableObject {
   }
 }
 
+const ROOM_CODE = /^[A-HJ-NP-Z2-9]{6}$/;
+const ROOM_LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const CLIENT_ID = /^[a-z0-9]{8,32}$/;
+const HTTP_URL = /^https?:\/\/[^\s"'()\\<>]{1,500}$/;
+const MAX_MEMBERS = 12;
+const ROOM_LIFE_MS = 12 * 3600e3;
+const HOST_GRACE_MS = 3 * 60e3;
+const MAX_FRAME = 16 * 1024;
+const MAX_CHAT = 300;
+const CHAT_GAP_MS = 400;
+const REACTIONS = ["❤️", "😂", "😮", "😢", "👏", "🔥"];
+
+const clip = (v, n) => (typeof v === "string" ? v.trim().replace(/\s+/g, " ").slice(0, n) : "");
+const httpUrl = (v) => (typeof v === "string" && HTTP_URL.test(v) ? v : undefined);
+const memberName = (v) => [...clip(v, 80)].slice(0, MAX_NAME).join("") || "Khách";
+
+function cleanMedia(m) {
+  if (!m || typeof m !== "object") throw new Refused("Phim không hợp lệ");
+  const id = clip(m.id, 200);
+  const type = clip(m.type, 20);
+  const vid = clip(m.vid, 200);
+  if (!id || !type || !vid) throw new Refused("Phim không hợp lệ");
+  const s = m.hint && typeof m.hint === "object" ? m.hint : {};
+  const hint = {
+    infoHash: typeof s.infoHash === "string" && /^[0-9a-f]{40}$/i.test(s.infoHash) ? s.infoHash.toLowerCase() : undefined,
+    fileIdx: Number.isInteger(s.fileIdx) && s.fileIdx >= 0 ? s.fileIdx : undefined,
+    sources: Array.isArray(s.sources) ? s.sources.filter((x) => typeof x === "string" && x.length <= 300).slice(0, 40) : undefined,
+    filename: clip(s.filename, 300) || undefined,
+    bingeGroup: clip(s.bingeGroup, 200) || undefined,
+    addon: clip(s.addon, 100) || undefined,
+    name: clip(s.name, 200) || undefined,
+    ytId: typeof s.ytId === "string" && /^[\w-]{6,20}$/.test(s.ytId) ? s.ytId : undefined,
+  };
+  const start = Number.isFinite(m.start) && m.start >= 0 ? Math.min(m.start, 1e9) : 0;
+  return { id, type, vid, name: clip(m.name, 200), label: clip(m.label, 200), poster: httpUrl(m.poster), background: httpUrl(m.background), start, hint };
+}
+
+function cleanPlay(p, now, vid) {
+  const pos = Number.isFinite(p.pos) && p.pos >= 0 ? Math.min(p.pos, 1e6) : 0;
+  const rate = Number.isFinite(p.rate) && p.rate >= 0.25 && p.rate <= 4 ? p.rate : 1;
+  return { paused: !!p.paused, hold: !!p.hold, pos, rate, at: now, vid };
+}
+
+export class WatchRoom extends DurableObject {
+  constructor(ctx, env) {
+    super(ctx, env);
+    this.room = undefined;
+    this.play = null;
+  }
+
+  async load() {
+    if (this.room === undefined) {
+      this.room = (await this.ctx.storage.get("room")) || null;
+      this.play = (await this.ctx.storage.get("play")) || null;
+    }
+    return this.room;
+  }
+
+  async save() {
+    await this.ctx.storage.put("room", this.room);
+  }
+
+  async schedule() {
+    const r = this.room;
+    await this.ctx.storage.setAlarm(Math.min(r.created + ROOM_LIFE_MS, r.hostGone ? r.hostGone + HOST_GRACE_MS : Infinity));
+  }
+
+  async init(hostKey, uid) {
+    if (await this.load()) return false;
+    this.room = { hostKey, uid, created: Date.now(), media: null, hostGone: null };
+    this.play = null;
+    await this.save();
+    await this.schedule();
+    return true;
+  }
+
+  sockets(except) {
+    return this.ctx.getWebSockets().filter((ws) => ws !== except && ws.readyState === 1 && this.who(ws).id);
+  }
+
+  who(ws) {
+    try { return ws.deserializeAttachment() || {}; } catch (e) { return {}; }
+  }
+
+  send(ws, msg) {
+    try { ws.send(JSON.stringify(msg)); } catch (e) {}
+  }
+
+  broadcast(msg, except) {
+    const data = JSON.stringify(msg);
+    for (const ws of this.sockets()) if (ws !== except) try { ws.send(data); } catch (e) {}
+  }
+
+  roster(except) {
+    const members = this.sockets(except).map((ws) => this.who(ws)).map(({ id, name, host, waiting }) => ({ id, name, host: !!host, waiting: !!waiting }));
+    return { members, hostOnline: members.some((m) => m.host) };
+  }
+
+  shareRoster(except) {
+    const data = JSON.stringify({ t: "members", ...this.roster(except) });
+    for (const ws of this.sockets(except)) try { ws.send(data); } catch (e) {}
+  }
+
+  async fetch(request) {
+    const url = new URL(request.url);
+    const [client, server] = Object.values(new WebSocketPair());
+    const refuse = (code, message) => {
+      server.accept();
+      server.send(JSON.stringify({ t: "error", message }));
+      server.close(code, "refused");
+      return new Response(null, { status: 101, webSocket: client });
+    };
+    const room = await this.load();
+    if (!room) return refuse(4404, "Không có phòng này hoặc phòng đã đóng");
+    const id = url.searchParams.get("id") || "";
+    if (!CLIENT_ID.test(id)) return refuse(4400, "Yêu cầu không hợp lệ");
+    const key = url.searchParams.get("key") || "";
+    const host = !!key && same(key, room.hostKey);
+    if (key && !host) return refuse(4403, "Mã chủ phòng không đúng");
+    const stale = this.sockets().filter((ws) => { const w = this.who(ws); return w.id === id || (host && w.host); });
+    const guests = this.sockets().filter((ws) => !stale.includes(ws) && !this.who(ws).host);
+    if (!host && guests.length >= MAX_MEMBERS - 1) return refuse(4409, "Phòng đã đủ người");
+    for (const ws of stale) {
+      this.send(ws, { t: "replaced" });
+      try { ws.close(4001, "replaced"); } catch (e) {}
+    }
+    this.ctx.acceptWebSocket(server);
+    server.serializeAttachment({ id, name: memberName(url.searchParams.get("name")), host, waiting: false, chatAt: 0, reactAt: 0 });
+    if (host && room.hostGone) {
+      room.hostGone = null;
+      await this.save();
+      await this.schedule();
+    }
+    const roster = this.roster();
+    this.send(server, { t: "welcome", you: id, host, now: Date.now(), media: room.media, play: this.play, ...roster });
+    const data = JSON.stringify({ t: "members", ...roster });
+    for (const ws of this.sockets()) if (ws !== server) try { ws.send(data); } catch (e) {}
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  async webSocketMessage(ws, data) {
+    if (typeof data !== "string" || data.length > MAX_FRAME) return;
+    let msg;
+    try { msg = JSON.parse(data); } catch (e) { return; }
+    if (!msg || typeof msg !== "object") return;
+    const room = await this.load();
+    if (!room) {
+      try { ws.close(4404, "closed"); } catch (e) {}
+      return;
+    }
+    const me = this.who(ws);
+    const now = Date.now();
+    if (msg.t === "ping") {
+      this.send(ws, { t: "pong", c: Number.isFinite(msg.c) ? msg.c : 0, s: now });
+      return;
+    }
+    if (msg.t === "status") {
+      const waiting = !!msg.waiting;
+      if (waiting !== !!me.waiting) {
+        ws.serializeAttachment({ ...me, waiting });
+        this.shareRoster();
+      }
+      return;
+    }
+    if (msg.t === "chat" || msg.t === "react") {
+      const slot = msg.t === "chat" ? "chatAt" : "reactAt";
+      if (now - (me[slot] || 0) < CHAT_GAP_MS) return;
+      const text = msg.t === "chat" ? clip(msg.text, MAX_CHAT) : "";
+      if (msg.t === "chat" ? !text : !REACTIONS.includes(msg.e)) return;
+      ws.serializeAttachment({ ...me, [slot]: now });
+      this.broadcast(msg.t === "chat" ? { t: "chat", id: me.id, from: me.name, host: !!me.host, text, at: now } : { t: "react", id: me.id, from: me.name, e: msg.e });
+      return;
+    }
+    if (!me.host) return;
+    if (msg.t === "media") {
+      let media;
+      try { media = cleanMedia(msg.media); } catch (e) { return; }
+      room.media = media;
+      this.play = { paused: true, hold: false, pos: media.start, rate: 1, at: now, vid: media.vid };
+      await this.ctx.storage.put({ room, play: this.play });
+      this.broadcast({ t: "media", media, play: this.play });
+    } else if (msg.t === "play") {
+      if (!room.media) return;
+      this.play = cleanPlay(msg, now, room.media.vid);
+      if (!msg.beat) await this.ctx.storage.put("play", this.play);
+      this.broadcast({ t: "play", play: this.play }, ws);
+    } else if (msg.t === "close") {
+      await this.closeRoom("Chủ phòng đã đóng phòng");
+    }
+  }
+
+  async webSocketClose(ws) {
+    try { ws.close(1000, "bye"); } catch (e) {}
+    const room = await this.load();
+    if (!room) return;
+    const me = this.who(ws);
+    if (me.host && !this.sockets(ws).some((s) => this.who(s).host)) {
+      room.hostGone = Date.now();
+      await this.save();
+      await this.schedule();
+    }
+    this.shareRoster(ws);
+  }
+
+  async webSocketError(ws) {
+    await this.webSocketClose(ws);
+  }
+
+  async alarm() {
+    const room = await this.load();
+    if (!room) return;
+    const now = Date.now();
+    if (now >= room.created + ROOM_LIFE_MS) return this.closeRoom("Phòng đã mở quá 12 giờ");
+    if (room.hostGone && now >= room.hostGone + HOST_GRACE_MS) return this.closeRoom("Chủ phòng đã rời phòng");
+    await this.schedule();
+  }
+
+  async closeRoom(message) {
+    for (const ws of this.ctx.getWebSockets()) {
+      this.send(ws, { t: "closed", message });
+      try { ws.close(4404, "closed"); } catch (e) {}
+    }
+    this.room = null;
+    this.play = null;
+    await this.ctx.storage.deleteAlarm();
+    await this.ctx.storage.delete(["room", "play"]);
+  }
+}
+
+function roomCode() {
+  return [...crypto.getRandomValues(new Uint8Array(6))].map((b) => ROOM_LETTERS[b % ROOM_LETTERS.length]).join("");
+}
+
+async function roomCreate(request, env) {
+  const body = await request.json().catch(() => null);
+  const uid = await cachedUserId(body && body.authKey, env);
+  if (!uid) return fail("Phiên đăng nhập Stremio đã hết hạn", 401);
+  for (let i = 0; i < 6; i++) {
+    const code = roomCode();
+    const hostKey = hex(crypto.getRandomValues(new Uint8Array(32)));
+    if (await env.ROOMS.get(env.ROOMS.idFromName(code)).init(hostKey, uid)) return reply({ result: { code, hostKey } });
+  }
+  return fail("Chưa tạo được phòng, hãy thử lại", 503);
+}
+
+function roomSocket(request, env, code) {
+  if ((request.headers.get("upgrade") || "").toLowerCase() !== "websocket") return fail("Cần kết nối WebSocket", 426);
+  if (!ROOM_CODE.test(code)) return fail("Mã phòng không hợp lệ", 404);
+  return env.ROOMS.get(env.ROOMS.idFromName(code)).fetch(request);
+}
+
 async function profileApi(request, env, method) {
   if (!METHODS.has(method)) return fail("not found", 404);
   const body = await request.json().catch(() => null);
@@ -304,6 +555,12 @@ export default {
       if (request.method !== "POST") return fail("method not allowed", 405);
       return profileApi(request, env, pathname.slice("/api/profile/".length));
     }
+    if (pathname === "/api/room/create") {
+      if (request.method !== "POST") return fail("method not allowed", 405);
+      return roomCreate(request, env);
+    }
+    const room = /^\/api\/room\/([A-Za-z0-9]{6})\/ws$/.exec(pathname);
+    if (room) return roomSocket(request, env, room[1].toUpperCase());
     if (pathname !== "/api/relay") return reply({ error: "not found" }, 404);
     if (request.method === "POST") return register(request, env);
     if (request.method === "GET") return lookup(request, env);

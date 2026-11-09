@@ -78,6 +78,7 @@ const ICON = {
   source: '<svg viewBox="0 0 24 24"><rect x="3.5" y="4" width="17" height="6" rx="1.8" fill="none" stroke="currentColor" stroke-width="2"/><rect x="3.5" y="14" width="17" height="6" rx="1.8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M7 7h.01M7 17h.01" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>',
   list: '<svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="12" height="8.5" rx="1.8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M18.5 7v9.5a2 2 0 0 1-2 2H6.5M3.5 17h0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   close: '<svg viewBox="0 0 24 24"><path d="m6.5 6.5 11 11m0-11-11 11" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>',
+  people: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8.5" r="3.3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M3 19.5c.6-3.3 3-5.2 6-5.2s5.4 1.9 6 5.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M15.5 5.6a3.1 3.1 0 0 1 0 5.9M17.6 14.6c1.8.6 3 2.2 3.4 4.9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   cog: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2.8v2.6M12 18.6v2.6M21.2 12h-2.6M5.4 12H2.8M18.5 5.5l-1.8 1.8M7.3 16.7l-1.8 1.8M18.5 18.5l-1.8-1.8M7.3 7.3 5.5 5.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
 };
 
@@ -463,6 +464,7 @@ function editProfile(p) {
 }
 
 async function logout() {
+  roomStop(room.host);
   if (pl.open) closePlayer();
   await flushPrefs();
   try { await call("logout"); } catch (e) {}
@@ -945,6 +947,9 @@ function buildPlayer() {
   ui.cc = iconBtn("cc", "Âm thanh và phụ đề (C)", () => toggleMenu("tracks"));
   ui.eps = iconBtn("list", "Các tập (E)", () => toggleMenu("episodes"));
   ui.src = iconBtn("source", "Nguồn phát (S)", () => toggleMenu("sources"));
+  ui.room = iconBtn("people", "Xem chung (W)", () => roomMenu(), "room-btn");
+  ui.roomCount = h("span", { class: "room-count", hidden: true });
+  ui.room.append(ui.roomCount);
   ui.nextUp = h("button", { class: "pl-nextup", tabindex: "-1", hidden: true, onclick: (e) => { e.stopPropagation(); playNext(false); } });
   ui.speedVal = h("span", {}, "1×");
   ui.speed = h("button", { class: "pl-btn pl-speed", tabindex: "-1", title: "Tốc độ", onclick: (e) => { e.stopPropagation(); toggleMenu("speed"); } }, ...(TOUCH ? [h("span", { html: ICON.speed }), h("span", { class: "pl-label" }, "Tốc độ (", ui.speedVal, ")")] : [ui.speedVal]));
@@ -962,7 +967,7 @@ function buildPlayer() {
   let center = null;
   let bottom;
   if (TOUCH) {
-    for (const [btn, text] of [[ui.eps, "Các tập"], [ui.src, "Nguồn"], [ui.cc, "Phụ đề"], [ui.next, "Tập tiếp"]]) {
+    for (const [btn, text] of [[ui.room, "Xem chung"], [ui.eps, "Các tập"], [ui.src, "Nguồn"], [ui.cc, "Phụ đề"], [ui.next, "Tập tiếp"]]) {
       btn.classList.add("act");
       btn.append(h("span", { class: "pl-label" }, text));
     }
@@ -979,13 +984,13 @@ function buildPlayer() {
     back10.classList.add("big");
     fwd10.classList.add("big");
     center = h("div", { class: "pl-center" }, back10, ui.play, fwd10);
-    bottom = h("div", { class: "pl-bottom" }, seekRow, h("div", { class: "pl-actions" }, ui.lock, ui.stretch, ui.speed, ui.eps, ui.src, ui.cc, ui.next));
+    bottom = h("div", { class: "pl-bottom" }, seekRow, h("div", { class: "pl-actions" }, ui.lock, ui.stretch, ui.speed, ui.room, ui.eps, ui.src, ui.cc, ui.next));
   } else {
     bottom = h("div", { class: "pl-bottom" },
       seekRow,
       h("div", { class: "pl-row" },
         h("div", { class: "pl-group" }, ui.play, back10, fwd10, ui.next, h("div", { class: "pl-volwrap" }, ui.volBtn, ui.vol)),
-        h("div", { class: "pl-group" }, ui.stretch, ui.eps, ui.src, ui.cc, ui.speed, ui.fs)));
+        h("div", { class: "pl-group" }, ui.room, ui.stretch, ui.eps, ui.src, ui.cc, ui.speed, ui.fs)));
   }
   for (const el of [bottom, center].filter(Boolean)) {
     el.addEventListener("click", (e) => e.stopPropagation());
@@ -1434,7 +1439,8 @@ function curTime() {
 }
 
 function togglePause() {
-  if (!pl.s.loaded) return;
+  if (!pl.s.loaded || roomLocked()) return;
+  if (room.hold) roomSkipHold(false);
   flash(pl.s.paused ? "play" : "pause");
   pl.s.paused = !pl.s.paused;
   paintState();
@@ -1443,6 +1449,7 @@ function togglePause() {
 }
 
 function seekTo(t) {
+  if (roomLocked()) { paintTime(); return; }
   const d = pl.s.duration || 0;
   const target = Math.max(0, d ? Math.min(d - 1, t) : t);
   pl.seekTarget = target;
@@ -1452,7 +1459,7 @@ function seekTo(t) {
 }
 
 function seekBy(dt) {
-  if (!pl.s.loaded) return;
+  if (!pl.s.loaded || roomLocked()) return;
   flash(dt < 0 ? "back10" : "fwd10");
   seekTo(curTime() + dt);
   wake();
@@ -1509,9 +1516,11 @@ function paintState() {
   ui.volBtn.innerHTML = s.mute || s.volume === 0 ? ICON.mute : ICON.vol;
   ui.vol.style.setProperty("--v", `${((s.mute ? 0 : s.volume ?? 100) / 150) * 100}%`);
   ui.speedVal.textContent = `${s.speed && s.speed !== 1 ? +s.speed.toFixed(2) : 1}×`;
-  const nx = nextEpisode();
+  const guest = roomGuest();
+  const nx = guest ? null : nextEpisode();
   ui.next.hidden = !nx;
-  ui.eps.hidden = !((pl.ctx?.m?.videos || []).length > 1);
+  ui.eps.hidden = guest || !((pl.ctx?.m?.videos || []).length > 1);
+  ui.speed.hidden = guest;
   const left = (s.duration || 0) - (s.time || 0);
   const showUp = !!nx && s.loaded && s.duration > 300 && left > 0 && left <= 90;
   if (showUp && ui.nextUp.hidden) ui.nextUp.innerHTML = `${ICON.next}<span>Tập tiếp · ${epShort(nx)}</span>`;
@@ -1537,6 +1546,7 @@ function onPlayerState(s) {
   paintState();
   if (pl.menu === "tracks" && s.tracks) renderMenu();
   else if (pl.ui.delayVal && s.subDelay != null) pl.ui.delayVal.textContent = delayText(s.subDelay);
+  if (room.host) hostWatch();
 }
 
 function nextEpisode() {
@@ -1567,7 +1577,7 @@ function sameSource(groups, c) {
 
 async function playEpisode(v, auto) {
   const c = pl.ctx;
-  if (!c || !v) return false;
+  if (!c || !v || roomLocked()) return false;
   const session = ++pl.session;
   call("player_stop").catch(() => {});
   pl.menu = null;
@@ -1879,7 +1889,20 @@ function openPlayer(c) {
 }
 
 function closePlayer(stop = true) {
-  if (!pl.open) return;
+  if (!pl.open) return false;
+  if (stop && roomGuest()) {
+    if (!room.asking) {
+      room.asking = true;
+      roomLeavePrompt().then((leave) => {
+        room.asking = false;
+        if (!leave) return;
+        roomStop(false);
+        toast("Đã rời phòng xem chung");
+        closePlayer();
+      });
+    }
+    return false;
+  }
   pl.open = false;
   navSync();
   pl.session++;
@@ -1890,6 +1913,8 @@ function closePlayer(stop = true) {
   pl.ui.root.hidden = true;
   document.body.classList.remove("playing", "see-through");
   pl.returnFocus?.focus?.({ preventScroll: true });
+  if (room.host) hostWatch();
+  return true;
 }
 
 async function startPlayback(m, vid, label, stream, start, addon) {
@@ -1901,6 +1926,7 @@ async function startPlayback(m, vid, label, stream, start, addon) {
   closeSheet();
   const session = ++pl.session;
   openPlayer({ m, vid, label, stream, addon });
+  if (room.host) roomShareMedia((start || 0) / 1000);
   if (TOUCH && !pl.fs) {
     call("player_fullscreen", { on: true }).then((on) => { pl.fs = on; pl.ui.fs.innerHTML = on ? ICON.unfull : ICON.full; }).catch(() => {});
   }
@@ -1911,6 +1937,597 @@ async function startPlayback(m, vid, label, stream, start, addon) {
     if (pl.session === session) closePlayer(false);
     toast(e, true);
   }
+}
+
+const ROOM_API = document.querySelector('meta[name="wistv-room-api"]')?.content || "https://film.wis237.online/api/room/";
+const ROOM_WS = ROOM_API.replace(/^http/, "ws");
+const ROOM_CODE_RE = /^[A-HJ-NP-Z2-9]{6}$/;
+const ROOM_REACTIONS = ["❤️", "😂", "😮", "😢", "👏", "🔥"];
+const ROOM_HOLD_MS = 30000;
+const ROOM_BEAT_MS = 4000;
+const ROOM_SITE = !TAURI && /^https?:$/.test(location.protocol) ? location.origin + location.pathname : "https://film.wis237.online/";
+const randomId = (n) => [...crypto.getRandomValues(new Uint8Array(n))].map((b) => "abcdefghijklmnopqrstuvwxyz0123456789"[b % 36]).join("");
+
+const room = {
+  code: null, key: null, host: false, me: randomId(12), name: "", ws: null, online: false, leaving: false, tries: 0,
+  retryTimer: null, pingTimer: null, syncTimer: null, members: [], hostOnline: true, media: null, play: null, offset: 0, rtt: Infinity,
+  chat: [], unread: 0, hold: null, skip: new Set(), sent: null, hostPos: 0, bufSince: null, waiting: false, waitSince: null,
+  rateSet: null, cool: { seek: 0, pause: 0 }, joining: null, lastError: "", panel: null, feed: null, pill: null,
+};
+
+const inRoom = () => !!room.code;
+const roomGuest = () => inRoom() && !room.host;
+const serverNow = () => Date.now() + room.offset;
+const roomPos = (p) => (p.paused ? p.pos : p.pos + (Math.max(0, serverNow() - p.at) / 1000) * p.rate);
+const roomInvite = () => `${ROOM_SITE}?room=${room.code}`;
+const roomHostName = () => room.members.find((m) => m.host)?.name || "Chủ phòng";
+const roomColor = (id) => PROFILE_COLORS[[...String(id)].reduce((a, c) => a + c.charCodeAt(0), 0) % PROFILE_COLORS.length];
+const sameMedia = (c, md) => !!c && !!md && c.m.id === md.id && c.vid === md.vid;
+const canHostRoom = () => !!app.user && pl.open && !!pl.ctx && !String(pl.ctx.vid).startsWith("local:");
+
+function roomSend(msg) {
+  const ws = room.ws;
+  if (!ws || ws.readyState !== 1) return false;
+  try { ws.send(JSON.stringify(msg)); return true; } catch (e) { return false; }
+}
+
+function roomLocked() {
+  if (!roomGuest()) return false;
+  toast(`${roomHostName()} đang điều khiển phát, dừng, tua và chọn tập`);
+  return true;
+}
+
+function roomStart({ code, key, name }) {
+  roomStop(false);
+  Object.assign(room, {
+    code, key: key || null, host: !!key, name, online: false, leaving: false, tries: 0, members: [], hostOnline: true, media: null, play: null,
+    offset: 0, rtt: Infinity, chat: [], unread: 0, hold: null, skip: new Set(), sent: null, bufSince: null, waiting: false, waitSince: null,
+    rateSet: null, cool: { seek: 0, pause: 0 }, joining: null, lastError: "",
+  });
+  try { sessionStorage.setItem("wistv.room", JSON.stringify({ code, key: key || null, name })); } catch (e) {}
+  roomConnect();
+  room.syncTimer = setInterval(roomTick, 500);
+  paintRoom();
+}
+
+function roomStop(close) {
+  if (!room.code) return;
+  room.leaving = true;
+  if (close && room.host) roomSend({ t: "close" });
+  const ws = room.ws;
+  room.ws = null;
+  try { ws?.close(1000, "leave"); } catch (e) {}
+  clearTimeout(room.retryTimer);
+  clearInterval(room.pingTimer);
+  clearInterval(room.syncTimer);
+  if (!room.host && pl.open && room.rateSet != null && room.rateSet !== 1) setProp("speed", 1);
+  Object.assign(room, { code: null, key: null, host: false, online: false, members: [], media: null, play: null, hold: null, rateSet: null, joining: null, waiting: false, unread: 0 });
+  try { sessionStorage.removeItem("wistv.room"); } catch (e) {}
+  room.panel?._close?.();
+  paintRoom();
+}
+
+function roomConnect() {
+  clearTimeout(room.retryTimer);
+  const q = new URLSearchParams({ id: room.me, name: room.name });
+  if (room.key) q.set("key", room.key);
+  let ws;
+  try { ws = new WebSocket(`${ROOM_WS}${room.code}/ws?${q}`); } catch (e) { roomRetry(); return; }
+  room.ws = ws;
+  ws.onopen = () => {
+    if (room.ws !== ws) return;
+    room.tries = 0;
+    room.rtt = Infinity;
+    [0, 400, 900].forEach((d) => setTimeout(() => { if (room.ws === ws) roomSend({ t: "ping", c: Date.now() }); }, d));
+    clearInterval(room.pingTimer);
+    room.pingTimer = setInterval(() => roomSend({ t: "ping", c: Date.now() }), 15000);
+  };
+  ws.onmessage = (e) => {
+    if (room.ws !== ws) return;
+    let m;
+    try { m = JSON.parse(e.data); } catch (x) { return; }
+    if (m && typeof m === "object") roomMessage(m);
+  };
+  ws.onclose = (e) => {
+    if (room.ws !== ws) return;
+    room.ws = null;
+    room.online = false;
+    clearInterval(room.pingTimer);
+    if (room.leaving || !room.code) return;
+    if (e.code === 4001) { roomStop(false); toast("Phòng xem chung đã được mở ở cửa sổ khác"); return; }
+    if (e.code >= 4400 && e.code < 4500) { const why = room.lastError || "Phòng xem chung đã đóng"; roomStop(false); toast(why, true); return; }
+    roomRetry();
+    paintRoom();
+  };
+}
+
+function roomRetry() {
+  room.tries++;
+  if (room.tries > 12) { roomStop(false); toast("Mất kết nối phòng xem chung", true); return; }
+  room.retryTimer = setTimeout(() => { if (room.code && !room.ws) roomConnect(); }, Math.min(15000, 1000 * 2 ** Math.min(room.tries - 1, 4)));
+}
+
+function roomMessage(m) {
+  if (m.t === "pong") {
+    const now = Date.now();
+    const rtt = now - m.c;
+    if (rtt >= 0 && rtt <= room.rtt + 40) { room.rtt = Math.min(room.rtt, rtt); room.offset = m.s - (m.c + now) / 2; }
+    return;
+  }
+  if (m.t === "error") { room.lastError = String(m.message || ""); return; }
+  if (m.t === "closed") {
+    const why = String(m.message || "Phòng xem chung đã đóng");
+    const host = room.host;
+    roomStop(false);
+    if (!host) toast(why);
+    return;
+  }
+  if (m.t === "chat") { roomChat(m); return; }
+  if (m.t === "react") { roomReact(m); return; }
+  if (m.t === "welcome") {
+    room.online = true;
+    if (room.rtt === Infinity) room.offset = m.now - Date.now();
+    room.members = Array.isArray(m.members) ? m.members : [];
+    room.hostOnline = !!m.hostOnline;
+    if (room.host) {
+      room.sent = null;
+      if (!pl.open && m.play) room.hostPos = roomPos(m.play);
+      if (pl.open && !sameMedia(pl.ctx, m.media)) roomShareMedia();
+      else roomBeat(false);
+    } else {
+      room.media = m.media || null;
+      room.play = m.play || null;
+      roomFollowMedia();
+    }
+  } else if (m.t === "members") {
+    room.members = Array.isArray(m.members) ? m.members : [];
+    room.hostOnline = !!m.hostOnline;
+    if (room.host) roomHoldCheck();
+  } else if (m.t === "media" && !room.host) {
+    room.media = m.media || null;
+    room.play = m.play || null;
+    roomFollowMedia();
+  } else if (m.t === "play" && !room.host) {
+    room.play = m.play || null;
+    roomSync();
+  } else return;
+  paintRoom();
+}
+
+function roomMediaOf(c, start) {
+  const s = c.stream || {};
+  const bh = s.behaviorHints || {};
+  return {
+    id: c.m.id, type: c.m.type, vid: c.vid, name: c.m.name || "", label: c.label && c.label !== c.m.name ? c.label : "", poster: c.m.poster, background: c.m.background, start: Math.max(0, start || 0),
+    hint: { infoHash: s.infoHash, fileIdx: s.fileIdx, sources: s.sources, filename: bh.filename, bingeGroup: bh.bingeGroup, addon: c.addon, name: s.name, ytId: s.ytId },
+  };
+}
+
+function roomShareMedia(start) {
+  if (!room.host || !room.online || !pl.open || !pl.ctx || String(pl.ctx.vid).startsWith("local:")) return;
+  const at = start ?? curTime();
+  room.hostPos = at;
+  if (roomSend({ t: "media", media: roomMediaOf(pl.ctx, at) })) { room.sent = null; roomBeat(false); }
+}
+
+function hostPlayState() {
+  const s = pl.s;
+  const live = pl.open && !!s.loaded;
+  const t = Date.now();
+  if (live && s.buffering) { if (room.bufSince == null) room.bufSince = t; } else room.bufSince = null;
+  if (live) room.hostPos = s.time || 0;
+  const stalled = room.bufSince != null && t - room.bufSince > 700;
+  return { paused: !live || !!s.paused || stalled, hold: !!room.hold, pos: room.hostPos || 0, rate: s.speed || 1 };
+}
+
+function roomBeat(beat) {
+  if (!room.host || !room.online) return;
+  const p = hostPlayState();
+  if (roomSend({ t: "play", ...p, beat })) room.sent = { ...p, at: Date.now() };
+}
+
+function hostWatch() {
+  if (!room.host || !room.online) return;
+  const last = room.sent;
+  if (!last) { roomBeat(false); return; }
+  const p = hostPlayState();
+  const guess = last.paused ? last.pos : last.pos + ((Date.now() - last.at) / 1000) * last.rate;
+  if (p.paused !== last.paused || p.hold !== last.hold || Math.abs(p.rate - last.rate) > 0.01 || Math.abs(p.pos - guess) > 1.2) roomBeat(false);
+  else if (Date.now() - last.at >= ROOM_BEAT_MS) roomBeat(true);
+}
+
+function roomHoldCheck() {
+  if (!room.host) return;
+  const waiting = room.members.filter((m) => !m.host && m.waiting);
+  for (const id of [...room.skip]) if (!waiting.some((m) => m.id === id)) room.skip.delete(id);
+  const block = waiting.filter((m) => !room.skip.has(m.id));
+  const t = Date.now();
+  if (room.hold) {
+    if (block.length && t - room.hold.since < ROOM_HOLD_MS && pl.open) {
+      const names = block.map((m) => m.name);
+      if (names.join("|") !== room.hold.names.join("|")) { room.hold.names = names; paintRoom(); }
+      return;
+    }
+    block.forEach((m) => room.skip.add(m.id));
+    room.hold = null;
+    if (pl.open && pl.s.paused) cmd("set", "pause", "no");
+    paintRoom();
+    return;
+  }
+  if (block.length && pl.open && pl.s.loaded && !pl.s.paused) {
+    room.hold = { since: t, names: block.map((m) => m.name) };
+    cmd("set", "pause", "yes");
+    paintRoom();
+  }
+}
+
+function roomSkipHold(resume) {
+  if (!room.hold) return;
+  room.members.filter((m) => m.waiting && !m.host).forEach((m) => room.skip.add(m.id));
+  room.hold = null;
+  if (resume && pl.open && pl.s.paused) cmd("set", "pause", "no");
+  paintRoom();
+}
+
+function roomRate(r) {
+  const v = Math.round(r * 100) / 100;
+  if (room.rateSet === v) return;
+  room.rateSet = v;
+  setProp("speed", v);
+}
+
+function roomReport() {
+  const p = room.play;
+  const s = pl.s;
+  const wants = !!p && (!p.paused || !!p.hold);
+  const mine = pl.open && sameMedia(pl.ctx, room.media);
+  let ready = true;
+  if (mine) {
+    const left = s.duration > 0 ? s.duration - (s.time || 0) : 99;
+    const ahead = s.cache != null ? s.cache - (s.time || 0) : 99;
+    ready = !!s.loaded && !s.buffering && (left < 5 || ahead >= (room.waiting ? 4 : 2));
+  }
+  const raw = wants && (!!room.joining || (mine && !ready));
+  const t = Date.now();
+  let next = room.waiting;
+  if (raw) {
+    if (room.waitSince == null) room.waitSince = t;
+    if (t - room.waitSince >= 900) next = true;
+  } else {
+    room.waitSince = null;
+    next = false;
+  }
+  if (next !== room.waiting && roomSend({ t: "status", waiting: next })) room.waiting = next;
+}
+
+function roomSync() {
+  if (!roomGuest()) return;
+  roomReport();
+  const p = room.play;
+  const s = pl.s;
+  if (!p || !pl.open || !sameMedia(pl.ctx, room.media) || !s.loaded || (p.vid && p.vid !== room.media.vid)) return;
+  const t = Date.now();
+  const want = roomPos(p);
+  if (!!s.paused !== !!p.paused && t > room.cool.pause) {
+    cmd("set", "pause", p.paused ? "yes" : "no");
+    room.cool.pause = t + 800;
+  }
+  const drift = (s.time || 0) - want;
+  if (!s.buffering && t > room.cool.seek && Math.abs(drift) > (p.paused ? 0.6 : 2.5)) {
+    const target = Math.max(0, want + (p.paused ? 0 : 0.4));
+    pl.seekTarget = target;
+    pl.seekUntil = t + 2500;
+    cmd("seek", target.toFixed(2), "absolute");
+    room.cool.seek = t + 3000;
+    roomRate(p.rate);
+    return;
+  }
+  roomRate(p.paused || Math.abs(drift) < 0.5 ? p.rate : p.rate * (drift > 0 ? 0.95 : 1.05));
+}
+
+function roomTick() {
+  if (!inRoom()) return;
+  if (room.host) { hostWatch(); roomHoldCheck(); }
+  else roomSync();
+}
+
+function roomMatch(groups, hint) {
+  const all = groups.flatMap((g) => g.streams.filter((s) => s.url || s.infoHash).map((stream) => ({ stream, addon: g.addon })));
+  const tests = [
+    (s) => hint.infoHash && s.infoHash && String(s.infoHash).toLowerCase() === hint.infoHash && (hint.fileIdx == null || s.fileIdx == null || s.fileIdx === hint.fileIdx),
+    (s) => hint.filename && s.behaviorHints?.filename === hint.filename,
+    (s) => hint.bingeGroup && s.behaviorHints?.bingeGroup === hint.bingeGroup,
+  ];
+  for (const test of tests) {
+    const hit = all.find((o) => test(o.stream));
+    if (hit) return hit;
+  }
+  return (hint.addon && hint.name && all.find((o) => o.addon === hint.addon && o.stream.name === hint.name)) || null;
+}
+
+function roomFindStream(md) {
+  const hint = md.hint || {};
+  const torrent = hint.infoHash
+    ? { stream: { infoHash: hint.infoHash, fileIdx: hint.fileIdx, sources: hint.sources, name: hint.name, behaviorHints: { filename: hint.filename, bingeGroup: hint.bingeGroup } }, addon: hint.addon || "" }
+    : null;
+  if (torrent && TAURI) return Promise.resolve(torrent);
+  return new Promise((resolve) => {
+    let over = false;
+    const end = (hit) => { if (!over) { over = true; clearTimeout(timer); resolve(hit || torrent); } };
+    const timer = setTimeout(() => end(null), 15000);
+    watchStreams(md.type, md.vid, (e) => { const hit = roomMatch(loadedGroups(e), hint); if (hit) end(hit); })
+      .then((e) => end(roomMatch(loadedGroups(e), hint)), () => end(null));
+  });
+}
+
+async function roomFollowMedia() {
+  const md = room.media;
+  if (!md || room.host) return;
+  if (pl.open && sameMedia(pl.ctx, md)) { roomSync(); return; }
+  const token = `${md.id}|${md.vid}`;
+  if (room.joining === token) return;
+  room.joining = token;
+  paintRoom();
+  const hit = await roomFindStream(md);
+  if (room.joining !== token) return;
+  room.joining = null;
+  const now = room.media;
+  if (!inRoom() || !now || `${now.id}|${now.vid}` !== token) { paintRoom(); return; }
+  const m = { id: md.id, type: md.type, name: md.name || "", poster: md.poster, background: md.background };
+  if (!hit) {
+    paintRoom();
+    toast(`Không tìm được đúng nguồn ${roomHostName()} đang xem, hãy chọn một nguồn`);
+    openStreams(m, md.vid, md.label);
+    return;
+  }
+  const at = room.play ? roomPos(room.play) : md.start;
+  startPlayback(m, md.vid, md.label, hit.stream, Math.floor(at * 1000), hit.addon);
+  paintRoom();
+}
+
+function roomFeed() {
+  if (!room.feed) { room.feed = h("div", { id: "room-feed" }); document.body.append(room.feed); }
+  return room.feed;
+}
+
+function roomChat(m) {
+  room.chat.push(m);
+  if (room.chat.length > 100) room.chat.shift();
+  if (room.panel) { paintRoom(); return; }
+  if (m.id === room.me) return;
+  room.unread++;
+  const el = h("div", { class: "room-bubble" }, h("b", {}, m.from), m.text);
+  const feed = roomFeed();
+  feed.append(el);
+  while (feed.children.length > 3) feed.firstChild.remove();
+  setTimeout(() => el.remove(), 7000);
+  paintRoom();
+}
+
+function roomReact(m) {
+  const el = h("div", { class: "room-float", style: `left:${62 + Math.random() * 30}%` }, h("span", {}, m.e), h("small", {}, m.from));
+  document.body.append(el);
+  setTimeout(() => el.remove(), 2600);
+}
+
+function roomName() {
+  const saved = pref("roomName", "");
+  if (saved) return saved;
+  return app.user ? profileName(currentProfile()) : "";
+}
+
+function roomDialog({ join, code = "" }) {
+  return new Promise((resolve) => {
+    const done = (v) => { box.remove(); resolve(v); };
+    const box = layer("edit room-dialog", () => done(null));
+    const nameIn = h("input", { class: "pf-input focusable", maxlength: "20", placeholder: "Tên hiện trong phòng", value: roomName(), autocomplete: "off" });
+    const codeIn = join ? h("input", { class: "pf-input focusable room-code-in", maxlength: "6", placeholder: "Ví dụ K7P2QD", value: code, autocapitalize: "characters", autocomplete: "off", spellcheck: "false" }) : null;
+    const msg = h("p", { class: "pin-msg" });
+    const bad = (text, el) => { msg.textContent = text; msg.classList.add("bad"); el.focus(); };
+    const submit = () => {
+      const name = nameIn.value.trim();
+      const c = join ? codeIn.value.trim().toUpperCase() : "";
+      if (join && !ROOM_CODE_RE.test(c)) { bad("Mã phòng gồm 6 chữ và số, ví dụ K7P2QD", codeIn); return; }
+      if (!name) { bad("Nhập tên để mọi người biết bạn là ai", nameIn); return; }
+      setPref("roomName", name);
+      done({ name, code: c });
+    };
+    for (const el of [nameIn, codeIn].filter(Boolean)) el.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } });
+    codeIn?.addEventListener("input", () => { codeIn.value = codeIn.value.toUpperCase(); });
+    put(box, h("div", { class: "pf-card" },
+      h("h2", {}, join ? "Vào phòng xem chung" : "Tạo phòng xem chung"),
+      h("p", { class: "hint" }, join
+        ? "Nhập mã phòng bạn được gửi. Chủ phòng điều khiển phát, dừng, tua và chọn tập; phụ đề và âm lượng bạn tự chỉnh."
+        : "Bạn bè ở máy khác xem cùng lúc với bạn. Chỉ bạn điều khiển phát, dừng, tua và chọn tập."),
+      join ? [h("label", { class: "pf-label" }, "Mã phòng"), codeIn] : null,
+      h("label", { class: "pf-label" }, "Tên của bạn"), nameIn, msg,
+      h("div", { class: "pf-row end" },
+        h("button", { class: "btn focusable", onclick: () => done(null) }, "Huỷ"),
+        h("button", { class: "btn primary focusable", onclick: submit }, join ? "Vào phòng" : "Tạo phòng"))));
+    const first = join && !code ? codeIn : !nameIn.value ? nameIn : $(".btn.primary", box);
+    first.focus({ preventScroll: true });
+  });
+}
+
+async function createRoom() {
+  if (!canHostRoom()) { toast(app.user ? "Mở một phim rồi mới tạo phòng xem chung" : "Đăng nhập tài khoản Stremio để tạo phòng xem chung", true); return; }
+  const r = await roomDialog({ join: false });
+  if (!r) return;
+  let made;
+  try { made = await call("room_create"); } catch (e) { toast(e, true); return; }
+  if (!made?.code || !made?.hostKey) { toast("Máy chủ xem chung trả về dữ liệu lạ", true); return; }
+  if (inRoom()) roomStop(room.host);
+  room.hostPos = curTime();
+  roomStart({ code: made.code, key: made.hostKey, name: r.name });
+  roomPanel();
+}
+
+async function joinRoom(code) {
+  const r = await roomDialog({ join: true, code: code || "" });
+  if (!r) return;
+  if (inRoom() && room.code === r.code) { roomPanel(); return; }
+  if (inRoom()) roomStop(room.host);
+  roomStart({ code: r.code, key: null, name: r.name });
+  toast(`Đang vào phòng ${r.code}…`);
+}
+
+function roomMenu() {
+  if (inRoom()) { roomPanel(); return; }
+  const done = () => box.remove();
+  const box = layer("edit", done);
+  const host = canHostRoom();
+  put(box, h("div", { class: "pf-card" },
+    h("h2", {}, "Xem chung"),
+    h("p", { class: "hint" }, "Xem cùng lúc với bạn bè ở máy khác. Mỗi máy tự tải phim, chỉ chủ phòng điều khiển phát, dừng, tua và chọn tập."),
+    app.user ? null : h("p", { class: "hint" }, "Đăng nhập tài khoản Stremio để tạo phòng. Không cần tài khoản vẫn vào được phòng của người khác."),
+    h("div", { class: "pf-row end" },
+      h("button", { class: "btn focusable", onclick: () => { done(); joinRoom(""); } }, "Vào phòng bằng mã"),
+      host ? h("button", { class: "btn primary focusable", onclick: () => { done(); createRoom(); } }, "Tạo phòng cho phim này") : null)));
+  ($(".btn.primary", box) || $(".btn", box))?.focus({ preventScroll: true });
+}
+
+function roomLeavePrompt() {
+  return new Promise((resolve) => {
+    const done = (v) => { box.remove(); resolve(v); };
+    const box = layer("edit", () => done(false));
+    put(box, h("div", { class: "pf-card" },
+      h("h2", {}, "Rời phòng xem chung?"),
+      h("p", { class: "hint" }, `Bạn đang xem cùng ${roomHostName()}. Thoát trình phát là rời phòng, muốn quay lại thì nhập lại mã ${room.code}.`),
+      h("div", { class: "pf-row end" },
+        h("button", { class: "btn danger focusable", onclick: () => done(true) }, "Rời phòng"),
+        h("button", { class: "btn primary focusable", onclick: () => done(false) }, "Ở lại"))));
+    $(".btn.primary", box).focus({ preventScroll: true });
+  });
+}
+
+async function roomCopy() {
+  const link = roomInvite();
+  try { await navigator.clipboard.writeText(link); toast("Đã sao chép link mời"); }
+  catch (e) { toast(`Link mời: ${link}`); }
+}
+
+function roomStatusText() {
+  if (!room.online) return room.tries ? "Mất kết nối, đang thử lại…" : "Đang kết nối…";
+  if (room.host) return room.hold ? `Đang chờ ${room.hold.names.join(", ")} tải phim…` : "Bạn là chủ phòng. Mọi người phát, dừng, tua và chuyển tập theo bạn.";
+  if (!room.hostOnline) return "Chủ phòng đang mất kết nối, chờ họ quay lại…";
+  if (!room.media) return `Đang chờ ${roomHostName()} chọn phim…`;
+  if (room.joining) return "Đang tìm nguồn giống chủ phòng…";
+  const what = [room.media.name, room.media.label].filter(Boolean).join(" · ");
+  return `${roomHostName()} đang điều khiển${what ? ` · ${what}` : ""}`;
+}
+
+function paintPart(el, sig, build) {
+  if (el._sig === sig) return;
+  el._sig = sig;
+  put(el, build());
+}
+
+function paintRoomPanel() {
+  const box = room.panel;
+  if (!box || !inRoom()) return;
+  const p = box._parts;
+  paintPart(p.head, room.code, () => [
+    h("div", {}, h("small", {}, "Mã phòng"), h("b", { class: "room-code" }, room.code)),
+    h("div", { class: "room-share" },
+      h("button", { class: "btn focusable room-copy", onclick: roomCopy }, "Sao chép link mời"),
+      navigator.share ? h("button", { class: "btn focusable", onclick: () => navigator.share({ title: "Xem chung trên WiS TV", text: `Vào xem cùng mình, mã phòng ${room.code}`, url: roomInvite() }).catch(() => {}) }, "Chia sẻ") : null),
+  ]);
+  const status = roomStatusText();
+  paintPart(p.status, `${status}|${!!room.hold}`, () => [h("span", {}, status), room.hold ? h("button", { class: "btn focusable", onclick: () => roomSkipHold(true) }, "Phát luôn, không chờ") : null]);
+  paintPart(p.people, JSON.stringify(room.members), () => room.members.map((m) => h("span", { class: `room-person ${m.waiting ? "wait" : ""}` },
+    h("i", { class: "pf-face", style: `background:${roomColor(m.id)}` }, firstLetter(m.name)), m.name,
+    m.host ? h("em", {}, "chủ phòng") : null, m.id === room.me ? h("em", {}, "bạn") : null, m.waiting ? h("em", { class: "busy" }, "đang tải") : null)));
+  const last = room.chat[room.chat.length - 1];
+  paintPart(p.log, `${room.chat.length}|${last?.at || 0}`, () => room.chat.length
+    ? room.chat.map((m) => h("p", { class: m.id === room.me ? "me" : "" }, h("b", {}, m.from), m.text))
+    : h("p", { class: "hint" }, "Chưa có tin nhắn. Gửi lời chào cả phòng nhé."));
+  p.log.scrollTop = p.log.scrollHeight;
+  const rejoin = !room.host && !!room.media && !pl.open && !room.joining;
+  paintPart(p.foot, `${room.host}|${rejoin}`, () => [
+    h("button", { class: "btn danger focusable", onclick: () => { const host = room.host; roomStop(host); toast(host ? "Đã đóng phòng xem chung" : "Đã rời phòng xem chung"); } }, room.host ? "Đóng phòng" : "Rời phòng"),
+    rejoin ? h("button", { class: "btn primary focusable", onclick: () => { box._close(); roomFollowMedia(); } }, "Xem cùng phòng") : null,
+  ]);
+}
+
+function roomPanel() {
+  if (!inRoom()) return;
+  if (room.panel) return;
+  const close = () => { box.remove(); if (room.panel === box) room.panel = null; paintRoom(); if (pl.open) wake(); };
+  const box = layer("room-layer", close);
+  box._close = close;
+  room.panel = box;
+  room.unread = 0;
+  const input = h("input", { class: "pf-input room-input focusable", maxlength: "300", placeholder: "Nhắn cho cả phòng…", enterkeyhint: "send", autocomplete: "off" });
+  const send = () => {
+    const text = input.value.trim();
+    if (!text) return;
+    if (roomSend({ t: "chat", text })) input.value = "";
+    else toast("Đang kết nối lại phòng…", true);
+  };
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); send(); } });
+  box.addEventListener("click", (e) => { if (e.target === box) close(); });
+  const parts = { head: h("div", { class: "room-head" }), status: h("div", { class: "room-status" }), people: h("div", { class: "room-people" }), log: h("div", { class: "room-log" }), foot: h("div", { class: "pf-row room-foot" }) };
+  box._parts = parts;
+  put(box, h("div", { class: "room-card" },
+    h("button", { class: "pl-menu-x focusable", "aria-label": "Đóng", html: ICON.close, onclick: close }),
+    h("h2", {}, "Xem chung"),
+    parts.head, parts.status, parts.people,
+    h("div", { class: "room-reacts" }, ROOM_REACTIONS.map((e) => h("button", { class: "room-react-btn focusable", "aria-label": `Thả ${e}`, onclick: () => roomSend({ t: "react", e }) }, e))),
+    parts.log,
+    h("div", { class: "room-send" }, input, h("button", { class: "btn primary focusable", onclick: send }, "Gửi")),
+    parts.foot));
+  paintRoom();
+  (TOUCH ? $(".room-copy", box) : input)?.focus({ preventScroll: true });
+}
+
+function paintRoom() {
+  if (!room.pill) {
+    room.pill = h("button", { id: "room-pill", class: "focusable", hidden: true, onclick: () => roomPanel() });
+    document.body.append(room.pill);
+  }
+  const pill = room.pill;
+  pill.hidden = !inRoom() || !!room.panel;
+  if (inRoom()) {
+    const n = room.members.length || 1;
+    const text = !room.online ? "Đang kết nối phòng…"
+      : room.host ? `Phòng ${room.code} · ${n} người`
+      : !room.media ? `Phòng ${room.code} · chờ chủ phòng chọn phim`
+      : room.joining ? "Đang mở phim của phòng…"
+      : `Phòng ${room.code} · bấm để xem cùng`;
+    put(pill, h("span", { class: "room-dot", html: ICON.people }), h("span", {}, text), room.unread ? h("b", {}, String(room.unread)) : null);
+  }
+  paintRoomPanel();
+  document.body.classList.toggle("in-room", inRoom());
+  if (pl.ui) {
+    pl.ui.roomCount.hidden = !inRoom();
+    pl.ui.roomCount.textContent = inRoom() ? String(room.unread || room.members.length || 1) : "";
+    pl.ui.roomCount.classList.toggle("unread", room.unread > 0);
+    pl.ui.root.classList.toggle("room-guest", roomGuest());
+    if (pl.open) paintState();
+  }
+}
+
+function roomFromUrl() {
+  if (TAURI) return null;
+  const q = new URLSearchParams(location.search);
+  const code = String(q.get("room") || "").trim().toUpperCase();
+  if (!q.has("room")) return null;
+  q.delete("room");
+  const rest = q.toString();
+  history.replaceState(history.state, "", location.pathname + (rest ? `?${rest}` : "") + location.hash);
+  return ROOM_CODE_RE.test(code) ? code : "";
+}
+
+function roomSaved() {
+  let saved = null;
+  try { saved = JSON.parse(sessionStorage.getItem("wistv.room") || "null"); } catch (e) {}
+  return saved && typeof saved === "object" && ROOM_CODE_RE.test(String(saved.code)) && typeof saved.name === "string" && saved.name ? saved : null;
+}
+
+function roomResume(invite) {
+  const saved = roomSaved();
+  if (invite != null && invite !== saved?.code) { joinRoom(invite); return; }
+  if (saved) roomStart(saved);
 }
 
 function playerKey(e) {
@@ -1929,6 +2546,7 @@ function playerKey(e) {
   if (k === "c" || k === "C") { toggleMenu("tracks"); return handled(); }
   if ((k === "e" || k === "E") && !pl.ui.eps.hidden) { toggleMenu("episodes"); return handled(); }
   if (k === "s" || k === "S") { toggleMenu("sources"); return handled(); }
+  if (k === "w" || k === "W") { roomMenu(); return handled(); }
   if (k === "Escape") {
     if (pl.menu) toggleMenu(null);
     else if (pl.fs) toggleFullscreen();
@@ -2210,6 +2828,14 @@ async function renderSettings(view) {
       h("div", { class: "who" }, h("b", {}, profileName(me)),
         h("span", {}, app.profiles.list.length > 1 ? `${app.profiles.list.length} hồ sơ · dùng chung addon, Thư viện và lịch sử riêng` : "Thêm hồ sơ để mỗi người có Thư viện và lịch sử xem riêng")),
       h("button", { class: "btn focusable", onclick: () => openProfiles({ manage: true }).then(() => { paintAvatar(); const cur = app.stack[app.stack.length - 1]; if (cur?.route === "settings") render(); }) }, "Quản lý hồ sơ"))) : null;
+  const together = h("div", { class: "panel" }, h("h3", {}, "Xem chung"),
+    h("p", { class: "hint" }, inRoom()
+      ? `Bạn đang ở phòng ${room.code}${room.host ? " với vai trò chủ phòng" : ""}.`
+      : "Xem cùng lúc với bạn bè ở máy khác, chỉ chủ phòng điều khiển. Muốn tạo phòng: mở phim rồi bấm nút Xem chung trong trình phát."),
+    h("div", { style: "display:flex;gap:12px;flex-wrap:wrap;margin-top:12px" },
+      inRoom()
+        ? h("button", { class: "btn primary focusable", onclick: () => roomPanel() }, "Mở phòng")
+        : h("button", { class: "btn primary focusable", onclick: () => joinRoom("") }, "Vào phòng bằng mã")));
   const list = h("div", { class: "panel" }, h("h3", {}, `Addon (${app.addons.length})`),
     h("div", { style: "display:flex;gap:12px;align-items:center;flex-wrap:wrap" },
       h("button", { class: "btn primary focusable", onclick: () => go("addons") }, "Quản lý addon"),
@@ -2254,7 +2880,7 @@ async function renderSettings(view) {
   paintSubs();
   const version = h("p", { class: "hint", style: "margin-top:18px" });
   if (TAURI?.app?.getVersion) TAURI.app.getVersion().then((v) => { version.textContent = `WiS TV phiên bản ${v}`; }).catch(() => {});
-  view.append(h("div", { class: "page plain" }, h("h1", {}, "Cài đặt"), account, people, own, subs, ios, pc, list, TOUCH ? h("div", { class: "panel" }, h("h3", {}, "Điều khiển"), touchHelp) : help, version));
+  view.append(h("div", { class: "page plain" }, h("h1", {}, "Cài đặt"), account, people, together, own, subs, ios, pc, list, TOUCH ? h("div", { class: "panel" }, h("h3", {}, "Điều khiển"), touchHelp) : help, version));
   $(".panel .btn")?.focus({ preventScroll: true });
 }
 
@@ -2283,11 +2909,12 @@ async function renderLogin(view) {
     }
   });
   const guest = h("button", { class: "link focusable", onclick: async () => { app.guest = true; loadPrefs(); await boot(); } }, "Dùng thử không cần tài khoản");
+  const together = h("button", { class: "link focusable", onclick: async () => { app.guest = true; loadPrefs(); await boot(); joinRoom(""); } }, "Vào phòng xem chung bằng mã");
   view.append(h("div", { class: "login page" }, wall,
     h("div", { class: "login-card" },
       h("div", { class: "brand" }, h("span", { class: "brand-w" }, "WiS"), h("span", { class: "brand-tv" }, "TV")),
       h("p", {}, "Đăng nhập bằng tài khoản Stremio để dùng addon và thư viện của bạn."),
-      form, guest)));
+      form, guest, together)));
   email.focus({ preventScroll: true });
   try {
     const addons = await web.addons();
@@ -2600,7 +3227,7 @@ if (!TAURI) {
 function stepBack() {
   const top = topLayer();
   if (top) { top._back?.(); return true; }
-  if (pl.open) { closePlayer(); return true; }
+  if (pl.open) return closePlayer();
   if (!$("#sheet").hidden) { closeSheet(); return true; }
   if (app.stack.length > 1) { app.stack.pop(); render(); return true; }
   const cur = app.stack[0]?.route;
@@ -2676,7 +3303,7 @@ function moveFocus(dir) {
 }
 
 document.addEventListener("keydown", (e) => {
-  if (pl.open) { playerKey(e); return; }
+  if (pl.open && !topLayer()) { playerKey(e); return; }
   const inInput = e.target instanceof HTMLInputElement;
   const dirs = { ArrowLeft: "l", ArrowRight: "r", ArrowUp: "u", ArrowDown: "d" };
   if (dirs[e.key]) {
@@ -2688,7 +3315,7 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     if (inInput && e.key === "Escape") e.target.blur();
     back();
-  } else if (e.key === "/" && !inInput) {
+  } else if (e.key === "/" && !inInput && !pl.open && !topLayer()) {
     e.preventDefault();
     go("search");
   }
@@ -2772,7 +3399,7 @@ document.addEventListener("mouseup", (e) => { if (e.button === 3) back(); });
   listen("player-ended", ({ payload }) => {
     if (!pl.open || payload.session !== pl.session) return;
     if (payload.error) toast(`Trình phát: ${payload.error}`, true);
-    if (payload.ended && nextEpisode()) { playNext(true); return; }
+    if (payload.ended && nextEpisode() && !roomGuest()) { playNext(true); return; }
     closePlayer(false);
   });
   listen("library-changed", async ({ payload }) => {
@@ -2829,7 +3456,10 @@ async function boot() {
 
 (async () => {
   try { app.user = await call("session"); } catch (e) { app.user = null; }
+  const invite = roomFromUrl();
   if (app.user) await startSignedIn();
+  else if (invite != null || roomSaved()) { app.guest = true; loadPrefs(); await boot(); }
   else go("login");
   startupOpen();
+  if (app.user || app.guest) roomResume(invite);
 })();

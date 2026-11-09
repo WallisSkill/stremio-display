@@ -47,6 +47,7 @@ pub fn run() {
             commands::profile_unlock,
             commands::prefs_get,
             commands::prefs_set,
+            commands::room_create,
             commands::play,
             commands::player_command,
             commands::player_set,

@@ -3,6 +3,7 @@ use serde_json::{json, Value};
 
 const API: &str = "https://api.strem.io/api/";
 const PROFILE_API: &str = "https://film.wis237.online/api/profile/";
+const ROOM_API: &str = "https://film.wis237.online/api/room/";
 pub const MAIN_PROFILE: &str = "main";
 
 #[derive(Clone, Default)]
@@ -69,6 +70,10 @@ pub async fn prefs_get(http: &reqwest::Client, auth_key: &str, profile: &Profile
 pub async fn prefs_set(http: &reqwest::Client, auth_key: &str, profile: &Profile, prefs: &Value) -> Result<(), String> {
     let body = json!({ "authKey": auth_key, "profile": profile.id, "token": profile.token, "prefs": prefs });
     call_at(http, PROFILE_API, "máy chủ hồ sơ", "prefsSet", body).await.map(|_| ())
+}
+
+pub async fn room_create(http: &reqwest::Client, auth_key: &str) -> Result<Value, String> {
+    call_at(http, ROOM_API, "máy chủ xem chung", "create", json!({ "authKey": auth_key })).await
 }
 
 pub async fn profile_unlock(http: &reqwest::Client, auth_key: &str, id: &str, pin: &str) -> Result<String, String> {

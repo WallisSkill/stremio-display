@@ -199,6 +199,12 @@ pub async fn profiles_save(st: State<'_, AppState>, list: Value, tokens: Option<
 }
 
 #[tauri::command]
+pub async fn room_create(st: State<'_, AppState>) -> R<Value> {
+    let key = st.auth_key().ok_or("Đăng nhập tài khoản Stremio để tạo phòng xem chung")?;
+    api::room_create(&st.http, &key).await
+}
+
+#[tauri::command]
 pub async fn prefs_get(st: State<'_, AppState>) -> R<Value> {
     let Some(key) = st.auth_key() else {
         return Ok(Value::Null);

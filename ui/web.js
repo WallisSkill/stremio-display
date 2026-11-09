@@ -51,18 +51,22 @@ function activeProfile() {
   return ok ? { id: saved.id, token: String(saved.token || "") } : { id: MAIN_PROFILE, token: "" };
 }
 
-async function profileApi(method, body) {
+const ROOM_API = document.querySelector('meta[name="wistv-room-api"]')?.content || "https://film.wis237.online/api/room/";
+
+async function workerApi(base, who, method, body) {
   let res;
   try {
-    res = await fetch(PROFILE_API + method, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    res = await fetch(base + method, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   } catch (e) {
-    throw "Không kết nối được máy chủ hồ sơ";
+    throw `Không kết nối được ${who}`;
   }
   const data = await res.json().catch(() => null);
-  if (!data) throw "Phản hồi máy chủ hồ sơ không hợp lệ";
+  if (!data) throw `Phản hồi ${who} không hợp lệ`;
   if (data.error) throw (data.error.message || data.error);
   return data.result;
 }
+
+const profileApi = (method, body) => workerApi(PROFILE_API, "máy chủ hồ sơ", method, body);
 
 const datastore = (profile, method, body) =>
   profile.id === MAIN_PROFILE ? api(method, body) : profileApi(method, { ...body, profile: profile.id, token: profile.token });
@@ -409,7 +413,7 @@ function snapshot() {
     time: v.currentTime || 0,
     duration: isFinite(v.duration) ? v.duration : 0,
     paused: v.paused,
-    buffering: P.buffering || !P.loaded,
+    buffering: !P.loaded || v.seeking || (P.buffering && v.readyState < 3),
     cache: P.loaded ? bufferedEnd() : null,
     cachePercent: null,
     volume: Math.round(v.volume * 100),
@@ -708,6 +712,7 @@ function command({ args }) {
   if (c === "cycle" && a === "pause") { if (v.paused) v.play().catch(() => {}); else v.pause(); return; }
   if (c === "cycle" && a === "mute") { v.muted = !v.muted; return; }
   if (c === "set" && a === "mute") { v.muted = b === "yes"; return; }
+  if (c === "set" && a === "pause") { if (b === "yes") v.pause(); else v.play().catch(() => {}); return; }
   if (c === "seek") {
     const n = Number(a);
     const dur = isFinite(v.duration) ? v.duration : Infinity;
@@ -872,6 +877,10 @@ export const web = {
     const key = needKey("Đăng nhập tài khoản Stremio để dùng hồ sơ");
     const saved = await profileApi("profilesSet", { authKey: key, profiles: list, tokens: tokens || {} });
     return profileList(Array.isArray(saved) ? saved : []);
+  },
+  async room_create() {
+    const key = needKey("Đăng nhập tài khoản Stremio để tạo phòng xem chung");
+    return workerApi(ROOM_API, "máy chủ xem chung", "create", { authKey: key });
   },
   async prefs_get() {
     const key = authKey();
