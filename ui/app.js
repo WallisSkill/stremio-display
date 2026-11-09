@@ -337,6 +337,31 @@ function renderBrowse(view, filterType) {
       setHero(featured[fi], info, dots, fi);
     }, 9000);
   };
+  const showFeatured = (k) => {
+    if (!featured.length) return;
+    clearTimeout(app.previewTimer);
+    fi = (k + featured.length) % featured.length;
+    setHero(featured[fi], info, dots, fi);
+    rotate();
+  };
+  let touchFrom = null;
+  let swipedAt = 0;
+  hero.addEventListener("touchstart", (e) => {
+    touchFrom = e.touches.length === 1 ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null;
+  }, { passive: true });
+  hero.addEventListener("touchend", (e) => {
+    const t = e.changedTouches[0];
+    if (!touchFrom || !t) return;
+    const dx = t.clientX - touchFrom.x;
+    const dy = t.clientY - touchFrom.y;
+    touchFrom = null;
+    if (Math.abs(dx) < 45 || Math.abs(dx) < Math.abs(dy) * 1.4) return;
+    swipedAt = Date.now();
+    showFeatured(fi + (dx < 0 ? 1 : -1));
+  }, { passive: true });
+  hero.addEventListener("click", (e) => {
+    if (Date.now() - swipedAt < 400) { e.preventDefault(); e.stopPropagation(); }
+  }, true);
   const preview = (m) => {
     clearTimeout(app.previewTimer);
     app.previewTimer = setTimeout(() => {
@@ -380,7 +405,7 @@ function renderBrowse(view, filterType) {
       onLoaded: i === 0 ? (items) => {
         featured = items.filter((m) => m.description || m.background).slice(0, 7);
         if (!featured.length) featured = items.slice(0, 7);
-        dots.replaceChildren(...featured.map(() => h("i")));
+        dots.replaceChildren(...featured.map((m, k) => h("button", { class: "hero-dot", tabindex: "-1", "aria-label": m.name || `Phim ${k + 1}`, onclick: () => showFeatured(k) }, h("i"))));
         fi = 0;
         setHero(featured[0], info, dots, 0);
         rotate();
