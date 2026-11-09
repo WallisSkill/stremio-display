@@ -94,7 +94,7 @@ def markdown(items):
 
 
 def main():
-    past = [h for h in history() if isinstance(h, dict) and h.get("version") != VERSION]
+    past = [h for h in history() if isinstance(h, dict) and h.get("version") and h.get("version") != VERSION]
     since = next((h["commit"] for h in past if h.get("commit") and reachable(h["commit"])), None)
     entry = {
         "version": VERSION,

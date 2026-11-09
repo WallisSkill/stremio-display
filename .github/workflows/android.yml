@@ -57,6 +57,7 @@ jobs:
         run: |
           set -o pipefail
           VERSION="0.1.${{ github.run_number }}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           printf '{"version":"%s"}' "$VERSION" > "$RUNNER_TEMP/version.json"
           cd src-tauri
           cargo tauri android build --apk --split-per-abi --target aarch64 --config "$RUNNER_TEMP/version.json" 2>&1 | tee "$RUNNER_TEMP/build.log"

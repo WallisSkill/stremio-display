@@ -73,6 +73,8 @@ jobs:
           adb shell input keyevent KEYCODE_Z
           sleep 5
           shot 6-toggle-1
+          sleep 15
+          shot 6-toggle-1b
           adb shell input keyevent KEYCODE_Z
           sleep 5
           shot 6-toggle-2

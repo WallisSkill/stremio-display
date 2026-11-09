@@ -124,7 +124,7 @@
       if (!m) return [];
       try {
         const list = JSON.parse(m[1]);
-        return Array.isArray(list) ? list.filter((v) => v && typeof v.version === "string") : [];
+        return Array.isArray(list) ? list.filter((v) => v && typeof v.version === "string" && v.version) : [];
       } catch (e) {
         return [];
       }
