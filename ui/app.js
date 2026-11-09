@@ -961,7 +961,10 @@ function buildPlayer() {
   ui.stretch = iconBtn(fillMode ? "fit" : "fill", fillMode ? "Giữ đúng tỉ lệ (Z)" : "Dãn kín màn hình (Z)", () => setFill(!fillMode, true));
   ui.clock = h("span", { class: "pl-clock" });
   ui.batt = h("span", { class: "pl-batt", hidden: true });
-  const top = h("div", { class: "pl-top" }, iconBtn("left", "Quay lại (Esc)", () => closePlayer()), h("div", { class: "pl-titles" }, ui.title, ui.sub), h("div", { class: "pl-status" }, ui.clock, ui.batt));
+  if (TOUCH) {
+    ui.lock = h("button", { class: "pl-lock", tabindex: "-1", title: "Khoá màn hình", "aria-label": "Khoá màn hình", onclick: (e) => { e.stopPropagation(); setLock(true); } }, h("span", { html: ICON.lock }), h("span", { class: "pl-label" }, "Khoá"));
+  }
+  const top = h("div", { class: "pl-top" }, h("div", { class: "pl-lead" }, iconBtn("left", "Quay lại (Esc)", () => closePlayer()), h("div", { class: "pl-titles" }, ui.title, ui.sub)), ...(ui.lock ? [ui.lock] : []), h("div", { class: "pl-status" }, ui.clock, ui.batt));
   const back10 = iconBtn("back10", "Lùi 10 giây (←)", () => seekBy(-10));
   const fwd10 = iconBtn("fwd10", "Tới 10 giây (→)", () => seekBy(10));
   const seekRow = h("div", { class: "pl-seekrow" }, ui.seek, ui.time);
@@ -977,15 +980,14 @@ function buildPlayer() {
     ui.fillLabel = h("span", { class: "pl-label" }, fillMode ? "Vừa hình" : "Dãn hình");
     ui.stretch.classList.add("act");
     put(ui.stretch, ui.fillIcon, ui.fillLabel);
-    ui.lock = iconBtn("lock", "Khoá màn hình", () => setLock(true));
-    ui.lock.classList.add("act");
-    ui.lock.append(h("span", { class: "pl-label" }, "Khoá"));
     ui.unlock = h("button", { class: "pl-unlock", tabindex: "-1", onclick: (e) => { e.stopPropagation(); setLock(false); } }, h("span", { html: ICON.unlock }), h("span", {}, "Mở khoá"));
     ui.play.classList.add("huge");
     back10.classList.add("big");
     fwd10.classList.add("big");
     center = h("div", { class: "pl-center" }, back10, ui.play, fwd10);
-    bottom = h("div", { class: "pl-bottom" }, seekRow, h("div", { class: "pl-actions" }, ui.lock, ui.stretch, ui.speed, ui.room, ui.eps, ui.src, ui.cc, ui.next));
+    ui.actions = h("div", { class: "pl-actions" }, ui.stretch, ui.speed, ui.room, ui.eps, ui.src, ui.cc, ui.next);
+    bottom = h("div", { class: "pl-bottom" }, seekRow, ui.actions);
+    window.addEventListener("resize", () => { ui.fitSig = ""; fitActions(); });
   } else {
     bottom = h("div", { class: "pl-bottom" },
       seekRow,
@@ -1529,6 +1531,20 @@ function paintState() {
   ui.nextUp.hidden = !showUp;
   ui.root.classList.toggle("paused", !!s.paused);
   paintTime();
+  fitActions();
+}
+
+function fitActions() {
+  const ui = pl.ui;
+  const row = ui?.actions;
+  if (!row || ui.root.hidden) return;
+  const sig = `${innerWidth}|${ui.speedVal.textContent}|${[...row.children].map((b) => (b.hidden ? 0 : 1)).join("")}`;
+  if (sig === ui.fitSig) return;
+  ui.fitSig = sig;
+  row.classList.remove("stack", "bare");
+  const over = () => row.scrollWidth > row.clientWidth + 1;
+  if (over()) row.classList.add("stack");
+  if (over()) row.classList.add("bare");
 }
 
 function onPlayerState(s) {
