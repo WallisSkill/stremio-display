@@ -265,9 +265,24 @@ async function loadProfiles() {
   paintAvatar();
 }
 
+function followViewport() {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const root = document.documentElement.style;
+  const sync = () => { root.setProperty("--vvh", `${Math.round(vv.height)}px`); root.setProperty("--vvt", `${Math.round(vv.offsetTop)}px`); };
+  vv.addEventListener("resize", sync);
+  vv.addEventListener("scroll", sync);
+  sync();
+}
+followViewport();
+
 function layer(cls, onBack) {
   const el = h("div", { class: `layer ${cls}` });
   el._back = onBack;
+  el.addEventListener("focusin", (e) => {
+    if (!TOUCH || !e.target.matches("input, textarea")) return;
+    setTimeout(() => e.target.closest(".pf-card, .room-card, .layer > *")?.querySelector(".pf-row, .room-send")?.scrollIntoView({ block: "nearest" }), 350);
+  });
   document.body.append(el);
   return el;
 }
@@ -2423,8 +2438,8 @@ function roomDialog({ join, code = "" }) {
   return new Promise((resolve) => {
     const done = (v) => { box.remove(); resolve(v); };
     const box = layer("edit room-dialog", () => done(null));
-    const nameIn = h("input", { class: "pf-input focusable", maxlength: "20", placeholder: "Tên hiện trong phòng", value: roomName(), autocomplete: "off" });
-    const codeIn = join ? h("input", { class: "pf-input focusable room-code-in", maxlength: "6", placeholder: "Ví dụ K7P2QD", value: code, autocapitalize: "characters", autocomplete: "off", spellcheck: "false" }) : null;
+    const nameIn = h("input", { class: "pf-input focusable", maxlength: "20", placeholder: "Tên hiện trong phòng", value: roomName(), autocomplete: "off", enterkeyhint: "go" });
+    const codeIn = join ? h("input", { class: "pf-input focusable room-code-in", maxlength: "6", placeholder: "Ví dụ K7P2QD", value: code, autocapitalize: "characters", autocomplete: "off", spellcheck: "false", enterkeyhint: "next" }) : null;
     const msg = h("p", { class: "pin-msg" });
     const bad = (text, el) => { msg.textContent = text; msg.classList.add("bad"); el.focus(); };
     const submit = () => {
@@ -2448,7 +2463,7 @@ function roomDialog({ join, code = "" }) {
       h("div", { class: "pf-row end" },
         h("button", { class: "btn focusable", onclick: () => done(null) }, "Huỷ"),
         h("button", { class: "btn primary focusable", onclick: submit }, join ? "Vào phòng" : "Tạo phòng"))));
-    const first = join && !code ? codeIn : !nameIn.value ? nameIn : $(".btn.primary", box);
+    const first = TOUCH ? $(".btn.primary", box) : join && !code ? codeIn : !nameIn.value ? nameIn : $(".btn.primary", box);
     first.focus({ preventScroll: true });
   });
 }
@@ -2574,12 +2589,12 @@ function roomPanel() {
   box._parts = parts;
   put(box, h("div", { class: "room-card" },
     h("button", { class: "pl-menu-x focusable", "aria-label": "Đóng", html: ICON.close, onclick: close }),
-    h("h2", {}, "Xem chung"),
-    parts.head, parts.status, parts.people,
-    h("div", { class: "room-reacts" }, ROOM_REACTIONS.map((e) => h("button", { class: "room-react-btn focusable", "aria-label": `Thả ${e}`, onclick: () => roomSend({ t: "react", e }) }, e))),
-    parts.log,
-    h("div", { class: "room-send" }, input, h("button", { class: "btn primary focusable", onclick: send }, "Gửi")),
-    parts.foot));
+    h("div", { class: "room-col" }, h("h2", {}, "Xem chung"), parts.head, parts.status, parts.people),
+    h("div", { class: "room-col talk" },
+      h("div", { class: "room-reacts" }, ROOM_REACTIONS.map((e) => h("button", { class: "room-react-btn focusable", "aria-label": `Thả ${e}`, onclick: () => roomSend({ t: "react", e }) }, e))),
+      parts.log,
+      h("div", { class: "room-send" }, input, h("button", { class: "btn primary focusable", onclick: send }, "Gửi")),
+      parts.foot)));
   paintRoom();
   (TOUCH ? $(".room-copy", box) : input)?.focus({ preventScroll: true });
 }

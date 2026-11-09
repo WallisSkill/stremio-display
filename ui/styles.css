@@ -744,7 +744,8 @@ body.web-playing #wv { display: block; }
 .sh-x { flex: none; width: 40px; height: 40px; display: grid; place-items: center; background: none; border: 0; color: #fff; cursor: pointer; border-radius: 50%; }
 .sh-term:focus-visible, .sh-x:focus-visible { outline: 2px solid rgba(255,255,255,0.8); outline-offset: 2px; }
 
-.layer { position: fixed; inset: 0; z-index: 45; display: grid; place-items: center; overflow-y: auto; padding: max(24px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom)); background: rgba(6,6,9,0.94); animation: fade 260ms var(--ease); }
+.layer { position: fixed; inset: var(--vvt, 0px) 0 auto 0; height: var(--vvh, 100%); z-index: 45; display: grid; place-items: center; overflow-y: auto; overscroll-behavior: contain; padding: max(24px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); background: rgba(6,6,9,0.94); animation: fade 260ms var(--ease); }
+.layer > * { margin-block: auto; }
 .layer.pin-layer, .layer.edit { background: rgba(6,6,9,0.82); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
 .pf-screen { display: flex; flex-direction: column; align-items: center; gap: 26px; width: min(980px, 100%); text-align: center; }
 .pf-screen h1 { margin: 0; font-size: clamp(28px, 4vw, 46px); font-weight: 700; letter-spacing: -0.02em; }
@@ -804,8 +805,11 @@ body.web-playing #wv { display: block; }
 #player.touch .pl-btn.act > span.room-count[hidden] { display: none; }
 #player.room-guest .pl-seek { cursor: default; }
 .layer.room-layer { place-items: center end; padding-right: clamp(16px, 3vw, 44px); background: rgba(6,6,9,0.45); }
-.room-card { position: relative; display: flex; flex-direction: column; gap: 14px; width: min(400px, 100%); max-height: calc(100dvh - 48px); padding: 24px 22px; border-radius: 22px; background: rgba(20,20,26,0.95); border: 1px solid var(--line); box-shadow: 0 24px 60px rgba(0,0,0,0.55); }
+.room-card { position: relative; display: flex; flex-direction: column; gap: 14px; width: min(400px, 100%); max-height: calc(var(--vvh, 100dvh) - 48px); overflow-y: auto; overscroll-behavior: contain; padding: 24px 22px; border-radius: 22px; background: rgba(20,20,26,0.95); border: 1px solid var(--line); box-shadow: 0 24px 60px rgba(0,0,0,0.55); }
 .room-card h2 { margin: 0; font-size: 20px; }
+.room-card > .pl-menu-x { position: absolute; top: 14px; right: 14px; margin: 0; width: 36px; height: 36px; flex: none; }
+.room-col { display: flex; flex-direction: column; gap: inherit; min-width: 0; }
+.room-col.talk { flex: 1 1 auto; min-height: 0; }
 .room-head { display: flex; flex-direction: column; gap: 10px; }
 .room-head small { display: block; font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint); }
 .room-code { display: block; font-size: 34px; font-weight: 800; letter-spacing: 0.18em; user-select: all; -webkit-user-select: all; }
@@ -847,8 +851,32 @@ body.playing #room-pill { display: none; }
 @media (max-width: 760px) {
   #room-pill { right: 12px; bottom: calc(76px + env(safe-area-inset-bottom)); }
   .layer.room-layer { place-items: end center; padding: 12px; }
-  .room-card { max-height: 84dvh; padding: 20px 16px; }
+  .layer.room-layer > * { margin-block: auto 0; }
+  .room-card { max-height: min(84dvh, calc(var(--vvh, 100dvh) - 24px)); padding: 20px 16px; }
   .room-code { font-size: 28px; }
   .room-log { max-height: 160px; }
 }
 body:not(.playing) .layer.room-layer { background: rgba(6,6,9,0.82); }
+@media (max-height: 520px) {
+  .layer { padding-top: max(10px, env(safe-area-inset-top)); padding-bottom: max(10px, env(safe-area-inset-bottom)); }
+  .pf-card, .pin-card { gap: 10px; padding: 18px 22px; border-radius: 20px; }
+  .pf-card h2, .pin-card h2 { font-size: 19px; }
+  .pf-card .hint { font-size: 13px; line-height: 1.4; }
+  .pf-label { margin: 2px 0 -4px; }
+  .pf-input { height: 42px; }
+  .pf-row.end { margin-top: 2px; }
+  .pf-row .btn { height: 40px; }
+  .room-dialog .pf-card { width: min(560px, 100%); }
+  .layer.room-layer { padding-top: 10px; padding-bottom: 10px; }
+  .room-card { gap: 10px; padding: 16px 18px; max-height: calc(var(--vvh, 100dvh) - 20px); }
+  .room-code { font-size: 26px; }
+  .room-log { min-height: 48px; max-height: 110px; }
+  body:has(.layer) .toast { bottom: auto; top: max(10px, env(safe-area-inset-top)); }
+}
+.layer { scroll-padding: 12px; }
+@media (max-height: 520px) and (orientation: landscape) and (min-width: 600px) {
+  .room-card { flex-direction: row; gap: 20px; width: min(780px, 100%); height: calc(var(--vvh, 100dvh) - 20px); overflow: hidden; }
+  .room-col { flex: 1 1 0; overflow-y: auto; overscroll-behavior: contain; gap: 10px; padding-right: 2px; }
+  .room-col.talk { padding-top: 34px; }
+  .room-log { flex: 1 1 auto; max-height: none; }
+}
