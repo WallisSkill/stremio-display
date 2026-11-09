@@ -3573,7 +3573,89 @@ async function boot() {
   go("home");
 }
 
+function playIntro() {
+  const box = h("div", { id: "intro", "aria-hidden": "true" });
+  document.body.append(box);
+  const NS = "http://www.w3.org/2000/svg";
+  const el = (tag, attrs, parent) => { const n = document.createElementNS(NS, tag); for (const k in attrs) n.setAttribute(k, attrs[k]); if (parent) parent.append(n); return n; };
+  const W = 640, H = 260, BASE = 150, SIZE = 112, SY = BASE + 24;
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, width: "100%", height: "100%", preserveAspectRatio: "xMidYMid meet" }, box);
+  const font = getComputedStyle(document.body).fontFamily.replace(/"/g, "'");
+  const defs = el("defs", {}, svg);
+  const filter = el("filter", { id: "intro-bend", x: "-20%", y: "-60%", width: "140%", height: "220%" }, defs);
+  const noise = el("feTurbulence", { type: "fractalNoise", baseFrequency: "0.012 0.05", numOctaves: "2", seed: "4", result: "n" }, filter);
+  const warp = el("feDisplacementMap", { in: "SourceGraphic", in2: "n", scale: "0", xChannelSelector: "R", yChannelSelector: "G" }, filter);
+  const grad = el("linearGradient", { id: "intro-fill", gradientUnits: "userSpaceOnUse" }, defs);
+  const stops = ["#ffffff", "#d2d2dc", "#ffffff", "#d2d2dc", "#b9b9c6"].map((c, i) => el("stop", { offset: i === 4 ? 1 : 0, "stop-color": c }, grad));
+  const probe = el("text", { x: 0, y: BASE, "font-size": SIZE, "font-weight": 800, style: `font-family:${font}` }, svg);
+  probe.textContent = "WiS";
+  const xs = [0, 1, 2].map((i) => probe.getStartPositionOfChar(i).x);
+  const wWiS = probe.getComputedTextLength();
+  probe.textContent = "TV";
+  probe.setAttribute("font-weight", 400);
+  const wTV = probe.getComputedTextLength();
+  probe.remove();
+  const gap = SIZE * 0.24;
+  const total = wWiS + gap + wTV;
+  const x0 = (W - total) / 2;
+  for (const [k, v] of [["x1", x0], ["y1", BASE - SIZE * 0.75], ["x2", x0 + wWiS], ["y2", BASE]]) grad.setAttribute(k, v);
+  const scene = el("g", {}, svg);
+  const string = el("path", { fill: "none", stroke: "#ffffff", "stroke-width": 2.4, "stroke-linecap": "round" }, scene);
+  const word = el("g", { filter: "url(#intro-bend)" }, scene);
+  const letters = [..."WiS"].map((ch, i) => {
+    const t = el("text", { x: x0 + xs[i], y: BASE, "font-size": SIZE, "font-weight": 800, fill: "url(#intro-fill)", opacity: 0, style: `font-family:${font}` }, word);
+    t.textContent = ch;
+    return { t, cx: x0 + (xs[i] + (i < 2 ? xs[i + 1] : wWiS)) / 2 };
+  });
+  const tv = el("text", { x: x0 + wWiS + gap, y: BASE, "font-size": SIZE, "font-weight": 400, fill: "#ffffff", "fill-opacity": 0.6, opacity: 0, style: `font-family:${font}` }, scene);
+  tv.textContent = "TV";
+  const clamp = (v) => Math.max(0, Math.min(1, v));
+  const easeOut = (p) => 1 - Math.pow(1 - p, 3);
+  const spring = (p) => (p >= 1 ? 1 : 1 - Math.exp(-5 * p) * Math.cos(9 * p));
+  const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const t0 = performance.now();
+  let exitAt = still ? 500 : 2050;
+  let exitLen = 550;
+  const clock = () => (still ? 1400 : 0) + performance.now() - t0;
+  const skip = () => { const t = clock() - (still ? 1400 : 0); if (t < exitAt) { exitAt = t; exitLen = 280; } };
+  box.addEventListener("pointerdown", skip);
+  window.addEventListener("keydown", skip, true);
+  const frame = () => {
+    const t = clock();
+    const half = (total / 2 + 34) * easeOut(clamp(t / 500)) * (1 - 0.55 * easeOut(clamp((t - 1300) / 500)));
+    const amp = 20 * Math.sin(Math.PI * clamp((t - 100) / 1300)) * Math.exp(-Math.max(0, t - 500) / 450);
+    let d = "";
+    for (let x = W / 2 - half; x <= W / 2 + half + 0.1; x += 5) {
+      const u = (x - (W / 2 - half)) / Math.max(1, 2 * half);
+      d += `${d ? "L" : "M"}${x.toFixed(1)} ${(SY + amp * Math.sin(u * Math.PI) * Math.sin(u * 5 * Math.PI - t * 0.014)).toFixed(1)}`;
+    }
+    string.setAttribute("d", d || `M${W / 2} ${SY}`);
+    string.setAttribute("opacity", ((1 - clamp((t - 1500) / 450)) * 0.92).toFixed(3));
+    letters.forEach((L, i) => {
+      const p = clamp((t - 300 - i * 110) / 750);
+      const sk = (1 - spring(p)) * -32 + 7 * Math.sin(Math.PI * clamp((t - 1150 - i * 85) / 380));
+      L.t.setAttribute("opacity", clamp(p * 4).toFixed(3));
+      L.t.setAttribute("transform", `translate(${L.cx} ${SY}) skewX(${sk.toFixed(2)}) scale(1 ${Math.max(0.02, spring(p)).toFixed(3)}) translate(${-L.cx} ${-SY})`);
+    });
+    const pt = easeOut(clamp((t - 760) / 600));
+    tv.setAttribute("opacity", pt.toFixed(3));
+    tv.setAttribute("transform", `translate(${((1 - pt) * 26).toFixed(1)} 0)`);
+    warp.setAttribute("scale", (34 * (1 - easeOut(clamp((t - 250) / 1100))) * clamp(t / 250)).toFixed(2));
+    noise.setAttribute("baseFrequency", `0.012 ${(0.05 + 0.025 * Math.sin(t / 70)).toFixed(4)}`);
+    const sh = -0.3 + 1.6 * clamp((t - 1350) / 650);
+    [sh - 0.16, sh, sh + 0.16].forEach((o, i) => stops[i + 1].setAttribute("offset", clamp(o).toFixed(3)));
+    const pe = clamp((t - (still ? 1400 : 0) - exitAt) / exitLen);
+    scene.setAttribute("transform", `translate(${W / 2} ${H / 2}) scale(${(1 + 0.07 * easeOut(pe)).toFixed(4)}) translate(${-W / 2} ${-H / 2})`);
+    box.style.opacity = (1 - easeOut(pe)).toFixed(3);
+    if (pe < 1) { requestAnimationFrame(frame); return; }
+    window.removeEventListener("keydown", skip, true);
+    box.remove();
+  };
+  requestAnimationFrame(frame);
+}
+
 (async () => {
+  if (TAURI || STANDALONE) playIntro();
   try { app.user = await call("session"); } catch (e) { app.user = null; }
   const invite = roomFromUrl();
   if (app.user) await startSignedIn();
