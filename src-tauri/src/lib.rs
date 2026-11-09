@@ -2,7 +2,6 @@ mod addons;
 #[cfg(target_os = "android")]
 mod android;
 mod api;
-mod autocrop;
 mod commands;
 mod player;
 mod server;
