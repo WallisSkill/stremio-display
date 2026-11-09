@@ -85,6 +85,7 @@ const TYPE_LABEL = { movie: "Phim", series: "Phim bộ", channel: "Kênh", tv: "
 
 const app = {
   user: null,
+  profiles: { active: "main", list: [] },
   guest: false,
   addons: [],
   library: [],
@@ -216,8 +217,251 @@ function cacheClear() {
   try { for (const key of Object.keys(localStorage)) if (key.startsWith(CACHE)) localStorage.removeItem(key); } catch (e) {}
 }
 
-const bootKey = () => `boot:${app.user?._id || app.user?.email || "guest"}`;
+const bootKey = () => `boot:${app.user?._id || app.user?.email || "guest"}${app.profiles.active === "main" ? "" : `:${app.profiles.active}`}`;
 const saveBoot = () => cacheSet(bootKey(), { addons: app.addons, library: app.library });
+
+const PROFILE_COLORS = ["#e50914", "#f59e0b", "#22c55e", "#3b82f6", "#a855f7", "#ec4899", "#14b8a6", "#64748b"];
+const MAX_PROFILES = 8;
+const NO_PROFILES = () => ({ active: "main", list: [] });
+const profilesKey = () => `profiles:${app.user?._id || app.user?.email || ""}`;
+const profileName = (p) => p.name || app.user?.fullname || String(app.user?.email || "").split("@")[0] || "Chính";
+const currentProfile = () => app.profiles.list.find((p) => p.id === app.profiles.active) || { id: "main", name: "", color: 0, locked: false };
+const hasProfiles = () => app.profiles.list.length > 1 || app.profiles.list.some((p) => p.locked);
+const firstLetter = (n) => ([...String(n).trim()][0] || "?").toUpperCase();
+
+function newProfileId() {
+  const bytes = crypto.getRandomValues(new Uint8Array(8));
+  return [...bytes].map((b) => "abcdefghijklmnopqrstuvwxyz0123456789"[b % 36]).join("");
+}
+
+function profileFace(p, cls = "pf-face") {
+  return h("span", { class: cls, style: `background:${PROFILE_COLORS[p.color] || PROFILE_COLORS[0]}` },
+    firstLetter(profileName(p)),
+    p.locked ? h("i", { class: "pf-lock", html: ICON.lock }) : null);
+}
+
+function paintAvatar() {
+  const a = $("#avatar");
+  if (!a) return;
+  const on = !!app.user && hasProfiles();
+  const p = currentProfile();
+  a.textContent = on ? firstLetter(profileName(p)) : initial();
+  a.style.background = on ? PROFILE_COLORS[p.color] || "" : "";
+  a.setAttribute("aria-label", on ? `Hồ sơ: ${profileName(p)}` : "Tài khoản");
+}
+
+async function loadProfiles() {
+  const hit = cacheGet(profilesKey());
+  app.profiles = Array.isArray(hit?.v?.list) ? hit.v : NO_PROFILES();
+  const fresh = call("profiles").then((v) => {
+    app.profiles = v && Array.isArray(v.list) ? v : NO_PROFILES();
+    cacheSet(profilesKey(), app.profiles);
+    paintAvatar();
+  }, () => {});
+  if (!hit) await Promise.race([fresh, new Promise((r) => setTimeout(r, 4000))]);
+  else await Promise.race([fresh, new Promise((r) => setTimeout(r, 1200))]);
+  paintAvatar();
+}
+
+function layer(cls, onBack) {
+  const el = h("div", { class: `layer ${cls}` });
+  el._back = onBack;
+  document.body.append(el);
+  return el;
+}
+
+const topLayer = () => { const all = $$(".layer"); return all[all.length - 1] || null; };
+
+function pinPrompt({ face, title, check }) {
+  return new Promise((resolve) => {
+    let digits = "";
+    let busy = false;
+    const dots = h("div", { class: "pin-dots" });
+    const msg = h("p", { class: "pin-msg" });
+    const done = (v) => { document.removeEventListener("keydown", onKey, true); box.remove(); resolve(v); };
+    const box = layer("pin-layer", () => done(null));
+    const paint = () => put(dots, ...Array.from({ length: 6 }, (_, i) => h("i", { class: i < digits.length ? "on" : "" })));
+    const submit = async () => {
+      busy = true;
+      msg.textContent = "Đang kiểm tra…";
+      msg.classList.remove("bad");
+      try { done(await check(digits)); }
+      catch (e) {
+        digits = "";
+        paint();
+        msg.textContent = String(e);
+        msg.classList.add("bad");
+        dots.classList.remove("shake");
+        void dots.offsetWidth;
+        dots.classList.add("shake");
+      }
+      busy = false;
+    };
+    const press = (k) => {
+      if (busy) return;
+      if (k === "del") digits = digits.slice(0, -1);
+      else if (digits.length < 6) digits += k;
+      paint();
+      if (digits.length === 6) submit();
+    };
+    const onKey = (e) => {
+      if (/^\d$/.test(e.key)) { e.preventDefault(); e.stopPropagation(); press(e.key); }
+      else if (e.key === "Backspace" && digits) { e.preventDefault(); e.stopPropagation(); press("del"); }
+    };
+    document.addEventListener("keydown", onKey, true);
+    const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "cancel", "0", "del"];
+    const pad = h("div", { class: "pin-pad" }, keys.map((k) =>
+      h("button", { class: `pin-key focusable ${k.length > 1 ? "fn" : ""}`, onclick: () => (k === "cancel" ? done(null) : press(k)) },
+        k === "del" ? "⌫" : k === "cancel" ? "Huỷ" : k)));
+    put(box, h("div", { class: "pin-card" }, profileFace(face, "pf-face big"), h("h2", {}, title), dots, msg, pad));
+    paint();
+    $(".pin-key", pad)?.focus({ preventScroll: true });
+  });
+}
+
+const unlockPrompt = (p, title) => pinPrompt({ face: p, title: title || `Nhập mã PIN của ${profileName(p)}`, check: (pin) => call("profile_unlock", { id: p.id, pin }) });
+
+async function switchProfile(p, token, startup) {
+  try { await call("profile_use", { id: p.id, token }); }
+  catch (e) { toast(e, true); return false; }
+  app.profiles.active = p.id;
+  cacheSet(profilesKey(), app.profiles);
+  paintAvatar();
+  if (startup) return true;
+  if (pl.open) closePlayer();
+  const hit = cacheGet(bootKey());
+  app.library = Array.isArray(hit?.v?.library) ? hit.v.library : [];
+  go("home");
+  toast(`Đang xem với hồ sơ ${profileName(p)}`);
+  refreshLibrary().then(() => {
+    const cur = app.stack[app.stack.length - 1];
+    if (cur?.route === "home" && !pl.open && $("#sheet").hidden && !topLayer()) render();
+  });
+  return true;
+}
+
+function openProfiles({ startup = false, manage = false } = {}) {
+  return new Promise((resolve) => {
+    let managing = manage;
+    const close = (v) => { box.remove(); resolve(v); };
+    const box = layer("pf-layer", startup ? () => {} : () => close(false));
+    const choose = async (p) => {
+      let token = "";
+      if (p.locked) {
+        token = await unlockPrompt(p);
+        if (token === null) return;
+      }
+      if (!startup && p.id === app.profiles.active && !p.locked) { close(true); return; }
+      if (await switchProfile(p, token, startup)) close(true);
+    };
+    const draw = () => {
+      const tiles = app.profiles.list.map((p) =>
+        h("button", { class: `pf-tile focusable ${p.id === app.profiles.active ? "on" : ""}`, onclick: () => (managing ? editProfile(p).then(draw) : choose(p)) },
+          profileFace(p), h("span", { class: "pf-name" }, profileName(p)), managing ? h("span", { class: "pf-edit" }, "Sửa") : null));
+      if (managing && app.profiles.list.length < MAX_PROFILES) {
+        tiles.push(h("button", { class: "pf-tile add focusable", onclick: () => editProfile(null).then(draw) },
+          h("span", { class: "pf-face add" }, "+"), h("span", { class: "pf-name" }, "Thêm hồ sơ")));
+      }
+      const actions = [h("button", { class: "btn focusable", onclick: () => { managing = !managing; draw(); } }, managing ? "Xong" : "Quản lý hồ sơ")];
+      if (!startup) actions.push(h("button", { class: "btn focusable", onclick: () => close(false) }, "Đóng"));
+      put(box, h("div", { class: "pf-screen" },
+        h("h1", {}, managing ? "Quản lý hồ sơ" : "Ai đang xem?"),
+        managing ? h("p", { class: "hint" }, "Các hồ sơ dùng chung addon, mỗi hồ sơ có Thư viện và lịch sử xem riêng.") : null,
+        h("div", { class: "pf-grid" }, tiles),
+        h("div", { class: "pf-actions" }, actions)));
+      ($(".pf-tile.on", box) || $(".pf-tile", box))?.focus({ preventScroll: true });
+    };
+    draw();
+  });
+}
+
+function editProfile(p) {
+  return new Promise(async (resolve) => {
+    const isNew = !p;
+    const tokens = {};
+    if (p?.locked) {
+      const t = await unlockPrompt(p, `Nhập mã PIN của ${profileName(p)} để sửa`);
+      if (t === null) { resolve(false); return; }
+      tokens[p.id] = t;
+    }
+    const draft = { id: p?.id || newProfileId(), name: p?.name || "", color: p ? p.color : app.profiles.list.length % PROFILE_COLORS.length, locked: !!p?.locked };
+    let pin;
+    let armed = false;
+    const close = (v) => { box.remove(); resolve(v); };
+    const box = layer("pf-layer edit", () => close(false));
+    const nameInput = h("input", { class: "pf-input", maxlength: "20", value: draft.name, placeholder: draft.id === "main" ? profileName({ name: "" }) : "Tên hồ sơ", autocomplete: "off" });
+    const msg = h("p", { class: "pin-msg" });
+    const lockedNow = () => (pin === undefined ? draft.locked : typeof pin === "string");
+    const setPin = async () => {
+      const first = await pinPrompt({ face: { ...draft, locked: false }, title: "Đặt mã PIN 6 số", check: async (d) => d });
+      if (first === null) return;
+      const again = await pinPrompt({ face: { ...draft, locked: false }, title: "Nhập lại mã PIN", check: async (d) => { if (d !== first) throw "Hai lần nhập không khớp, nhập lại"; return d; } });
+      if (again === null) return;
+      pin = first;
+      draw();
+      $(".pf-pin .btn", box)?.focus({ preventScroll: true });
+    };
+    const save = async (remove) => {
+      const name = nameInput.value.trim();
+      if (!remove && !name && draft.id !== "main") { msg.textContent = "Hãy đặt tên cho hồ sơ"; msg.classList.add("bad"); nameInput.focus(); return; }
+      const base = app.profiles.list.length ? app.profiles.list : [{ id: "main", name: "", color: 0 }];
+      const others = base.map((x) => ({ id: x.id, name: x.name, color: x.color }));
+      let list;
+      if (remove) list = others.filter((x) => x.id !== draft.id);
+      else {
+        const mine = { id: draft.id, name, color: draft.color };
+        if (pin !== undefined) mine.pin = pin;
+        list = isNew ? [...others, mine] : others.map((x) => (x.id === draft.id ? mine : x));
+      }
+      const before = app.profiles.active;
+      msg.textContent = "Đang lưu…";
+      msg.classList.remove("bad");
+      try {
+        const saved = await call("profiles_save", { list, tokens });
+        app.profiles = saved && Array.isArray(saved.list) ? saved : app.profiles;
+        cacheSet(profilesKey(), app.profiles);
+        if (!remove && draft.id === app.profiles.active && pin !== undefined) {
+          const token = typeof pin === "string" ? await call("profile_unlock", { id: draft.id, pin }) : "";
+          await call("profile_use", { id: draft.id, token });
+        }
+        paintAvatar();
+        close(true);
+        if (app.profiles.active !== before) switchProfile(currentProfile(), "", false);
+      } catch (e) { msg.textContent = String(e); msg.classList.add("bad"); }
+    };
+    const draw = () => {
+      const swatches = PROFILE_COLORS.map((c, i) =>
+        h("button", { class: `pf-swatch focusable ${i === draft.color ? "on" : ""}`, style: `background:${c}`, "aria-label": `Màu ${i + 1}`, onclick: () => { draft.color = i; draw(); $(".pf-swatch.on", box)?.focus({ preventScroll: true }); } }));
+      const pinButtons = lockedNow()
+        ? [h("button", { class: "btn focusable", onclick: setPin }, "Đổi mã PIN"), h("button", { class: "btn focusable", onclick: () => { pin = null; draw(); } }, "Bỏ mã PIN")]
+        : [h("button", { class: "btn focusable", onclick: setPin }, "Đặt mã PIN")];
+      const del = !isNew && draft.id !== "main"
+        ? h("button", { class: `btn danger focusable ${armed ? "armed" : ""}`, onclick: () => { if (!armed) { armed = true; draw(); $(".btn.danger", box)?.focus(); return; } save(true); } },
+          armed ? "Bấm lần nữa để xoá hẳn" : "Xoá hồ sơ")
+        : null;
+      put(box, h("div", { class: "pf-card" },
+        profileFace({ ...draft, name: nameInput.value.trim() || draft.name, locked: lockedNow() }, "pf-face big"),
+        h("h2", {}, isNew ? "Thêm hồ sơ" : "Sửa hồ sơ"),
+        h("label", { class: "pf-label" }, "Tên"), nameInput,
+        h("label", { class: "pf-label" }, "Màu"), h("div", { class: "pf-swatches" }, swatches),
+        h("label", { class: "pf-label" }, "Mã PIN"),
+        h("p", { class: "hint" }, lockedNow() ? "Phải nhập mã PIN 6 số mỗi khi chọn hồ sơ này." : "Chưa có mã PIN, ai cũng chọn được hồ sơ này."),
+        h("div", { class: "pf-row pf-pin" }, pinButtons),
+        armed ? h("p", { class: "pin-msg bad" }, `Thư viện và lịch sử xem của ${profileName(p)} sẽ bị xoá.`) : null,
+        msg,
+        h("div", { class: "pf-row end" }, del, h("button", { class: "btn focusable", onclick: () => close(false) }, "Huỷ"), h("button", { class: "btn primary focusable", onclick: () => save(false) }, "Lưu"))));
+    };
+    nameInput.addEventListener("keydown", (e) => { if (e.key === "Enter") save(false); });
+    draw();
+    nameInput.focus({ preventScroll: true });
+  });
+}
+
+async function startSignedIn() {
+  await loadProfiles();
+  if (hasProfiles()) await openProfiles({ startup: true });
+  await boot();
+}
 
 async function refreshLibrary() {
   try { app.library = await call("library"); saveBoot(); } catch (e) { app.library = []; }
@@ -1865,8 +2109,15 @@ async function renderSettings(view) {
       h("div", { class: "avatar" }, initial()),
       h("div", { class: "who" }, h("b", {}, name), h("span", {}, app.user ? "Đã đồng bộ với Stremio" : "Chế độ khách · chỉ có Cinemeta")),
       app.user
-        ? h("button", { class: "btn focusable", onclick: async () => { await call("logout"); cacheClear(); app.user = null; app.library = []; app.addons = []; go("login", {}, true); } }, "Đăng xuất")
+        ? h("button", { class: "btn focusable", onclick: async () => { await call("logout"); cacheClear(); app.user = null; app.profiles = NO_PROFILES(); app.library = []; app.addons = []; paintAvatar(); go("login", {}, true); } }, "Đăng xuất")
         : h("button", { class: "btn primary focusable", onclick: () => go("login", {}, true) }, "Đăng nhập")));
+  const me = currentProfile();
+  const people = app.user ? h("div", { class: "panel" }, h("h3", {}, "Hồ sơ người xem"),
+    h("div", { class: "account" },
+      profileFace(me, "pf-face mid"),
+      h("div", { class: "who" }, h("b", {}, profileName(me)),
+        h("span", {}, app.profiles.list.length > 1 ? `${app.profiles.list.length} hồ sơ · dùng chung addon, Thư viện và lịch sử riêng` : "Thêm hồ sơ để mỗi người có Thư viện và lịch sử xem riêng")),
+      h("button", { class: "btn focusable", onclick: () => openProfiles({ manage: true }).then(() => { paintAvatar(); const cur = app.stack[app.stack.length - 1]; if (cur?.route === "settings") render(); }) }, "Quản lý hồ sơ"))) : null;
   const list = h("div", { class: "panel" }, h("h3", {}, `Addon (${app.addons.length})`),
     h("div", { style: "display:flex;gap:12px;align-items:center;flex-wrap:wrap" },
       h("button", { class: "btn primary focusable", onclick: () => go("addons") }, "Quản lý addon"),
@@ -1910,7 +2161,7 @@ async function renderSettings(view) {
   paintSubs();
   const version = h("p", { class: "hint", style: "margin-top:18px" });
   if (TAURI?.app?.getVersion) TAURI.app.getVersion().then((v) => { version.textContent = `WiS TV phiên bản ${v}`; }).catch(() => {});
-  view.append(h("div", { class: "page plain" }, h("h1", {}, "Cài đặt"), account, ios, pc, subs, list, TOUCH ? h("div", { class: "panel" }, h("h3", {}, "Điều khiển"), touchHelp) : help, version));
+  view.append(h("div", { class: "page plain" }, h("h1", {}, "Cài đặt"), account, people, ios, pc, subs, list, TOUCH ? h("div", { class: "panel" }, h("h3", {}, "Điều khiển"), touchHelp) : help, version));
   $(".panel .btn")?.focus({ preventScroll: true });
 }
 
@@ -1931,7 +2182,7 @@ async function renderLogin(view) {
     try {
       app.user = await call("login", { email: email.value, password: pass.value });
       app.guest = false;
-      await boot();
+      await startSignedIn();
     } catch (x) {
       err.textContent = String(x);
       submit.disabled = false;
@@ -2254,6 +2505,8 @@ if (!TAURI) {
 }
 
 function stepBack() {
+  const top = topLayer();
+  if (top) { top._back?.(); return true; }
   if (pl.open) { closePlayer(); return true; }
   if (!$("#sheet").hidden) { closeSheet(); return true; }
   if (app.stack.length > 1) { app.stack.pop(); render(); return true; }
@@ -2263,6 +2516,7 @@ function stepBack() {
 }
 
 function back() {
+  if (topLayer()) { stepBack(); return; }
   if (!TAURI && nav.depth > 0 && navLayers() > 0) { history.back(); return; }
   stepBack();
 }
@@ -2290,7 +2544,7 @@ function visible(el) {
 }
 
 function moveFocus(dir) {
-  const scope = !$("#sheet").hidden ? $("#sheet") : document;
+  const scope = topLayer() || (!$("#sheet").hidden ? $("#sheet") : document);
   const items = $$(".focusable", scope).filter(visible);
   const cur = document.activeElement;
   if (!cur || !items.includes(cur)) { items[0]?.focus(); return; }
@@ -2349,6 +2603,11 @@ document.addEventListener("keydown", (e) => {
 
 $("#scrim").addEventListener("click", () => back());
 $("#back-btn").addEventListener("click", () => back());
+$("#avatar").addEventListener("click", (e) => {
+  if (!app.user || !hasProfiles()) return;
+  e.stopImmediatePropagation();
+  openProfiles();
+}, true);
 $$("[data-route]", $("#topbar")).forEach((b) => b.addEventListener("click", () => go(b.dataset.route)));
 $("#view").addEventListener("scroll", () => $("#topbar").classList.toggle("solid", $("#view").scrollTop > 40), { passive: true });
 document.addEventListener("mouseup", (e) => { if (e.button === 3) back(); });
@@ -2458,7 +2717,7 @@ async function boot() {
     else app.library = app.library || [];
     if (addons.status === "fulfilled") saveBoot();
   };
-  $("#avatar").textContent = initial();
+  paintAvatar();
   if (hit && Array.isArray(hit.v?.addons) && hit.v.addons.length) {
     app.addons = hit.v.addons;
     app.library = Array.isArray(hit.v.library) ? hit.v.library : [];
@@ -2477,7 +2736,7 @@ async function boot() {
 
 (async () => {
   try { app.user = await call("session"); } catch (e) { app.user = null; }
-  if (app.user) await boot();
+  if (app.user) await startSignedIn();
   else go("login");
   startupOpen();
 })();

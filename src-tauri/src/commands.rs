@@ -169,9 +169,44 @@ pub async fn library(st: State<'_, AppState>) -> R<Vec<Value>> {
     let Some(key) = st.auth_key() else {
         return Ok(Vec::new());
     };
-    let items = api::library_get(&st.http, &key).await?;
+    let items = api::library_get(&st.http, &key, &st.profile()).await?;
     *st.library.lock().unwrap() = items.clone();
     Ok(items)
+}
+
+fn profile_list(st: &AppState, list: Vec<Value>) -> R<Value> {
+    let active = st.profile().id;
+    if !list.iter().any(|p| p["id"].as_str() == Some(active.as_str())) {
+        st.set_profile(api::Profile::main())?;
+    }
+    Ok(json!({ "active": st.profile().id, "list": list }))
+}
+
+#[tauri::command]
+pub async fn profiles(st: State<'_, AppState>) -> R<Value> {
+    let Some(key) = st.auth_key() else {
+        return Ok(json!({ "active": api::MAIN_PROFILE, "list": [] }));
+    };
+    let list = api::profiles_get(&st.http, &key).await?;
+    profile_list(&st, list)
+}
+
+#[tauri::command]
+pub async fn profiles_save(st: State<'_, AppState>, list: Value, tokens: Option<Value>) -> R<Value> {
+    let key = st.auth_key().ok_or("Đăng nhập tài khoản Stremio để dùng hồ sơ")?;
+    let list = api::profiles_set(&st.http, &key, &list, &tokens.unwrap_or_else(|| json!({}))).await?;
+    profile_list(&st, list)
+}
+
+#[tauri::command]
+pub async fn profile_unlock(st: State<'_, AppState>, id: String, pin: String) -> R<String> {
+    let key = st.auth_key().ok_or("Đăng nhập tài khoản Stremio để dùng hồ sơ")?;
+    api::profile_unlock(&st.http, &key, &id, &pin).await
+}
+
+#[tauri::command]
+pub fn profile_use(st: State<'_, AppState>, id: String, token: Option<String>) -> R<()> {
+    st.set_profile(api::Profile { id, token: token.unwrap_or_default() })
 }
 
 fn new_item(id: &str, name: &Value, kind: &Value, poster: &Value, now: &str) -> Value {
@@ -227,7 +262,7 @@ pub async fn library_toggle(st: State<'_, AppState>, meta: Value) -> R<bool> {
     item["removed"] = json!(in_library);
     item["temp"] = json!(false);
     item["_mtime"] = json!(now);
-    api::library_put(&st.http, &key, &item).await?;
+    api::library_put(&st.http, &key, &st.profile(), &item).await?;
     st.cache_library_item(&item);
     Ok(!in_library)
 }
@@ -242,6 +277,8 @@ pub struct PlayCtx {
     pub start: Option<u64>,
     #[serde(default)]
     pub session: u64,
+    #[serde(skip)]
+    pub profile: api::Profile,
 }
 
 fn open_external(app: &AppHandle, url: &str) -> R<()> {
@@ -361,8 +398,9 @@ pub async fn play(
     app: AppHandle,
     st: State<'_, AppState>,
     stream: Value,
-    ctx: PlayCtx,
+    mut ctx: PlayCtx,
 ) -> R<()> {
+    ctx.profile = st.profile();
     if let Some(ext) = stream["externalUrl"].as_str() {
         return open_external(&app, ext);
     }
@@ -734,7 +772,8 @@ async fn save_progress(st: &AppState, ctx: &PlayCtx, p: &Progress) -> R<()> {
         return Ok(());
     }
     let now = now_iso();
-    let mut item = api::library_get_one(&st.http, &key, &ctx.id)
+    let profile = if ctx.profile.id.is_empty() { api::Profile::main() } else { ctx.profile.clone() };
+    let mut item = api::library_get_one(&st.http, &key, &profile, &ctx.id)
         .await?
         .unwrap_or_else(|| new_item(&ctx.id, &json!(ctx.name), &json!(ctx.kind), &json!(ctx.poster), &now));
     if !item["state"].is_object() {
@@ -775,7 +814,9 @@ async fn save_progress(st: &AppState, ctx: &PlayCtx, p: &Progress) -> R<()> {
         s["noNotif"] = json!(false);
     }
     item["_mtime"] = json!(now);
-    api::library_put(&st.http, &key, &item).await?;
-    st.cache_library_item(&item);
+    api::library_put(&st.http, &key, &profile, &item).await?;
+    if profile.id == st.profile().id {
+        st.cache_library_item(&item);
+    }
     Ok(())
 }

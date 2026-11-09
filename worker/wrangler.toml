@@ -13,3 +13,11 @@ SITE_ORIGIN = "https://wallisskill.github.io/stremio-display"
 [[kv_namespaces]]
 binding = "RELAY"
 id = "6b49d8a099024cc08b78cbab175393d4"
+
+[[durable_objects.bindings]]
+name = "PROFILES"
+class_name = "ProfileStore"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ProfileStore"]

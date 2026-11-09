@@ -42,6 +42,36 @@ async function api(method, body) {
 const session = () => store.get("wistv.session");
 const authKey = () => session()?.authKey || null;
 
+const MAIN_PROFILE = "main";
+const PROFILE_API = document.querySelector('meta[name="wistv-profile-api"]')?.content || "https://film.wis237.online/api/profile/";
+
+function activeProfile() {
+  const saved = store.get("wistv.profile");
+  const ok = saved && saved.user === session()?.user?._id && typeof saved.id === "string";
+  return ok ? { id: saved.id, token: String(saved.token || "") } : { id: MAIN_PROFILE, token: "" };
+}
+
+async function profileApi(method, body) {
+  let res;
+  try {
+    res = await fetch(PROFILE_API + method, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  } catch (e) {
+    throw "Không kết nối được máy chủ hồ sơ";
+  }
+  const data = await res.json().catch(() => null);
+  if (!data) throw "Phản hồi máy chủ hồ sơ không hợp lệ";
+  if (data.error) throw (data.error.message || data.error);
+  return data.result;
+}
+
+const datastore = (profile, method, body) =>
+  profile.id === MAIN_PROFILE ? api(method, body) : profileApi(method, { ...body, profile: profile.id, token: profile.token });
+
+function profileList(list) {
+  if (!list.some((p) => p.id === activeProfile().id)) store.set("wistv.profile", null);
+  return { active: activeProfile().id, list };
+}
+
 const CREDIT_WORDS = new Set(["sub", "subs", "subbed", "subber", "vietsub", "engsub", "fansub", "dịch", "fix", "fixed", "sync", "synced", "resync", "resynced", "rip", "ripped", "encoded", "edited", "corrected", "credit", "credits"]);
 const CREDIT_PREFIXES = ["subtit", "translat", "vietsub", "fansub"];
 const CREDIT_PHRASES = ["phụ đề", "biên dịch", "người dịch"];
@@ -201,9 +231,9 @@ function cacheItem(item) {
   if (i >= 0) libraryCache[i] = item; else libraryCache.push(item);
 }
 
-async function libraryPut(key, item) {
-  await api("datastorePut", { authKey: key, collection: "libraryItem", changes: [item] });
-  cacheItem(item);
+async function libraryPut(key, item, profile = activeProfile()) {
+  await datastore(profile, "datastorePut", { authKey: key, collection: "libraryItem", changes: [item] });
+  if (profile.id === activeProfile().id) cacheItem(item);
 }
 
 let relay = { base: null, at: 0 };
@@ -529,7 +559,8 @@ async function saveProgress(ctx, p) {
   const key = authKey();
   if (!key || String(ctx.id).startsWith("local:") || !p.duration) return;
   const now = nowIso();
-  const found = await api("datastoreGet", { authKey: key, collection: "libraryItem", ids: [ctx.id], all: false });
+  const profile = ctx.profile || { id: MAIN_PROFILE, token: "" };
+  const found = await datastore(profile, "datastoreGet", { authKey: key, collection: "libraryItem", ids: [ctx.id], all: false });
   const item = (Array.isArray(found) && found.find((i) => i._id === ctx.id)) || newItem(ctx.id, ctx.name, ctx.kind, ctx.poster, now);
   if (!item.state || typeof item.state !== "object") item.state = {};
   const s = item.state;
@@ -556,7 +587,7 @@ async function saveProgress(ctx, p) {
   }
   if (s.noNotif == null) s.noNotif = false;
   item._mtime = now;
-  await libraryPut(key, item);
+  await libraryPut(key, item, profile);
 }
 
 function useFallback() {
@@ -623,7 +654,7 @@ async function play({ stream, ctx }) {
   }
   ensureDom();
   if (!P.finished) { P.finished = true; destroyMedia(); }
-  P.ctx = ctx;
+  P.ctx = { ...ctx, profile: activeProfile() };
   P.session = ctx.session;
   P.loaded = false;
   P.buffering = true;
@@ -773,6 +804,8 @@ export const web = {
     const u = res.user || {};
     const user = { _id: u._id, email: u.email, fullname: u.fullname, avatar: u.avatar };
     store.set("wistv.session", { authKey: res.authKey, user });
+    store.set("wistv.profile", null);
+    libraryCache = [];
     addonCache = null;
     relay = { base: null, at: 0 };
     return user;
@@ -780,6 +813,7 @@ export const web = {
   async logout() {
     const key = authKey();
     store.set("wistv.session", null);
+    store.set("wistv.profile", null);
     addonCache = null;
     libraryCache = [];
     relay = { base: null, at: 0 };
@@ -824,9 +858,31 @@ export const web = {
   async library() {
     const key = authKey();
     if (!key) return [];
-    const res = await api("datastoreGet", { authKey: key, collection: "libraryItem", ids: [], all: true });
+    const res = await datastore(activeProfile(), "datastoreGet", { authKey: key, collection: "libraryItem", ids: [], all: true });
     libraryCache = Array.isArray(res) ? res : [];
     return libraryCache;
+  },
+  async profiles() {
+    const key = authKey();
+    if (!key) return { active: MAIN_PROFILE, list: [] };
+    const list = await profileApi("profilesGet", { authKey: key });
+    return profileList(Array.isArray(list) ? list : []);
+  },
+  async profiles_save({ list, tokens }) {
+    const key = needKey("Đăng nhập tài khoản Stremio để dùng hồ sơ");
+    const saved = await profileApi("profilesSet", { authKey: key, profiles: list, tokens: tokens || {} });
+    return profileList(Array.isArray(saved) ? saved : []);
+  },
+  async profile_unlock({ id, pin }) {
+    const key = needKey("Đăng nhập tài khoản Stremio để dùng hồ sơ");
+    const res = await profileApi("profileUnlock", { authKey: key, profile: id, pin });
+    return String(res?.token || "");
+  },
+  async profile_use({ id, token }) {
+    const user = session()?.user?._id;
+    if (!user) throw "Chưa đăng nhập";
+    store.set("wistv.profile", { user, id, token: token || "" });
+    libraryCache = [];
   },
   async library_toggle({ meta }) {
     const key = needKey("Đăng nhập tài khoản Stremio để dùng Thư viện");
