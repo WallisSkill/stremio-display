@@ -7,6 +7,7 @@ mod commands;
 mod player;
 mod server;
 mod state;
+mod subinfo;
 mod torrent;
 #[cfg(desktop)]
 mod update;
@@ -50,6 +51,7 @@ pub fn run() {
             commands::startup_open,
             commands::open_url,
             commands::subtitles,
+            commands::subtitle_info,
             commands::addon_install,
             commands::addon_remove,
             commands::addon_move,

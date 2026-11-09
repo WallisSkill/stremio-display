@@ -905,7 +905,9 @@ function loadAddonSubs() {
 
 function addAddonSub(s, quiet) {
   pl.added.add(s.url);
-  const args = ["sub-add", s.url, "select", `${langName(s.lang)} · ${s.addon}`, s.lang || ""];
+  const who = subCredit(s.url) || releaseSummary(s) || s.addon;
+  const title = [langName(s.lang), who].filter(Boolean).join(" · ");
+  const args = ["sub-add", s.url, "select", [...title].length > 90 ? [...title].slice(0, 89).join("") + "…" : title, s.lang || ""];
   return quiet ? call("player_command", { args }).catch(() => {}) : cmd(...args);
 }
 
@@ -1209,7 +1211,64 @@ function trackLabel(t) {
 }
 
 function menuItem(label, on, onclick, extra) {
-  return h("button", { class: `pl-item ${on ? "on" : ""}`, tabindex: "-1", onclick }, h("i", { html: on ? ICON.check : "" }), h("span", {}, label), extra ? h("small", {}, extra) : null);
+  const notes = [].concat(extra || []).filter(Boolean).map((x) => (typeof x === "string" ? h("small", {}, x) : x));
+  return h("button", { class: `pl-item ${on ? "on" : ""}`, tabindex: "-1", onclick }, h("i", { html: on ? ICON.check : "" }), h("span", {}, label), notes);
+}
+
+const subInfo = new Map();
+const subInfoQueue = [];
+let subInfoBusy = 0;
+
+function wantSubInfo(url) {
+  if (subInfo.has(url)) return;
+  subInfo.set(url, null);
+  subInfoQueue.push(url);
+  pumpSubInfo();
+}
+
+function pumpSubInfo() {
+  while (subInfoBusy < 3 && subInfoQueue.length) {
+    const url = subInfoQueue.shift();
+    subInfoBusy++;
+    call("subtitle_info", { url })
+      .then((v) => subInfo.set(url, v || { credits: [] }), () => subInfo.set(url, { credits: [] }))
+      .finally(() => { subInfoBusy--; paintSubCredit(url); pumpSubInfo(); });
+  }
+}
+
+const subCredit = (url) => (subInfo.get(url)?.credits || []).join(" · ");
+
+function paintSubCredit(url) {
+  const text = subCredit(url);
+  for (const el of $$(".pl-credit", pl.ui?.menu || document)) {
+    if (el.dataset.url !== url) continue;
+    el.textContent = text ? `Dịch: ${text}` : "";
+    el.hidden = !text;
+  }
+}
+
+function releaseSummary(s) {
+  const names = String(s.movieReleaseName || "").split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+  const groups = [];
+  const res = new Set();
+  for (const n of names) {
+    const tail = n.match(/-([^\s\-[\]()]+)$/)?.[1]?.replace(/\.[a-z]{2,3}$/, "");
+    if (tail && !groups.includes(tail)) groups.push(tail);
+    const r = n.match(/\b(\d{3,4}p)\b/i)?.[1]?.toLowerCase();
+    if (r) res.add(r);
+  }
+  const group = String(s.releaseGroup || "").replace(/\.[a-z]{2,3}$/, "");
+  if (group && !groups.includes(group)) groups.unshift(group);
+  const source = s.releaseFormat || names.join(" ").match(/\b(WEB-?DL|WEBRip|BluRay|BDRip|BRRip|HDTV|DVDRip|HDRip|WEB)\b/i)?.[1] || "";
+  const fps = Number(s.fpsMilli) > 0 ? `${(Number(s.fpsMilli) / 1000).toFixed(3).replace(/\.?0+$/, "")} fps` : "";
+  const parts = [source, [...res].join("/"), fps].filter(Boolean);
+  if (groups.length) parts.push(names.length > 1 ? `khớp ${names.length} bản: ${groups.slice(0, 5).join(", ")}${groups.length > 5 ? "…" : ""}` : `nhóm ${groups[0]}`);
+  return parts.join(" · ");
+}
+
+function subFileName(s) {
+  const name = String(s.subtitleFileName || "").trim();
+  return name && !/^\d+$/.test(name) ? name : "";
 }
 
 const delayText = (v) => `${(Math.round((v || 0) * 10) / 10).toFixed(1)}s`;
@@ -1320,15 +1379,19 @@ function fillMenu(box) {
   else {
     const seen = new Set();
     const list = pl.subs.filter((s) => !seen.has(s.url) && seen.add(s.url)).sort((a, b) => langRank(a.lang) - langRank(b.lang) || String(a.lang).localeCompare(String(b.lang))).slice(0, 60);
+    list.slice(0, 12).forEach((s) => wantSubInfo(s.url));
     addonCol.append(...list.map((s) => {
       const done = pl.added.has(s.url);
+      const credit = subCredit(s.url);
+      const creditEl = h("small", { class: "pl-credit", "data-url": s.url, hidden: !credit }, credit ? `Dịch: ${credit}` : "");
+      const file = subFileName(s);
       return menuItem(langName(s.lang) || "Không rõ", done, () => {
         rememberSub({ lang: s.lang, url: s.url });
         const track = done && pl.tracks.find((t) => t.type === "sub" && t.file === s.url);
         if (track) { pickSub(track.id); return; }
         addAddonSub(s, false);
         renderMenu();
-      }, s.addon);
+      }, [creditEl, [releaseSummary(s), s.addon].filter(Boolean).join(" · "), file ? h("small", { class: "pl-file" }, file) : null]);
     }));
   }
   box.replaceChildren(audioCol, subCol, addonCol);

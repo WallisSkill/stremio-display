@@ -585,12 +585,33 @@ pub async fn subtitles(st: State<'_, AppState>, kind: String, id: String) -> R<V
     for (name, res) in futures::future::join_all(jobs).await {
         let Ok(v) = res else { continue };
         for s in v["subtitles"].as_array().into_iter().flatten() {
-            if let Some(url) = s["url"].as_str() {
-                out.push(json!({ "addon": name, "url": url, "lang": s["lang"], "id": s["id"] }));
+            if s["url"].as_str().is_some() {
+                let mut item = s.clone();
+                item["addon"] = json!(name);
+                out.push(item);
             }
         }
     }
     Ok(out)
+}
+
+#[tauri::command]
+pub async fn subtitle_info(st: State<'_, AppState>, url: String) -> R<Value> {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err("Địa chỉ phụ đề không hợp lệ".into());
+    }
+    let mut resp = st.http.get(&url).send().await.map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("HTTP {}", resp.status()));
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = resp.chunk().await.map_err(|e| e.to_string())? {
+        body.extend_from_slice(&chunk);
+        if body.len() > crate::subinfo::MAX_BYTES {
+            return Err("Tệp phụ đề quá lớn".into());
+        }
+    }
+    Ok(crate::subinfo::summarize(&String::from_utf8_lossy(&body)))
 }
 
 fn manifest_url(raw: &str) -> R<String> {

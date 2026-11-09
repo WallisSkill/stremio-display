@@ -42,6 +42,94 @@ async function api(method, body) {
 const session = () => store.get("wistv.session");
 const authKey = () => session()?.authKey || null;
 
+const CREDIT_WORDS = new Set(["sub", "subs", "subbed", "subber", "vietsub", "engsub", "fansub", "dịch", "fix", "fixed", "sync", "synced", "resync", "resynced", "rip", "ripped", "encoded", "edited", "corrected", "credit", "credits"]);
+const CREDIT_PREFIXES = ["subtit", "translat", "vietsub", "fansub"];
+const CREDIT_PHRASES = ["phụ đề", "biên dịch", "người dịch"];
+const SUB_ADS = ["opensubtitles", "osdb.link", "vip member", "advertise"];
+
+function subStamp(s) {
+  const t = String(s || "").trim().split(/\s+/)[0].replace(",", ".");
+  const [hms, frac = "0"] = t.split(".");
+  let secs = 0;
+  for (const part of hms.split(":")) { if (!/^\d+$/.test(part)) return null; secs = secs * 60 + Number(part); }
+  if (!/^\d*$/.test(frac)) return null;
+  return secs * 1000 + Number(frac.slice(0, 3).padEnd(3, "0"));
+}
+
+const stripBraces = (s) => s.replace(/\{[^}]*\}/g, "");
+const stripTags = (s) => stripBraces(s.replace(/<[^>]*>/g, ""));
+
+function isUrlToken(token) {
+  const t = token.replace(/^[()[\]<>{}"',;:|]+|[()[\]<>{}"',;:|]+$/g, "").toLowerCase();
+  if (t.includes("://") || t.startsWith("www.")) return true;
+  const host = t.split("/")[0];
+  const i = host.lastIndexOf(".");
+  if (i <= 0) return false;
+  const tld = host.slice(i + 1);
+  return tld.length >= 2 && tld.length <= 6 && /^[a-z]+$/.test(tld);
+}
+
+function isCredit(text) {
+  const low = stripTags(text).toLowerCase();
+  if (SUB_ADS.some((a) => low.includes(a))) return false;
+  if (CREDIT_PHRASES.some((p) => low.includes(p))) return true;
+  return low.split(/\s+/).some((tok) => {
+    if (!tok) return false;
+    if (isUrlToken(tok)) return true;
+    const w = tok.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
+    return CREDIT_WORDS.has(w) || CREDIT_PREFIXES.some((p) => w.startsWith(p));
+  });
+}
+
+function cleanCredit(text) {
+  const lines = [];
+  for (const line of stripTags(text).split("\n")) {
+    const s = line.split(/\s+/).filter((t) => t && !isUrlToken(t)).join(" ").replaceAll("()", "").replaceAll("[]", "").replace(/^[\s\-|:·,]+|[\s\-|:·,]+$/g, "");
+    if (/[\p{L}\p{N}]/u.test(s)) lines.push(s);
+  }
+  const joined = lines.join(" · ");
+  return [...joined].length > 140 ? [...joined].slice(0, 139).join("") + "…" : joined;
+}
+
+function parseSubCues(raw) {
+  const text = raw.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
+  const cues = [];
+  if (text.includes("[Events]") || /^Dialogue:/m.test(text)) {
+    for (const line of text.split("\n")) {
+      if (!line.startsWith("Dialogue:")) continue;
+      const f = line.slice(9).split(",");
+      if (f.length < 10) continue;
+      const a = subStamp(f[1]), b = subStamp(f[2]);
+      const body = stripBraces(f.slice(9).join(",")).replace(/\\[Nn]/g, "\n").trim();
+      if (a != null && b != null && body) cues.push({ start: a, end: b, text: body });
+    }
+  } else {
+    for (const block of text.split("\n\n")) {
+      const lines = block.split("\n");
+      const at = lines.findIndex((l) => l.includes("-->"));
+      if (at < 0) continue;
+      const [x, y] = lines[at].split("-->");
+      const a = subStamp(x), b = subStamp(y);
+      const body = lines.slice(at + 1).map((l) => l.trim()).filter(Boolean);
+      if (a != null && b != null && body.length) cues.push({ start: a, end: b, text: body.join("\n") });
+    }
+  }
+  return cues.sort((p, q) => p.start - q.start);
+}
+
+function summarizeSub(raw) {
+  const cues = parseSubCues(raw);
+  const n = cues.length;
+  const credits = [];
+  cues.forEach((c, i) => {
+    if (i >= 3 && i + 3 < n) return;
+    if (!isCredit(c.text)) return;
+    const line = cleanCredit(c.text);
+    if (line && !credits.includes(line)) credits.push(line);
+  });
+  return { credits, cues: n, start: n ? Math.min(...cues.map((c) => c.start)) : null, end: n ? Math.max(...cues.map((c) => c.end)) : null };
+}
+
 async function getJson(url) {
   let res;
   try { res = await fetch(url); } catch (e) { throw "Không kết nối được addon"; }
@@ -720,8 +808,16 @@ export const web = {
     const list = (await loadAddons()).filter((a) => supports(a, "subtitles", kind, id));
     const results = await Promise.all(list.map((a) => getJson(resourceUrl(a, "subtitles", kind, id)).then((v) => [a, v], () => [a, null])));
     const out = [];
-    for (const [a, v] of results) for (const s of v?.subtitles || []) if (s.url) out.push({ addon: addonName(a), url: s.url, lang: s.lang, id: s.id });
+    for (const [a, v] of results) for (const s of v?.subtitles || []) if (s.url) out.push({ ...s, addon: addonName(a) });
     return out;
+  },
+  async subtitle_info({ url }) {
+    if (!/^https?:\/\//.test(url)) throw "Địa chỉ phụ đề không hợp lệ";
+    const r = await fetch(url);
+    if (!r.ok) throw `HTTP ${r.status}`;
+    const text = await r.text();
+    if (text.length > 4 << 20) throw "Tệp phụ đề quá lớn";
+    return summarizeSub(text);
   },
   async library() {
     const key = authKey();
