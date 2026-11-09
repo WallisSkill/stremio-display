@@ -1100,6 +1100,7 @@ function onPlayerState(s) {
   }
   paintState();
   if (pl.menu === "tracks" && s.tracks) renderMenu();
+  else if (pl.ui.delayVal && s.subDelay != null) pl.ui.delayVal.textContent = delayText(s.subDelay);
 }
 
 function nextEpisode() {
@@ -1203,6 +1204,20 @@ function menuItem(label, on, onclick, extra) {
   return h("button", { class: `pl-item ${on ? "on" : ""}`, tabindex: "-1", onclick }, h("i", { html: on ? ICON.check : "" }), h("span", {}, label), extra ? h("small", {}, extra) : null);
 }
 
+const delayText = (v) => `${(Math.round((v || 0) * 10) / 10).toFixed(1)}s`;
+function nudgeDelay(step) {
+  const next = Math.round(((pl.s.subDelay || 0) + step) * 10) / 10;
+  pl.s.subDelay = next;
+  if (pl.ui.delayVal) pl.ui.delayVal.textContent = delayText(next);
+  setProp("sub-delay", next);
+}
+function pickSub(id) {
+  pl.s.sid = id;
+  pl.tracks = pl.tracks.map((t) => (t.type === "sub" ? { ...t, selected: id !== "no" && t.id === id } : t));
+  setProp("sid", id);
+  renderMenu();
+}
+
 function renderMenu() {
   const box = pl.ui.menu;
   box.hidden = !pl.menu;
@@ -1235,13 +1250,14 @@ function fillMenu(box) {
   const sid = pl.s.sid;
   const audioCol = h("div", { class: "pl-col" }, h("h4", {}, "Âm thanh"),
     audio.length ? audio.map((t) => menuItem(trackLabel(t), t.selected, () => { setProp("aid", t.id); })) : h("p", { class: "pl-none" }, "Chưa có thông tin"));
+  pl.ui.delayVal = h("b", {}, delayText(pl.s.subDelay));
   const subCol = h("div", { class: "pl-col" }, h("h4", {}, "Phụ đề"),
-    menuItem("Tắt", !sid || sid === "no" || sid === "false", () => { rememberSub({ off: true }); setProp("sid", "no"); }),
-    subs.map((t) => menuItem(trackLabel(t), t.selected, () => { rememberSub(t.external ? { lang: t.lang, url: t.file || undefined } : { lang: t.lang, title: t.title }); setProp("sid", t.id); })),
+    menuItem("Tắt", !sid || sid === "no" || sid === "false", () => { rememberSub({ off: true }); pickSub("no"); }),
+    subs.map((t) => menuItem(trackLabel(t), t.selected, () => { rememberSub(t.external ? { lang: t.lang, url: t.file || undefined } : { lang: t.lang, title: t.title }); pickSub(t.id); })),
     h("div", { class: "pl-delay" }, h("span", {}, "Độ trễ"),
-      h("button", { class: "pl-mini", tabindex: "-1", onclick: () => cmd("add", "sub-delay", "-0.1") }, "−0.1s"),
-      h("b", {}, `${(pl.s.subDelay || 0).toFixed(1)}s`),
-      h("button", { class: "pl-mini", tabindex: "-1", onclick: () => cmd("add", "sub-delay", "0.1") }, "+0.1s")),
+      h("button", { class: "pl-mini", tabindex: "-1", onclick: () => nudgeDelay(-0.1) }, "−0.1s"),
+      pl.ui.delayVal,
+      h("button", { class: "pl-mini", tabindex: "-1", onclick: () => nudgeDelay(0.1) }, "+0.1s")),
     subStylePanel());
   const addonCol = h("div", { class: "pl-col" }, h("h4", {}, "Phụ đề từ addon"));
   if (pl.subs === "loading") addonCol.append(h("div", { class: "spinner small" }));
@@ -1252,8 +1268,9 @@ function fillMenu(box) {
     addonCol.append(...list.map((s) => {
       const done = pl.added.has(s.url);
       return menuItem(langName(s.lang) || "Không rõ", done, () => {
-        if (done) return;
         rememberSub({ lang: s.lang, url: s.url });
+        const track = done && pl.tracks.find((t) => t.type === "sub" && t.file === s.url);
+        if (track) { pickSub(track.id); return; }
         addAddonSub(s, false);
         renderMenu();
       }, s.addon);
