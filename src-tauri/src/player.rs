@@ -7,7 +7,7 @@ use std::ffi::{c_char, c_int, c_void, CStr, CString};
 #[cfg(windows)]
 use std::path::PathBuf;
 use std::ptr;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -31,6 +31,30 @@ struct MpvEndFile {
     error: c_int,
 }
 
+#[repr(C)]
+struct MpvNode {
+    u: u64,
+    format: c_int,
+}
+
+#[repr(C)]
+struct MpvNodeList {
+    num: c_int,
+    values: *mut MpvNode,
+    keys: *mut *mut c_char,
+}
+
+#[repr(C)]
+struct MpvByteArray {
+    data: *const u8,
+    size: usize,
+}
+
+const FORMAT_STRING: c_int = 1;
+const FORMAT_INT64: c_int = 4;
+const FORMAT_NODE_MAP: c_int = 8;
+const FORMAT_BYTE_ARRAY: c_int = 9;
+
 type Handle = *mut c_void;
 
 struct Mpv {
@@ -41,6 +65,8 @@ struct Mpv {
     set_option_string: unsafe extern "C" fn(Handle, *const c_char, *const c_char) -> c_int,
     set_property_string: unsafe extern "C" fn(Handle, *const c_char, *const c_char) -> c_int,
     command: unsafe extern "C" fn(Handle, *mut *const c_char) -> c_int,
+    command_ret: unsafe extern "C" fn(Handle, *mut *const c_char, *mut MpvNode) -> c_int,
+    free_node_contents: unsafe extern "C" fn(*mut MpvNode),
     get_property_string: unsafe extern "C" fn(Handle, *const c_char) -> *mut c_char,
     free: unsafe extern "C" fn(*mut c_void),
     wait_event: unsafe extern "C" fn(Handle, f64) -> *mut MpvEvent,
@@ -91,7 +117,7 @@ fn open_lib() -> Result<Library, String> {
 
 #[cfg(not(any(windows, target_os = "android")))]
 mod linked {
-    use super::{Handle, MpvEvent};
+    use super::{Handle, MpvEvent, MpvNode};
     use std::ffi::{c_char, c_int, c_void};
 
     extern "C" {
@@ -100,6 +126,8 @@ mod linked {
         pub fn mpv_set_option_string(ctx: Handle, name: *const c_char, data: *const c_char) -> c_int;
         pub fn mpv_set_property_string(ctx: Handle, name: *const c_char, data: *const c_char) -> c_int;
         pub fn mpv_command(ctx: Handle, args: *mut *const c_char) -> c_int;
+        pub fn mpv_command_ret(ctx: Handle, args: *mut *const c_char, result: *mut MpvNode) -> c_int;
+        pub fn mpv_free_node_contents(node: *mut MpvNode);
         pub fn mpv_get_property_string(ctx: Handle, name: *const c_char) -> *mut c_char;
         pub fn mpv_free(data: *mut c_void);
         pub fn mpv_wait_event(ctx: Handle, timeout: f64) -> *mut MpvEvent;
@@ -117,6 +145,8 @@ impl Mpv {
             set_option_string: linked::mpv_set_option_string,
             set_property_string: linked::mpv_set_property_string,
             command: linked::mpv_command,
+            command_ret: linked::mpv_command_ret,
+            free_node_contents: linked::mpv_free_node_contents,
             get_property_string: linked::mpv_get_property_string,
             free: linked::mpv_free,
             wait_event: linked::mpv_wait_event,
@@ -147,6 +177,11 @@ impl Mpv {
                     unsafe extern "C" fn(Handle, *const c_char, *const c_char) -> c_int
                 ),
                 command: sym!("mpv_command", unsafe extern "C" fn(Handle, *mut *const c_char) -> c_int),
+                command_ret: sym!(
+                    "mpv_command_ret",
+                    unsafe extern "C" fn(Handle, *mut *const c_char, *mut MpvNode) -> c_int
+                ),
+                free_node_contents: sym!("mpv_free_node_contents", unsafe extern "C" fn(*mut MpvNode)),
                 get_property_string: sym!(
                     "mpv_get_property_string",
                     unsafe extern "C" fn(Handle, *const c_char) -> *mut c_char
@@ -182,6 +217,67 @@ impl Mpv {
         let mut ptrs: Vec<*const c_char> = owned.iter().map(|c| c.as_ptr()).collect();
         ptrs.push(ptr::null());
         (self.command)(ctx, ptrs.as_mut_ptr())
+    }
+
+    unsafe fn with_frame<T>(&self, ctx: Handle, f: impl FnOnce(&crate::autocrop::Frame) -> T) -> Option<T> {
+        let mut node = MpvNode { u: 0, format: 0 };
+        let grab = |args: &[&str], node: &mut MpvNode| {
+            let owned: Vec<CString> = args.iter().filter_map(|a| CString::new(*a).ok()).collect();
+            let mut ptrs: Vec<*const c_char> = owned.iter().map(|c| c.as_ptr()).collect();
+            ptrs.push(ptr::null());
+            (self.command_ret)(ctx, ptrs.as_mut_ptr(), node) >= 0
+        };
+        if !grab(&["screenshot-raw", "video", "bgr0"], &mut node) && !grab(&["screenshot-raw", "video"], &mut node) {
+            return None;
+        }
+        let out = (|| {
+            if node.format != FORMAT_NODE_MAP || node.u == 0 {
+                return None;
+            }
+            let list = &*(node.u as usize as *const MpvNodeList);
+            let (mut w, mut h, mut stride, mut format, mut data) = (0i64, 0i64, 0i64, String::new(), None);
+            for i in 0..list.num.max(0) as usize {
+                let key = CStr::from_ptr(*list.keys.add(i)).to_bytes();
+                let v = &*list.values.add(i);
+                match (key, v.format) {
+                    (b"w", FORMAT_INT64) => w = v.u as i64,
+                    (b"h", FORMAT_INT64) => h = v.u as i64,
+                    (b"stride", FORMAT_INT64) => stride = v.u as i64,
+                    (b"format", FORMAT_STRING) => format = CStr::from_ptr(v.u as usize as *const c_char).to_string_lossy().into_owned(),
+                    (b"data", FORMAT_BYTE_ARRAY) => {
+                        let b = &*(v.u as usize as *const MpvByteArray);
+                        if !b.data.is_null() {
+                            data = Some(std::slice::from_raw_parts(b.data, b.size));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if !matches!(format.as_str(), "bgr0" | "bgra" | "rgba" | "rgb0") || w <= 0 || h <= 0 || stride <= 0 {
+                return None;
+            }
+            let frame = crate::autocrop::Frame { w: w as u32, h: h as u32, stride: stride as usize, data: data? };
+            Some(f(&frame))
+        })();
+        (self.free_node_contents)(&mut node);
+        out
+    }
+
+    unsafe fn apply_crop(&self, ctx: Handle, change: crate::autocrop::Change) {
+        use crate::autocrop::Change;
+        match change {
+            Change::Crop(r) => {
+                if self.set_property(ctx, "video-crop", &format!("{}x{}+{}+{}", r.w, r.h, r.x, r.y)) < 0 {
+                    self.cmd(ctx, &["vf", "remove", "@wistvcrop"]);
+                    self.cmd(ctx, &["vf", "add", &format!("@wistvcrop:lavfi-crop=w={}:h={}:x={}:y={}", r.w, r.h, r.x, r.y)]);
+                }
+            }
+            Change::Clear => {
+                if self.set_property(ctx, "video-crop", "") < 0 {
+                    self.cmd(ctx, &["vf", "remove", "@wistvcrop"]);
+                }
+            }
+        }
     }
 
     unsafe fn prop(&self, ctx: Handle, name: &str) -> Option<String> {
@@ -299,6 +395,7 @@ struct Live {
 pub struct Player {
     live: Arc<Mutex<Option<Live>>>,
     generation: AtomicU64,
+    crop: Arc<AtomicBool>,
 }
 
 fn checked(lib: &Mpv, rc: c_int) -> Result<(), String> {
@@ -314,6 +411,7 @@ impl Player {
         Self {
             live: Arc::new(Mutex::new(None)),
             generation: AtomicU64::new(0),
+            crop: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -335,6 +433,10 @@ impl Player {
 
     pub fn stop(&self) {
         let _ = self.command(&["quit".to_string()]);
+    }
+
+    pub fn set_crop(&self, on: bool) {
+        self.crop.store(on, Ordering::Relaxed);
     }
 
     pub fn layout(&self) -> Value {
@@ -447,9 +549,10 @@ impl Player {
         let start_ms = req.start_ms;
         let wid = req.wid;
         let shared = self.live.clone();
+        let crop_on = self.crop.clone();
         std::thread::spawn(move || {
             let ctx = ctx_addr as Handle;
-            let out = unsafe { run(lib, ctx, start_ms, wid, &state) };
+            let out = unsafe { run(lib, ctx, start_ms, wid, &crop_on, &state) };
             {
                 let mut live = shared.lock().unwrap();
                 if live.as_ref().map(|l| l.generation) == Some(generation) {
@@ -509,7 +612,7 @@ unsafe fn follow_surface(lib: &Mpv, ctx: Handle, seen: &mut (u64, i64)) {
     }
 }
 
-unsafe fn run(lib: &Mpv, ctx: Handle, start_ms: u64, wid: i64, state: &dyn Fn(Value)) -> Outcome {
+unsafe fn run(lib: &Mpv, ctx: Handle, start_ms: u64, wid: i64, crop_on: &AtomicBool, state: &dyn Fn(Value)) -> Outcome {
     let mut pos = start_ms as f64 / 1000.0;
     let mut dur = 0.0f64;
     let mut error = None;
@@ -519,6 +622,7 @@ unsafe fn run(lib: &Mpv, ctx: Handle, start_ms: u64, wid: i64, state: &dyn Fn(Va
     let mut loaded = false;
     #[cfg(target_os = "android")]
     let mut surface = (u64::MAX, wid);
+    let mut crop = crate::autocrop::AutoCrop::new();
     loop {
         let ev = (lib.wait_event)(ctx, 0.2);
         #[cfg(windows)]
@@ -532,6 +636,18 @@ unsafe fn run(lib: &Mpv, ctx: Handle, start_ms: u64, wid: i64, state: &dyn Fn(Va
         }
         if let Some(d) = lib.prop_f64(ctx, "duration") {
             dur = d;
+        }
+        if !crop_on.load(Ordering::Relaxed) {
+            if let Some(change) = crop.disable() {
+                lib.apply_crop(ctx, change);
+            }
+        } else if loaded && crop.due() {
+            let ready = !lib.prop_flag(ctx, "paused-for-cache") && lib.prop(ctx, "video-params/w").is_some() && lib.prop(ctx, "vo-configured").as_deref() == Some("yes");
+            match ready.then(|| lib.with_frame(ctx, |f| crop.observe(f))).flatten() {
+                Some(Some(change)) => lib.apply_crop(ctx, change),
+                Some(None) => {}
+                None => crop.skip(),
+            }
         }
         let mut stop = false;
         if !ev.is_null() {

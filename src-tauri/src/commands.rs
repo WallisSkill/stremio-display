@@ -503,6 +503,7 @@ pub async fn player_fill(app: AppHandle, on: bool) -> R<Value> {
     #[cfg(not(target_os = "ios"))]
     let layer = Value::Null;
     off_main(app, move |st| {
+        st.player.set_crop(on);
         st.player.set("keepaspect", if on { "no" } else { "yes" })?;
         Ok(json!({ "mpv": st.player.layout(), "layer": layer }))
     })
