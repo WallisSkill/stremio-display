@@ -930,7 +930,7 @@ function loadAddonSubs() {
 
 function addAddonSub(s, quiet) {
   pl.added.add(s.url);
-  const who = subCredit(s.url) || releaseSummary(s) || s.addon;
+  const who = subCredit(s.url) || subLabel(s) || releaseSummary(s) || s.addon;
   const title = [langName(s.lang), who].filter(Boolean).join(" · ");
   const args = ["sub-add", s.url, "select", [...title].length > 90 ? [...title].slice(0, 89).join("") + "…" : title, s.lang || ""];
   return quiet ? call("player_command", { args }).catch(() => {}) : cmd(...args);
@@ -1291,6 +1291,11 @@ function releaseSummary(s) {
   return parts.join(" · ");
 }
 
+function subLabel(s) {
+  const label = String(s.label || "").replace(/\s+/g, " ").trim();
+  return label && label !== String(s.lang || "") && label !== langName(s.lang) ? label : "";
+}
+
 function subFileName(s) {
   const name = String(s.subtitleFileName || "").trim();
   return name && !/^\d+$/.test(name) ? name : "";
@@ -1416,7 +1421,7 @@ function fillMenu(box) {
         if (track) { pickSub(track.id); return; }
         addAddonSub(s, false);
         renderMenu();
-      }, [creditEl, [releaseSummary(s), s.addon].filter(Boolean).join(" · "), file ? h("small", { class: "pl-file" }, file) : null]);
+      }, [creditEl, subLabel(s) ? h("small", { class: "pl-label-note" }, subLabel(s)) : null, [releaseSummary(s), s.addon].filter(Boolean).join(" · "), file ? h("small", { class: "pl-file" }, file) : null]);
     }));
   }
   box.replaceChildren(audioCol, subCol, addonCol);
