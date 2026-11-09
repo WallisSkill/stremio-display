@@ -20,6 +20,7 @@ function tidy(m) {
 }
 
 const call = (cmd, args = {}) => {
+  if (!TAURI && typeof web[cmd] !== "function") return Promise.reject(new Error(`Bản web chưa hỗ trợ ${cmd}`));
   const p = TAURI ? TAURI.core.invoke(cmd, args) : web[cmd](args);
   if (cmd === "catalog") return p.then((list) => list.map(tidy));
   if (cmd === "meta") return p.then(tidy);
@@ -1348,6 +1349,7 @@ function addAddonSub(s, quiet) {
 }
 
 async function autoSub(session) {
+  if (roomGuest() && room.tracks?.sub && room.tracks.vid === pl.ctx?.vid) return;
   const pick = subPicks()[pl.ctx?.m?.id];
   const want = pick || (subLang ? { lang: subLang } : null);
   if (!want || pl.session !== session) return;
@@ -1732,7 +1734,7 @@ function nudgeDelay(step) {
   const next = Math.round(((pl.s.subDelay || 0) + step) * 10) / 10;
   pl.s.subDelay = next;
   if (pl.ui.delayVal) pl.ui.delayVal.textContent = delayText(next);
-  setProp("sub-delay", next);
+  call("player_command", { args: ["add", "sub-delay", String(step)] }).catch(() => setProp("sub-delay", next));
 }
 function pickSub(id) {
   pl.s.sid = id;
@@ -1816,6 +1818,18 @@ function fillMenu(box) {
     return;
   }
   box.className = "pl-menu";
+  if (roomGuest() && room.tracks && sameMedia(pl.ctx, room.media)) {
+    const found = (type) => pl.tracks.find((t) => t.type === type && t.selected);
+    const on = (type) => { const t = found(type); return t && (t.title || langName(t.lang)) ? { ...t, label: t.title || langName(t.lang) } : t; };
+    const sub = on("sub");
+    const audio = on("audio");
+    box.className = "pl-menu narrow";
+    put(box, h("div", { class: "pl-col" }, h("h4", {}, "Phụ đề & âm thanh"),
+      h("p", { class: "pl-note" }, `Phụ đề, âm thanh và độ trễ đang theo ${roomHostName()}. Kiểu chữ bên dưới chỉ đổi trên máy bạn.`),
+      h("p", { class: "pl-note" }, `Phụ đề: ${sub ? sub.label || trackLabel(sub) : "Tắt"}${audio ? ` · Âm thanh: ${audio.label || trackLabel(audio)}` : ""}${room.tracks.delay ? ` · Độ trễ ${delayText(room.tracks.delay)}` : ""}`),
+      subStylePanel()));
+    return;
+  }
   const audio = pl.tracks.filter((t) => t.type === "audio");
   const subs = pl.tracks.filter((t) => t.type === "sub");
   const sid = pl.s.sid;
@@ -1952,7 +1966,8 @@ const room = {
   code: null, key: null, host: false, me: randomId(12), name: "", ws: null, online: false, leaving: false, tries: 0,
   retryTimer: null, pingTimer: null, syncTimer: null, members: [], hostOnline: true, media: null, play: null, offset: 0, rtt: Infinity,
   chat: [], unread: 0, hold: null, skip: new Set(), sent: null, hostPos: 0, bufSince: null, waiting: false, waitSince: null,
-  rateSet: null, cool: { seek: 0, pause: 0 }, joining: null, lastError: "", panel: null, feed: null, pill: null,
+  rateSet: null, cool: { seek: 0, pause: 0, track: 0 }, joining: null, lastError: "", panel: null, feed: null, pill: null,
+  tracks: null, tracksSent: null, subTried: {},
 };
 
 const inRoom = () => !!room.code;
@@ -1982,7 +1997,7 @@ function roomStart({ code, key, name }) {
   Object.assign(room, {
     code, key: key || null, host: !!key, name, online: false, leaving: false, tries: 0, members: [], hostOnline: true, media: null, play: null,
     offset: 0, rtt: Infinity, chat: [], unread: 0, hold: null, skip: new Set(), sent: null, bufSince: null, waiting: false, waitSince: null,
-    rateSet: null, cool: { seek: 0, pause: 0 }, joining: null, lastError: "",
+    rateSet: null, cool: { seek: 0, pause: 0, track: 0 }, joining: null, lastError: "", tracks: null, tracksSent: null, subTried: {},
   });
   try { sessionStorage.setItem("wistv.room", JSON.stringify({ code, key: key || null, name })); } catch (e) {}
   roomConnect();
@@ -2001,7 +2016,7 @@ function roomStop(close) {
   clearInterval(room.pingTimer);
   clearInterval(room.syncTimer);
   if (!room.host && pl.open && room.rateSet != null && room.rateSet !== 1) setProp("speed", 1);
-  Object.assign(room, { code: null, key: null, host: false, online: false, members: [], media: null, play: null, hold: null, rateSet: null, joining: null, waiting: false, unread: 0 });
+  Object.assign(room, { code: null, key: null, host: false, online: false, members: [], media: null, play: null, hold: null, rateSet: null, joining: null, waiting: false, unread: 0, tracks: null, tracksSent: null, subTried: {} });
   try { sessionStorage.removeItem("wistv.room"); } catch (e) {}
   room.panel?._close?.();
   paintRoom();
@@ -2071,12 +2086,14 @@ function roomMessage(m) {
     room.hostOnline = !!m.hostOnline;
     if (room.host) {
       room.sent = null;
+      room.tracksSent = null;
       if (!pl.open && m.play) room.hostPos = roomPos(m.play);
       if (pl.open && !sameMedia(pl.ctx, m.media)) roomShareMedia();
       else roomBeat(false);
     } else {
       room.media = m.media || null;
       room.play = m.play || null;
+      room.tracks = m.tracks || null;
       roomFollowMedia();
     }
   } else if (m.t === "members") {
@@ -2086,7 +2103,14 @@ function roomMessage(m) {
   } else if (m.t === "media" && !room.host) {
     room.media = m.media || null;
     room.play = m.play || null;
+    room.tracks = m.tracks || null;
     roomFollowMedia();
+  } else if (m.t === "tracks" && !room.host) {
+    room.tracks = m.tracks || null;
+    room.cool.track = 0;
+    roomSync();
+    if (pl.menu === "tracks") renderMenu();
+    return;
   } else if (m.t === "play" && !room.host) {
     room.play = m.play || null;
     roomSync();
@@ -2099,7 +2123,10 @@ function roomMediaOf(c, start) {
   const bh = s.behaviorHints || {};
   return {
     id: c.m.id, type: c.m.type, vid: c.vid, name: c.m.name || "", label: c.label && c.label !== c.m.name ? c.label : "", poster: c.m.poster, background: c.m.background, start: Math.max(0, start || 0),
-    hint: { infoHash: s.infoHash, fileIdx: s.fileIdx, sources: s.sources, filename: bh.filename, bingeGroup: bh.bingeGroup, addon: c.addon, name: s.name, ytId: s.ytId },
+    hint: {
+      infoHash: s.infoHash, fileIdx: s.fileIdx, sources: s.sources, filename: bh.filename, bingeGroup: bh.bingeGroup, addon: c.addon, name: s.name, ytId: s.ytId,
+      url: s.url, headers: bh.proxyHeaders?.request, notWebReady: bh.notWebReady,
+    },
   };
 }
 
@@ -2107,7 +2134,60 @@ function roomShareMedia(start) {
   if (!room.host || !room.online || !pl.open || !pl.ctx || String(pl.ctx.vid).startsWith("local:")) return;
   const at = start ?? curTime();
   room.hostPos = at;
-  if (roomSend({ t: "media", media: roomMediaOf(pl.ctx, at) })) { room.sent = null; roomBeat(false); }
+  if (roomSend({ t: "media", media: roomMediaOf(pl.ctx, at) })) { room.sent = null; room.tracksSent = null; roomBeat(false); }
+}
+
+function trackPick(type) {
+  const list = pl.tracks.filter((t) => t.type === type);
+  const on = list.find((t) => t.selected);
+  if (!on) return type === "sub" ? { off: true } : null;
+  if (on.external) return /^https?:\/\//.test(on.file || "") ? { url: on.file, lang: on.lang || "", title: on.title || "" } : null;
+  return { lang: on.lang || "", title: on.title || "", idx: list.filter((t) => !t.external).indexOf(on) };
+}
+
+function hostShareTracks() {
+  if (!pl.open || !pl.ctx || !pl.s.loaded || !pl.tracks.length) return;
+  const tracks = { sub: trackPick("sub"), audio: trackPick("audio"), delay: Math.round((pl.s.subDelay || 0) * 10) / 10 };
+  const sig = `${pl.ctx.vid}|${JSON.stringify(tracks)}`;
+  if (sig !== room.tracksSent && roomSend({ t: "tracks", ...tracks })) room.tracksSent = sig;
+}
+
+function matchTrack(list, want) {
+  const inner = list.filter((t) => !t.external);
+  const same = (t) => (t.lang || "") === (want.lang || "") && (t.title || "") === (want.title || "");
+  const at = Number.isInteger(want.idx) ? inner[want.idx] : null;
+  if (at && same(at)) return at;
+  return inner.find(same) || (want.lang && inner.find((t) => sameLang(t.lang, want.lang))) || at || null;
+}
+
+function guestTracks() {
+  const want = room.tracks;
+  if (!want || want.vid !== room.media?.vid || !pl.s.loaded || Date.now() < room.cool.track) return;
+  const t = Date.now();
+  const pick = (prop, type, w) => {
+    if (!w) return false;
+    const list = pl.tracks.filter((x) => x.type === type);
+    const on = list.find((x) => x.selected);
+    if (w.off) { if (!on) return false; quietSet(prop, "no"); return true; }
+    if (w.url) {
+      const have = list.find((x) => x.external && x.file === w.url);
+      if (have) { if (have.selected) return false; quietSet(prop, have.id); return true; }
+      if (t - (room.subTried[w.url] || 0) < 10000) return false;
+      room.subTried[w.url] = t;
+      pl.added.add(w.url);
+      call("player_command", { args: ["sub-add", w.url, "select", w.title || langName(w.lang) || "Phụ đề", w.lang || ""] }).catch(() => {});
+      return true;
+    }
+    const hit = matchTrack(list, w);
+    if (!hit || hit.selected) return false;
+    quietSet(prop, hit.id);
+    return true;
+  };
+  let moved = pick("sid", "sub", want.sub);
+  moved = pick("aid", "audio", want.audio) || moved;
+  const delay = want.delay || 0;
+  if (Math.abs((pl.s.subDelay || 0) - delay) > 0.05) { quietSet("sub-delay", delay); pl.s.subDelay = delay; moved = true; }
+  if (moved) room.cool.track = t + 1500;
 }
 
 function hostPlayState() {
@@ -2128,6 +2208,7 @@ function roomBeat(beat) {
 
 function hostWatch() {
   if (!room.host || !room.online) return;
+  hostShareTracks();
   const last = room.sent;
   if (!last) { roomBeat(false); return; }
   const p = hostPlayState();
@@ -2205,6 +2286,7 @@ function roomSync() {
   roomReport();
   const p = room.play;
   const s = pl.s;
+  if (pl.open && sameMedia(pl.ctx, room.media)) guestTracks();
   if (!p || !pl.open || !sameMedia(pl.ctx, room.media) || !s.loaded || (p.vid && p.vid !== room.media.vid)) return;
   const t = Date.now();
   const want = roomPos(p);
@@ -2247,14 +2329,19 @@ function roomMatch(groups, hint) {
 
 function roomFindStream(md) {
   const hint = md.hint || {};
+  const bh = { filename: hint.filename, bingeGroup: hint.bingeGroup };
+  if (hint.url) {
+    const stream = { url: hint.url, name: hint.name, behaviorHints: { ...bh, notWebReady: hint.notWebReady || undefined, proxyHeaders: hint.headers ? { request: hint.headers } : undefined } };
+    return Promise.resolve({ stream, addon: hint.addon || "" });
+  }
   const torrent = hint.infoHash
-    ? { stream: { infoHash: hint.infoHash, fileIdx: hint.fileIdx, sources: hint.sources, name: hint.name, behaviorHints: { filename: hint.filename, bingeGroup: hint.bingeGroup } }, addon: hint.addon || "" }
+    ? { stream: { infoHash: hint.infoHash, fileIdx: hint.fileIdx, sources: hint.sources, name: hint.name, behaviorHints: bh }, addon: hint.addon || "" }
     : null;
   if (torrent && TAURI) return Promise.resolve(torrent);
   return new Promise((resolve) => {
     let over = false;
     const end = (hit) => { if (!over) { over = true; clearTimeout(timer); resolve(hit || torrent); } };
-    const timer = setTimeout(() => end(null), 15000);
+    const timer = setTimeout(() => end(null), torrent ? 8000 : 15000);
     watchStreams(md.type, md.vid, (e) => { const hit = roomMatch(loadedGroups(e), hint); if (hit) end(hit); })
       .then((e) => end(roomMatch(loadedGroups(e), hint)), () => end(null));
   });
@@ -2337,8 +2424,9 @@ function roomDialog({ join, code = "" }) {
     put(box, h("div", { class: "pf-card" },
       h("h2", {}, join ? "Vào phòng xem chung" : "Tạo phòng xem chung"),
       h("p", { class: "hint" }, join
-        ? "Nhập mã phòng bạn được gửi. Chủ phòng điều khiển phát, dừng, tua và chọn tập; phụ đề và âm lượng bạn tự chỉnh."
-        : "Bạn bè ở máy khác xem cùng lúc với bạn. Chỉ bạn điều khiển phát, dừng, tua và chọn tập."),
+        ? "Nhập mã phòng bạn được gửi. Chủ phòng điều khiển phát, dừng, tua, chọn tập, nguồn phim và phụ đề; kiểu chữ phụ đề và âm lượng bạn tự chỉnh."
+        : "Bạn bè ở máy khác xem cùng lúc với bạn. Chỉ bạn điều khiển phát, dừng, tua và chọn tập; mọi người dùng đúng nguồn phim, phụ đề và âm thanh bạn đang chọn."),
+      join ? null : h("p", { class: "hint" }, "Lưu ý: link nguồn phim và phụ đề được gửi cho mọi người trong phòng. Link từ Real-Debrid hay dịch vụ tương tự có chứa khoá tài khoản của bạn, nên chỉ mời người bạn tin."),
       join ? [h("label", { class: "pf-label" }, "Mã phòng"), codeIn] : null,
       h("label", { class: "pf-label" }, "Tên của bạn"), nameIn, msg,
       h("div", { class: "pf-row end" },

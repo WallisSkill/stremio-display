@@ -251,10 +251,20 @@ const ROOM_CODE = /^[A-HJ-NP-Z2-9]{6}$/;
 const ROOM_LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const CLIENT_ID = /^[a-z0-9]{8,32}$/;
 const HTTP_URL = /^https?:\/\/[^\s"'()\\<>]{1,500}$/;
+const SUB_URL = /^https?:\/\/[^\s"<>\\]{1,2000}$/;
+const STREAM_URL = /^(https?|magnet|rtmp|rtsp):[^\s"<>\\]{1,4000}$/;
+const HEADER_NAME = /^[A-Za-z0-9-]{1,64}$/;
+
+function cleanHeaders(h) {
+  if (!h || typeof h !== "object" || Array.isArray(h)) return undefined;
+  const out = {};
+  for (const [k, v] of Object.entries(h).slice(0, 20)) if (HEADER_NAME.test(k) && typeof v === "string" && v.length <= 1000) out[k] = v;
+  return Object.keys(out).length ? out : undefined;
+}
 const MAX_MEMBERS = 12;
 const ROOM_LIFE_MS = 12 * 3600e3;
 const HOST_GRACE_MS = 3 * 60e3;
-const MAX_FRAME = 16 * 1024;
+const MAX_FRAME = 32 * 1024;
 const MAX_CHAT = 300;
 const CHAT_GAP_MS = 400;
 const REACTIONS = ["❤️", "😂", "😮", "😢", "👏", "🔥"];
@@ -279,9 +289,26 @@ function cleanMedia(m) {
     addon: clip(s.addon, 100) || undefined,
     name: clip(s.name, 200) || undefined,
     ytId: typeof s.ytId === "string" && /^[\w-]{6,20}$/.test(s.ytId) ? s.ytId : undefined,
+    url: typeof s.url === "string" && STREAM_URL.test(s.url) ? s.url : undefined,
+    headers: cleanHeaders(s.headers),
+    notWebReady: s.notWebReady === true || undefined,
   };
   const start = Number.isFinite(m.start) && m.start >= 0 ? Math.min(m.start, 1e9) : 0;
   return { id, type, vid, name: clip(m.name, 200), label: clip(m.label, 200), poster: httpUrl(m.poster), background: httpUrl(m.background), start, hint };
+}
+
+function cleanTrack(t, url) {
+  if (!t || typeof t !== "object") return null;
+  if (t.off) return { off: true };
+  const out = { lang: clip(t.lang, 20), title: clip(t.title, 200) };
+  if (Number.isInteger(t.idx) && t.idx >= 0 && t.idx < 200) out.idx = t.idx;
+  if (url && typeof t.url === "string" && SUB_URL.test(t.url)) out.url = t.url;
+  return out;
+}
+
+function cleanTracks(m, vid) {
+  const delay = Number.isFinite(m.delay) ? Math.max(-600, Math.min(600, Math.round(m.delay * 10) / 10)) : 0;
+  return { vid, sub: cleanTrack(m.sub, true), audio: cleanTrack(m.audio, false), delay };
 }
 
 function cleanPlay(p, now, vid) {
@@ -295,12 +322,14 @@ export class WatchRoom extends DurableObject {
     super(ctx, env);
     this.room = undefined;
     this.play = null;
+    this.tracks = null;
   }
 
   async load() {
     if (this.room === undefined) {
       this.room = (await this.ctx.storage.get("room")) || null;
       this.play = (await this.ctx.storage.get("play")) || null;
+      this.tracks = (await this.ctx.storage.get("tracks")) || null;
     }
     return this.room;
   }
@@ -318,6 +347,7 @@ export class WatchRoom extends DurableObject {
     if (await this.load()) return false;
     this.room = { hostKey, uid, created: Date.now(), media: null, hostGone: null };
     this.play = null;
+    this.tracks = null;
     await this.save();
     await this.schedule();
     return true;
@@ -381,7 +411,7 @@ export class WatchRoom extends DurableObject {
       await this.schedule();
     }
     const roster = this.roster();
-    this.send(server, { t: "welcome", you: id, host, now: Date.now(), media: room.media, play: this.play, ...roster });
+    this.send(server, { t: "welcome", you: id, host, now: Date.now(), media: room.media, play: this.play, tracks: this.tracks, ...roster });
     const data = JSON.stringify({ t: "members", ...roster });
     for (const ws of this.sockets()) if (ws !== server) try { ws.send(data); } catch (e) {}
     return new Response(null, { status: 101, webSocket: client });
@@ -426,13 +456,19 @@ export class WatchRoom extends DurableObject {
       try { media = cleanMedia(msg.media); } catch (e) { return; }
       room.media = media;
       this.play = { paused: true, hold: false, pos: media.start, rate: 1, at: now, vid: media.vid };
-      await this.ctx.storage.put({ room, play: this.play });
-      this.broadcast({ t: "media", media, play: this.play });
+      this.tracks = null;
+      await this.ctx.storage.put({ room, play: this.play, tracks: null });
+      this.broadcast({ t: "media", media, play: this.play, tracks: null });
     } else if (msg.t === "play") {
       if (!room.media) return;
       this.play = cleanPlay(msg, now, room.media.vid);
       if (!msg.beat) await this.ctx.storage.put("play", this.play);
       this.broadcast({ t: "play", play: this.play }, ws);
+    } else if (msg.t === "tracks") {
+      if (!room.media) return;
+      this.tracks = cleanTracks(msg, room.media.vid);
+      await this.ctx.storage.put("tracks", this.tracks);
+      this.broadcast({ t: "tracks", tracks: this.tracks }, ws);
     } else if (msg.t === "close") {
       await this.closeRoom("Chủ phòng đã đóng phòng");
     }
@@ -471,8 +507,9 @@ export class WatchRoom extends DurableObject {
     }
     this.room = null;
     this.play = null;
+    this.tracks = null;
     await this.ctx.storage.deleteAlarm();
-    await this.ctx.storage.delete(["room", "play"]);
+    await this.ctx.storage.delete(["room", "play", "tracks"]);
   }
 }
 

@@ -401,7 +401,7 @@ function trackList() {
   if (P.hls) {
     P.hls.audioTracks.forEach((t, i) => out.push({ id: i + 1, type: "audio", title: t.name, lang: t.lang, codec: null, channels: t.channels || null, external: false, selected: P.hls.audioTrack === i }));
   }
-  P.ext.forEach((s, i) => out.push({ id: i + 1, type: "sub", title: s.title, lang: s.lang, codec: null, channels: null, external: true, selected: P.sid === i + 1 }));
+  P.ext.forEach((s, i) => out.push({ id: i + 1, type: "sub", title: s.title, lang: s.lang, codec: null, channels: null, external: true, file: s.url || null, selected: P.sid === i + 1 }));
   return out;
 }
 
@@ -518,7 +518,7 @@ async function addSubtitle(url, title, lang) {
   }
   const cues = parseSubs(text);
   if (!cues.length) throw "Tệp phụ đề trống hoặc không đọc được";
-  P.ext.push({ title, lang, cues });
+  P.ext.push({ title, lang, cues, url });
   P.sid = P.ext.length;
 }
 
@@ -731,6 +731,7 @@ function setProp({ name, value }) {
   const v = P.video;
   if (name === "volume") { v.volume = Math.max(0, Math.min(1, Number(value) / 100)); if (v.volume > 0) v.muted = false; return; }
   if (name === "speed") { v.playbackRate = Number(value) || 1; return; }
+  if (name === "sub-delay") { P.subDelay = Math.round((Number(value) || 0) * 10) / 10; return; }
   if (name === "sid") { const n = Number(value); P.sid = n > 0 && n <= P.ext.length ? n : null; return; }
   if (name === "aid") { if (P.hls) P.hls.audioTrack = Math.max(0, Number(value) - 1); return; }
   if (name === "sub-back-color" || name === "sub-outline-color" || name === "sub-border-color") return;
