@@ -34,7 +34,7 @@ jobs:
           set -e
           out='{}'
           for tag in ios windows android linux; do
-            rel=$(gh api "repos/${{ github.repository }}/releases/tags/$tag" --jq '{body, assets: [.assets[] | {name, size, updated_at, browser_download_url}]}' 2>/dev/null || echo null)
+            if ! rel=$(gh api "repos/${{ github.repository }}/releases/tags/$tag" --jq '{body, assets: [.assets[] | {name, size, updated_at, browser_download_url}]}' 2>/dev/null); then rel=null; fi
             out=$(jq -c --arg t "$tag" --argjson r "$rel" '. + {($t): $r}' <<<"$out")
           done
           jq --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '. + {generated: $at}' <<<"$out" > site/releases.json
