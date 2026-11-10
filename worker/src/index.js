@@ -57,10 +57,49 @@ const MAX_IDS = 500;
 const MAX_PREFS_BYTES = 64 * 1024;
 const METHODS = new Set(["profilesGet", "profilesSet", "profileUnlock", "datastoreGet", "datastorePut", "prefsGet", "prefsSet"]);
 
-const fail = (message, status = 400) => reply({ error: { message } }, status);
+const SAID = {
+  "wk.profileCount": "Cần từ 1 đến {max} hồ sơ",
+  "wk.profileId": "Mã hồ sơ không hợp lệ",
+  "wk.profileName": "Tên hồ sơ cần từ 1 đến {max} ký tự",
+  "wk.pinFormat": "Mã PIN cần đúng 6 chữ số",
+  "wk.mainProfile": "Không xoá được hồ sơ chính",
+  "wk.profileGone": "Hồ sơ này không còn",
+  "wk.profileLocked": "Hồ sơ đang khoá, hãy chọn lại hồ sơ và nhập mã PIN",
+  "wk.badPrefs": "Cài đặt không hợp lệ",
+  "wk.prefsTooBig": "Cài đặt quá lớn",
+  "wk.pinWrong": "Sai mã PIN",
+  "wk.pinNeeded": "Cần mã PIN của hồ sơ {name} để sửa hoặc xoá",
+  "wk.pinNeededMain": "Cần mã PIN của hồ sơ chính để sửa hoặc xoá",
+  "wk.badIds": "Danh sách mã không hợp lệ",
+  "wk.badChanges": "Thay đổi không hợp lệ",
+  "wk.badItem": "Mục thư viện không hợp lệ",
+  "wk.itemTooBig": "Mục thư viện quá lớn",
+  "wk.libraryFull": "Thư viện hồ sơ đã đầy",
+  "wk.badMedia": "Phim không hợp lệ",
+  "wk.noRoom": "Không có phòng này hoặc phòng đã đóng",
+  "wk.badRequest": "Yêu cầu không hợp lệ",
+  "wk.badHostKey": "Mã chủ phòng không đúng",
+  "wk.roomFull": "Phòng đã đủ người",
+  "wk.hostClosed": "Chủ phòng đã đóng phòng",
+  "wk.roomExpired": "Phòng đã mở quá {n} giờ",
+  "wk.hostLeft": "Chủ phòng đã rời phòng",
+  "wk.sessionExpired": "Phiên đăng nhập Stremio đã hết hạn",
+  "wk.roomCreateFail": "Chưa tạo được phòng, hãy thử lại",
+  "wk.needWebSocket": "Cần kết nối WebSocket",
+  "wk.badRoomCode": "Mã phòng không hợp lệ",
+};
+const said = (key, params) => (SAID[key] || key).replace(/\{(\w+)\}/g, (m, k) => (params && params[k] != null ? String(params[k]) : m));
+const coded = (key, params) => (SAID[key] ? { message: said(key, params), key, ...(params ? { params } : {}) } : { message: key });
+const fail = (key, status = 400, params) => reply({ error: coded(key, params) }, status);
 const enc = (s) => new TextEncoder().encode(s);
 
-class Refused extends Error {}
+class Refused extends Error {
+  constructor(key, params) {
+    super(said(key, params));
+    this.key = key;
+    this.params = params;
+  }
+}
 
 async function pinHash(pin, salt) {
   const key = await crypto.subtle.importKey("raw", enc(pin), "PBKDF2", false, ["deriveBits"]);
@@ -75,24 +114,24 @@ function same(a, b) {
 }
 
 function cleanProfiles(list) {
-  if (!Array.isArray(list) || !list.length || list.length > MAX_PROFILES) throw new Refused(`Cần từ 1 đến ${MAX_PROFILES} hồ sơ`);
+  if (!Array.isArray(list) || !list.length || list.length > MAX_PROFILES) throw new Refused("wk.profileCount", { max: MAX_PROFILES });
   const seen = new Set();
   const out = list.map((p, pos) => {
     const id = p && typeof p.id === "string" ? p.id : "";
-    if (!PROFILE_ID.test(id) || seen.has(id)) throw new Refused("Mã hồ sơ không hợp lệ");
+    if (!PROFILE_ID.test(id) || seen.has(id)) throw new Refused("wk.profileId");
     seen.add(id);
     const name = typeof p.name === "string" ? p.name.trim().replace(/\s+/g, " ") : "";
-    if ([...name].length > MAX_NAME || (!name && id !== MAIN)) throw new Refused(`Tên hồ sơ cần từ 1 đến ${MAX_NAME} ký tự`);
+    if ([...name].length > MAX_NAME || (!name && id !== MAIN)) throw new Refused("wk.profileName", { max: MAX_NAME });
     const color = Number.isInteger(p.color) && p.color >= 0 && p.color < COLORS ? p.color : 0;
     let pin;
     if (p.pin === null) pin = null;
     else if (p.pin !== undefined) {
-      if (typeof p.pin !== "string" || !PIN.test(p.pin)) throw new Refused("Mã PIN cần đúng 6 chữ số");
+      if (typeof p.pin !== "string" || !PIN.test(p.pin)) throw new Refused("wk.pinFormat");
       pin = p.pin;
     }
     return { id, name, color, pos, pin };
   });
-  if (!seen.has(MAIN)) throw new Refused("Không xoá được hồ sơ chính");
+  if (!seen.has(MAIN)) throw new Refused("wk.mainProfile");
   return out;
 }
 
@@ -121,15 +160,15 @@ export class ProfileStore extends DurableObject {
 
   async extra(profile, token) {
     const row = profile === MAIN ? null : this.rows().find((r) => r.id === profile);
-    if (!row) throw new Refused("Hồ sơ này không còn");
-    if (!(await this.allowed(row, token))) throw new Refused("Hồ sơ đang khoá, hãy chọn lại hồ sơ và nhập mã PIN");
+    if (!row) throw new Refused("wk.profileGone");
+    if (!(await this.allowed(row, token))) throw new Refused("wk.profileLocked");
     return profile;
   }
 
   async member(profile, token) {
     const row = this.rows().find((r) => r.id === profile);
-    if (!row && !(profile === MAIN && !this.rows().length)) throw new Refused("Hồ sơ này không còn");
-    if (row && !(await this.allowed(row, token))) throw new Refused("Hồ sơ đang khoá, hãy chọn lại hồ sơ và nhập mã PIN");
+    if (!row && !(profile === MAIN && !this.rows().length)) throw new Refused("wk.profileGone");
+    if (row && !(await this.allowed(row, token))) throw new Refused("wk.profileLocked");
     return profile;
   }
 
@@ -141,9 +180,9 @@ export class ProfileStore extends DurableObject {
 
   async prefsSet({ profile, token, prefs }) {
     const pid = await this.member(profile, token);
-    if (!prefs || typeof prefs !== "object" || Array.isArray(prefs)) throw new Refused("Cài đặt không hợp lệ");
+    if (!prefs || typeof prefs !== "object" || Array.isArray(prefs)) throw new Refused("wk.badPrefs");
     const data = JSON.stringify(prefs);
-    if (data.length > MAX_PREFS_BYTES) throw new Refused("Cài đặt quá lớn");
+    if (data.length > MAX_PREFS_BYTES) throw new Refused("wk.prefsTooBig");
     const at = Number.isFinite(prefs._at) ? prefs._at : Date.now();
     const old = this.sql.exec("SELECT at FROM prefs WHERE profile = ?", pid).toArray()[0];
     if (old && old.at > at) return { success: false, stale: true };
@@ -152,11 +191,11 @@ export class ProfileStore extends DurableObject {
   }
 
   async run(method, body) {
-    if (!METHODS.has(method)) return { refused: "not found" };
+    if (!METHODS.has(method)) return { refused: { key: "not found" } };
     try {
       return await this[method](body);
     } catch (e) {
-      if (e instanceof Refused) return { refused: e.message };
+      if (e instanceof Refused) return { refused: { key: e.key, params: e.params } };
       throw e;
     }
   }
@@ -169,11 +208,11 @@ export class ProfileStore extends DurableObject {
     const row = this.rows().find((r) => r.id === profile);
     if (!row) {
       if (profile === MAIN) return { token: "" };
-      throw new Refused("Hồ sơ này không còn");
+      throw new Refused("wk.profileGone");
     }
     if (!row.hash) return { token: "" };
     const ok = typeof pin === "string" && PIN.test(pin) && same(await pinHash(pin, row.salt), row.hash);
-    if (!ok) throw new Refused("Sai mã PIN");
+    if (!ok) throw new Refused("wk.pinWrong");
     return { token: await tokenOf(row) };
   }
 
@@ -185,7 +224,7 @@ export class ProfileStore extends DurableObject {
       if (!o.hash) continue;
       const n = next.find((p) => p.id === o.id);
       const changed = !n || n.name !== o.name || n.color !== o.color || n.pin !== undefined;
-      if (changed && !(await this.allowed(o, keys[o.id]))) throw new Refused(`Cần mã PIN của hồ sơ ${o.name || "chính"} để sửa hoặc xoá`);
+      if (changed && !(await this.allowed(o, keys[o.id]))) throw o.name ? new Refused("wk.pinNeeded", { name: o.name }) : new Refused("wk.pinNeededMain");
     }
     for (const n of next) {
       const o = old.find((r) => r.id === n.id);
@@ -215,7 +254,7 @@ export class ProfileStore extends DurableObject {
   async datastoreGet({ profile, token, ids, all }) {
     const pid = await this.extra(profile, token);
     if (all) return this.sql.exec("SELECT data FROM items WHERE profile = ?", pid).toArray().map((r) => JSON.parse(r.data));
-    if (!Array.isArray(ids) || ids.length > MAX_IDS) throw new Refused("Danh sách mã không hợp lệ");
+    if (!Array.isArray(ids) || ids.length > MAX_IDS) throw new Refused("wk.badIds");
     const out = [];
     for (const id of ids) {
       if (typeof id !== "string") continue;
@@ -227,19 +266,19 @@ export class ProfileStore extends DurableObject {
 
   async datastorePut({ profile, token, changes }) {
     const pid = await this.extra(profile, token);
-    if (!Array.isArray(changes) || changes.length > MAX_CHANGES) throw new Refused("Thay đổi không hợp lệ");
+    if (!Array.isArray(changes) || changes.length > MAX_CHANGES) throw new Refused("wk.badChanges");
     const rows = changes.map((item) => {
       const id = item && typeof item._id === "string" ? item._id : "";
-      if (!id || id.length > 200) throw new Refused("Mục thư viện không hợp lệ");
+      if (!id || id.length > 200) throw new Refused("wk.badItem");
       const data = JSON.stringify(item);
-      if (data.length > MAX_ITEM_BYTES) throw new Refused("Mục thư viện quá lớn");
+      if (data.length > MAX_ITEM_BYTES) throw new Refused("wk.itemTooBig");
       return { id, data, mtime: typeof item._mtime === "string" ? item._mtime : new Date().toISOString() };
     });
     this.ctx.storage.transactionSync(() => {
       for (const r of rows) {
         const old = this.sql.exec("SELECT mtime FROM items WHERE profile = ? AND id = ?", pid, r.id).toArray()[0];
         if (old && old.mtime > r.mtime) continue;
-        if (!old && this.sql.exec("SELECT COUNT(*) AS n FROM items WHERE profile = ?", pid).one().n >= MAX_ITEMS) throw new Refused("Thư viện hồ sơ đã đầy");
+        if (!old && this.sql.exec("SELECT COUNT(*) AS n FROM items WHERE profile = ?", pid).one().n >= MAX_ITEMS) throw new Refused("wk.libraryFull");
         this.sql.exec("INSERT OR REPLACE INTO items (profile, id, mtime, data) VALUES (?, ?, ?, ?)", pid, r.id, r.mtime, r.data);
       }
     });
@@ -274,11 +313,11 @@ const httpUrl = (v) => (typeof v === "string" && HTTP_URL.test(v) ? v : undefine
 const memberName = (v) => [...clip(v, 80)].slice(0, MAX_NAME).join("") || "Khách";
 
 function cleanMedia(m) {
-  if (!m || typeof m !== "object") throw new Refused("Phim không hợp lệ");
+  if (!m || typeof m !== "object") throw new Refused("wk.badMedia");
   const id = clip(m.id, 200);
   const type = clip(m.type, 20);
   const vid = clip(m.vid, 200);
-  if (!id || !type || !vid) throw new Refused("Phim không hợp lệ");
+  if (!id || !type || !vid) throw new Refused("wk.badMedia");
   const s = m.hint && typeof m.hint === "object" ? m.hint : {};
   const hint = {
     infoHash: typeof s.infoHash === "string" && /^[0-9a-f]{40}$/i.test(s.infoHash) ? s.infoHash.toLowerCase() : undefined,
@@ -383,22 +422,22 @@ export class WatchRoom extends DurableObject {
   async fetch(request) {
     const url = new URL(request.url);
     const [client, server] = Object.values(new WebSocketPair());
-    const refuse = (code, message) => {
+    const refuse = (code, key) => {
       server.accept();
-      server.send(JSON.stringify({ t: "error", message }));
+      server.send(JSON.stringify({ t: "error", ...coded(key) }));
       server.close(code, "refused");
       return new Response(null, { status: 101, webSocket: client });
     };
     const room = await this.load();
-    if (!room) return refuse(4404, "Không có phòng này hoặc phòng đã đóng");
+    if (!room) return refuse(4404, "wk.noRoom");
     const id = url.searchParams.get("id") || "";
-    if (!CLIENT_ID.test(id)) return refuse(4400, "Yêu cầu không hợp lệ");
+    if (!CLIENT_ID.test(id)) return refuse(4400, "wk.badRequest");
     const key = url.searchParams.get("key") || "";
     const host = !!key && same(key, room.hostKey);
-    if (key && !host) return refuse(4403, "Mã chủ phòng không đúng");
+    if (key && !host) return refuse(4403, "wk.badHostKey");
     const stale = this.sockets().filter((ws) => { const w = this.who(ws); return w.id === id || (host && w.host); });
     const guests = this.sockets().filter((ws) => !stale.includes(ws) && !this.who(ws).host);
-    if (!host && guests.length >= MAX_MEMBERS - 1) return refuse(4409, "Phòng đã đủ người");
+    if (!host && guests.length >= MAX_MEMBERS - 1) return refuse(4409, "wk.roomFull");
     for (const ws of stale) {
       this.send(ws, { t: "replaced" });
       try { ws.close(4001, "replaced"); } catch (e) {}
@@ -470,7 +509,7 @@ export class WatchRoom extends DurableObject {
       await this.ctx.storage.put("tracks", this.tracks);
       this.broadcast({ t: "tracks", tracks: this.tracks }, ws);
     } else if (msg.t === "close") {
-      await this.closeRoom("Chủ phòng đã đóng phòng");
+      await this.closeRoom("wk.hostClosed");
     }
   }
 
@@ -495,14 +534,14 @@ export class WatchRoom extends DurableObject {
     const room = await this.load();
     if (!room) return;
     const now = Date.now();
-    if (now >= room.created + ROOM_LIFE_MS) return this.closeRoom("Phòng đã mở quá 12 giờ");
-    if (room.hostGone && now >= room.hostGone + HOST_GRACE_MS) return this.closeRoom("Chủ phòng đã rời phòng");
+    if (now >= room.created + ROOM_LIFE_MS) return this.closeRoom("wk.roomExpired", { n: ROOM_LIFE_MS / 3600e3 });
+    if (room.hostGone && now >= room.hostGone + HOST_GRACE_MS) return this.closeRoom("wk.hostLeft");
     await this.schedule();
   }
 
-  async closeRoom(message) {
+  async closeRoom(key, params) {
     for (const ws of this.ctx.getWebSockets()) {
-      this.send(ws, { t: "closed", message });
+      this.send(ws, { t: "closed", ...coded(key, params) });
       try { ws.close(4404, "closed"); } catch (e) {}
     }
     this.room = null;
@@ -520,18 +559,18 @@ function roomCode() {
 async function roomCreate(request, env) {
   const body = await request.json().catch(() => null);
   const uid = await cachedUserId(body && body.authKey, env);
-  if (!uid) return fail("Phiên đăng nhập Stremio đã hết hạn", 401);
+  if (!uid) return fail("wk.sessionExpired", 401);
   for (let i = 0; i < 6; i++) {
     const code = roomCode();
     const hostKey = hex(crypto.getRandomValues(new Uint8Array(32)));
     if (await env.ROOMS.get(env.ROOMS.idFromName(code)).init(hostKey, uid)) return reply({ result: { code, hostKey } });
   }
-  return fail("Chưa tạo được phòng, hãy thử lại", 503);
+  return fail("wk.roomCreateFail", 503);
 }
 
 function roomSocket(request, env, code) {
-  if ((request.headers.get("upgrade") || "").toLowerCase() !== "websocket") return fail("Cần kết nối WebSocket", 426);
-  if (!ROOM_CODE.test(code)) return fail("Mã phòng không hợp lệ", 404);
+  if ((request.headers.get("upgrade") || "").toLowerCase() !== "websocket") return fail("wk.needWebSocket", 426);
+  if (!ROOM_CODE.test(code)) return fail("wk.badRoomCode", 404);
   return env.ROOMS.get(env.ROOMS.idFromName(code)).fetch(request);
 }
 
@@ -540,10 +579,10 @@ async function profileApi(request, env, method) {
   const body = await request.json().catch(() => null);
   if (!body || typeof body !== "object") return fail("bad request");
   const uid = await cachedUserId(body.authKey, env);
-  if (!uid) return fail("Phiên đăng nhập Stremio đã hết hạn", 401);
+  if (!uid) return fail("wk.sessionExpired", 401);
   const store = env.PROFILES.get(env.PROFILES.idFromName(uid));
   const out = await store.run(method, body);
-  if (out && typeof out.refused === "string") return fail(out.refused);
+  if (out && out.refused) return fail(out.refused.key, 400, out.refused.params);
   return reply({ result: out });
 }
 

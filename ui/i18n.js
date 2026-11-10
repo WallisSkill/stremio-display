@@ -53,14 +53,22 @@ export function errText(e) {
   const raw = typeof e === "string" ? e : e && typeof e.message === "string" ? e.message : String(e);
   if (!raw.startsWith("\u0001")) return raw;
   try {
-    const { k, ...params } = JSON.parse(raw.slice(1));
+    const { k, fallback, ...params } = JSON.parse(raw.slice(1));
+    if (!(k in DICTS.vi)) return typeof fallback === "string" && fallback ? fallback : raw;
     for (const [name, v] of Object.entries(params)) {
+      if (typeof v !== "string") continue;
       params[name] = v.startsWith("\u0001") ? errText(v) : v.startsWith("who.") && v in DICTS.vi ? t(v) : v;
     }
     return t(k, params);
   } catch (x) {
     return raw;
   }
+}
+
+export function serverText(o) {
+  if (!o || typeof o !== "object") return typeof o === "string" ? o : "";
+  if (typeof o.key === "string" && o.key in DICTS.vi) return t(o.key, o.params && typeof o.params === "object" ? o.params : {});
+  return typeof o.message === "string" ? o.message : "";
 }
 
 export const formatDate = (d, opts) => d.toLocaleDateString(LOCALES[lang], opts);

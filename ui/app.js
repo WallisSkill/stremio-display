@@ -1,5 +1,5 @@
 import { web, onWebEvent } from "./web.js";
-import { t as tr, setLang, savedLang, getLang, formatDate, LANGS, errText } from "./i18n.js";
+import { t as tr, setLang, savedLang, getLang, formatDate, LANGS, errText, serverText } from "./i18n.js";
 
 setLang(savedLang());
 
@@ -2324,9 +2324,9 @@ function roomMessage(m) {
     if (rtt >= 0 && rtt <= room.rtt + 40) { room.rtt = Math.min(room.rtt, rtt); room.offset = m.s - (m.c + now) / 2; }
     return;
   }
-  if (m.t === "error") { room.lastError = String(m.message || ""); return; }
+  if (m.t === "error") { room.lastError = serverText(m); return; }
   if (m.t === "closed") {
-    const why = String(m.message || tr("room.closed"));
+    const why = serverText(m) || tr("room.closed");
     const host = room.host;
     roomStop(false);
     if (!host) toast(why);

@@ -34,6 +34,14 @@ async fn call_at(http: &reqwest::Client, base: &str, who: &str, method: &str, bo
         .await
         .map_err(|e| crate::util::msg_with("err.badReply", &[("who", who.to_string()), ("e", e.to_string())]))?;
     if let Some(err) = v.get("error").filter(|e| !e.is_null()) {
+        if let Some(key) = err.get("key").and_then(Value::as_str) {
+            let mut m = err.get("params").and_then(Value::as_object).cloned().unwrap_or_default();
+            m.insert("k".to_string(), Value::from(key));
+            if let Some(text) = err.get("message").and_then(Value::as_str) {
+                m.insert("fallback".to_string(), Value::from(text));
+            }
+            return Err(format!("\u{1}{}", Value::Object(m)));
+        }
         return Err(err["message"].as_str().or_else(|| err.as_str()).map(String::from).unwrap_or_else(|| crate::util::msg("err.server")));
     }
     v.get("result")

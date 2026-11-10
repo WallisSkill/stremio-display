@@ -1,4 +1,4 @@
-import { t as tr } from "./i18n.js";
+import { t as tr, serverText } from "./i18n.js";
 
 const API = "https://api.strem.io/api/";
 const CINEMETA = "https://v3-cinemeta.strem.io/manifest.json";
@@ -64,7 +64,7 @@ async function workerApi(base, who, method, body) {
   }
   const data = await res.json().catch(() => null);
   if (!data) throw tr("web.badReply", { who });
-  if (data.error) throw (data.error.message || data.error);
+  if (data.error) throw serverText(data.error) || tr("err.server");
   return data.result;
 }
 
