@@ -148,7 +148,7 @@
       }
       return box;
     }
-    const snapshot = fetch("releases.json", { cache: "no-store" })
+    const snapshot = fetch(`releases.json?t=${Math.floor(Date.now() / 60000)}`, { cache: "no-store" })
       .then((res) => (res.ok ? res.json() : null))
       .catch(() => null);
     async function release(tag) {
