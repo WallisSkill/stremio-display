@@ -109,7 +109,7 @@ impl AppState {
     }
 
     pub fn set_profile(&self, p: crate::api::Profile) -> Result<(), String> {
-        let user = self.session.lock().unwrap().as_ref().map(|s| s.user["_id"].clone()).ok_or("Chưa đăng nhập")?;
+        let user = self.session.lock().unwrap().as_ref().map(|s| s.user["_id"].clone()).ok_or_else(|| crate::util::msg("err.notSignedIn"))?;
         let bytes = serde_json::to_vec(&serde_json::json!({ "user": user, "id": p.id, "token": p.token })).map_err(|e| e.to_string())?;
         fs::write(self.data_dir.join("profile.json"), bytes).map_err(|e| e.to_string())?;
         *self.profile.lock().unwrap() = p;

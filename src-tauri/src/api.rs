@@ -19,7 +19,7 @@ impl Profile {
 }
 
 async fn call(http: &reqwest::Client, method: &str, body: Value) -> Result<Value, String> {
-    call_at(http, API, "Stremio", method, body).await
+    call_at(http, API, "who.stremio", method, body).await
 }
 
 async fn call_at(http: &reqwest::Client, base: &str, who: &str, method: &str, body: Value) -> Result<Value, String> {
@@ -28,18 +28,17 @@ async fn call_at(http: &reqwest::Client, base: &str, who: &str, method: &str, bo
         .json(&body)
         .send()
         .await
-        .map_err(|e| format!("Không kết nối được {who}: {e}"))?;
+        .map_err(|e| crate::util::msg_with("err.connect", &[("who", who.to_string()), ("e", e.to_string())]))?;
     let v: Value = resp
         .json()
         .await
-        .map_err(|e| format!("Phản hồi {who} không hợp lệ: {e}"))?;
+        .map_err(|e| crate::util::msg_with("err.badReply", &[("who", who.to_string()), ("e", e.to_string())]))?;
     if let Some(err) = v.get("error").filter(|e| !e.is_null()) {
-        let msg = err["message"].as_str().or_else(|| err.as_str()).unwrap_or("Lỗi máy chủ");
-        return Err(msg.to_string());
+        return Err(err["message"].as_str().or_else(|| err.as_str()).map(String::from).unwrap_or_else(|| crate::util::msg("err.server")));
     }
     v.get("result")
         .cloned()
-        .ok_or_else(|| format!("{who} trả về rỗng"))
+        .ok_or_else(|| crate::util::msg_with("err.empty", &[("who", who.to_string())]))
 }
 
 async fn datastore(http: &reqwest::Client, profile: &Profile, method: &str, mut body: Value) -> Result<Value, String> {
@@ -48,37 +47,37 @@ async fn datastore(http: &reqwest::Client, profile: &Profile, method: &str, mut 
     }
     body["profile"] = json!(profile.id);
     body["token"] = json!(profile.token);
-    call_at(http, PROFILE_API, "máy chủ hồ sơ", method, body).await
+    call_at(http, PROFILE_API, "who.profiles", method, body).await
 }
 
 pub async fn profiles_get(http: &reqwest::Client, auth_key: &str) -> Result<Vec<Value>, String> {
-    let res = call_at(http, PROFILE_API, "máy chủ hồ sơ", "profilesGet", json!({ "authKey": auth_key })).await?;
+    let res = call_at(http, PROFILE_API, "who.profiles", "profilesGet", json!({ "authKey": auth_key })).await?;
     Ok(res.as_array().cloned().unwrap_or_default())
 }
 
 pub async fn profiles_set(http: &reqwest::Client, auth_key: &str, profiles: &Value, tokens: &Value) -> Result<Vec<Value>, String> {
     let body = json!({ "authKey": auth_key, "profiles": profiles, "tokens": tokens });
-    let res = call_at(http, PROFILE_API, "máy chủ hồ sơ", "profilesSet", body).await?;
+    let res = call_at(http, PROFILE_API, "who.profiles", "profilesSet", body).await?;
     Ok(res.as_array().cloned().unwrap_or_default())
 }
 
 pub async fn prefs_get(http: &reqwest::Client, auth_key: &str, profile: &Profile) -> Result<Value, String> {
     let body = json!({ "authKey": auth_key, "profile": profile.id, "token": profile.token });
-    call_at(http, PROFILE_API, "máy chủ hồ sơ", "prefsGet", body).await
+    call_at(http, PROFILE_API, "who.profiles", "prefsGet", body).await
 }
 
 pub async fn prefs_set(http: &reqwest::Client, auth_key: &str, profile: &Profile, prefs: &Value) -> Result<(), String> {
     let body = json!({ "authKey": auth_key, "profile": profile.id, "token": profile.token, "prefs": prefs });
-    call_at(http, PROFILE_API, "máy chủ hồ sơ", "prefsSet", body).await.map(|_| ())
+    call_at(http, PROFILE_API, "who.profiles", "prefsSet", body).await.map(|_| ())
 }
 
 pub async fn room_create(http: &reqwest::Client, auth_key: &str) -> Result<Value, String> {
-    call_at(http, ROOM_API, "máy chủ xem chung", "create", json!({ "authKey": auth_key })).await
+    call_at(http, ROOM_API, "who.rooms", "create", json!({ "authKey": auth_key })).await
 }
 
 pub async fn profile_unlock(http: &reqwest::Client, auth_key: &str, id: &str, pin: &str) -> Result<String, String> {
     let body = json!({ "authKey": auth_key, "profile": id, "pin": pin });
-    let res = call_at(http, PROFILE_API, "máy chủ hồ sơ", "profileUnlock", body).await?;
+    let res = call_at(http, PROFILE_API, "who.profiles", "profileUnlock", body).await?;
     Ok(res["token"].as_str().unwrap_or_default().to_string())
 }
 
@@ -102,7 +101,7 @@ pub async fn addon_collection(http: &reqwest::Client, auth_key: &str) -> Result<
         json!({ "type": "AddonCollectionGet", "authKey": auth_key, "update": true }),
     )
     .await?;
-    serde_json::from_value(res["addons"].clone()).map_err(|e| format!("Danh sách addon lỗi: {e}"))
+    serde_json::from_value(res["addons"].clone()).map_err(|e| crate::util::msg_with("err.addonList", &[("e", e.to_string())]))
 }
 
 pub async fn addon_collection_raw(http: &reqwest::Client, auth_key: &str) -> Result<Vec<Value>, String> {

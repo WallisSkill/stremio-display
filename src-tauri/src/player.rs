@@ -91,10 +91,10 @@ fn open_lib() -> Result<Library, String> {
     let path = candidates()
         .into_iter()
         .find(|p| p.is_file())
-        .ok_or("Không tìm thấy libmpv-2.dll cạnh WiS TV (cài lại ứng dụng hoặc đặt WISTV_LIBMPV)")?;
+        .ok_or_else(|| crate::util::msg("err.noMpvDll"))?;
     unsafe {
         Library::load_with_flags(&path, LOAD_WITH_ALTERED_SEARCH_PATH)
-            .map_err(|e| format!("Không nạp được {}: {e}", path.display()))
+            .map_err(|e| crate::util::msg_with("err.loadLib", &[("name", path.display().to_string()), ("e", e.to_string())]))
     }
 }
 
@@ -102,16 +102,16 @@ fn open_lib() -> Result<Library, String> {
 fn open_lib() -> Result<Library, String> {
     let vm = crate::android::java_vm();
     if vm == 0 {
-        return Err("Java VM chưa sẵn sàng cho trình phát".into());
+        return Err(crate::util::msg("err.noJvm"));
     }
     unsafe {
-        let avcodec = Library::new("libavcodec.so").map_err(|e| format!("Không nạp được libavcodec: {e}"))?;
+        let avcodec = Library::new("libavcodec.so").map_err(|e| crate::util::msg_with("err.loadLib", &[("name", "libavcodec".to_string()), ("e", e.to_string())]))?;
         let set_vm = *avcodec
             .get::<unsafe extern "C" fn(*mut c_void, *mut c_void) -> c_int>(b"av_jni_set_java_vm\0")
-            .map_err(|e| format!("libavcodec thiếu av_jni_set_java_vm: {e}"))?;
+            .map_err(|e| crate::util::msg_with("err.libSymbol", &[("lib", "libavcodec".to_string()), ("name", "av_jni_set_java_vm".to_string()), ("e", e.to_string())]))?;
         set_vm(vm as *mut c_void, ptr::null_mut());
         std::mem::forget(avcodec);
-        Library::new("libmpv.so").map_err(|e| format!("Không nạp được libmpv: {e}"))
+        Library::new("libmpv.so").map_err(|e| crate::util::msg_with("err.loadLib", &[("name", "libmpv".to_string()), ("e", e.to_string())]))
     }
 }
 
@@ -126,7 +126,7 @@ fn open_lib() -> Result<Library, String> {
             Err(e) => last = e.to_string(),
         }
     }
-    Err(format!("Không tìm thấy libmpv, hãy cài gói libmpv2 (hoặc libmpv1) rồi mở lại WiS TV: {last}"))
+    Err(crate::util::msg_with("err.noLibmpv", &[("e", last)]))
 }
 
 #[cfg(not(any(windows, target_os = "android", target_os = "linux")))]
@@ -176,7 +176,7 @@ impl Mpv {
             macro_rules! sym {
                 ($name:literal, $t:ty) => {
                     *lib.get::<$t>(concat!($name, "\0").as_bytes())
-                        .map_err(|e| format!("libmpv thiếu {}: {e}", $name))?
+                        .map_err(|e| crate::util::msg_with("err.libSymbol", &[("lib", "libmpv".to_string()), ("name", $name.to_string()), ("e", e.to_string())]))?
                 };
             }
             Ok(Self {
@@ -316,7 +316,7 @@ impl Mpv {
     unsafe fn err(&self, code: c_int) -> String {
         let p = (self.error_string)(code);
         if p.is_null() {
-            return format!("mpv lỗi {code}");
+            return crate::util::msg_with("err.mpvCode", &[("code", code.to_string())]);
         }
         CStr::from_ptr(p).to_string_lossy().into_owned()
     }
@@ -444,7 +444,7 @@ impl Player {
     fn with(&self, f: impl FnOnce(&Mpv, Handle) -> c_int) -> Result<(), String> {
         let lib = mpv()?;
         let live = self.live.lock().unwrap();
-        let live = live.as_ref().ok_or("Trình phát chưa chạy")?;
+        let live = live.as_ref().ok_or_else(|| crate::util::msg("err.playerIdle"))?;
         checked(lib, f(lib, live.ctx as Handle))
     }
 
@@ -513,7 +513,7 @@ impl Player {
         let lib = mpv()?;
         let ctx = unsafe { (lib.create)() };
         if ctx.is_null() {
-            return Err("Không tạo được trình phát mpv".into());
+            return Err(crate::util::msg("err.mpvCreate"));
         }
         let wid = req.wid.to_string();
         unsafe {
@@ -563,13 +563,13 @@ impl Player {
             if rc < 0 {
                 let e = lib.err(rc);
                 (lib.terminate_destroy)(ctx);
-                return Err(format!("mpv không khởi động được: {e}"));
+                return Err(crate::util::msg_with("err.mpvInit", &[("e", e.to_string())]));
             }
             let rc = lib.cmd(ctx, &["loadfile", &req.url]);
             if rc < 0 {
                 let e = lib.err(rc);
                 (lib.terminate_destroy)(ctx);
-                return Err(format!("mpv không mở được nguồn: {e}"));
+                return Err(crate::util::msg_with("err.mpvOpen", &[("e", e.to_string())]));
             }
         }
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;

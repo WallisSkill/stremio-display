@@ -1,5 +1,18 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub fn msg(key: &str) -> String {
+    msg_with(key, &[])
+}
+
+pub fn msg_with(key: &str, args: &[(&str, String)]) -> String {
+    let mut m = serde_json::Map::new();
+    m.insert("k".to_string(), serde_json::Value::from(key));
+    for (k, v) in args {
+        m.insert((*k).to_string(), serde_json::Value::from(v.as_str()));
+    }
+    format!("\u{1}{}", serde_json::Value::Object(m))
+}
+
 pub fn now_iso() -> String {
     let d = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
     let secs = d.as_secs() as i64;

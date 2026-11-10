@@ -1,5 +1,5 @@
 import { web, onWebEvent } from "./web.js";
-import { t as tr, setLang, savedLang, getLang, formatDate, LANGS } from "./i18n.js";
+import { t as tr, setLang, savedLang, getLang, formatDate, LANGS, errText } from "./i18n.js";
 
 setLang(savedLang());
 
@@ -26,7 +26,10 @@ function tidy(m) {
 
 const call = (cmd, args = {}) => {
   if (!TAURI && typeof web[cmd] !== "function") return Promise.reject(new Error(tr("web.unsupported", { cmd })));
-  const p = TAURI ? TAURI.core.invoke(cmd, args) : web[cmd](args);
+  const p = (TAURI ? TAURI.core.invoke(cmd, args) : Promise.resolve().then(() => web[cmd](args))).catch((e) => {
+    if (e instanceof Error) { e.message = errText(e); throw e; }
+    throw errText(e);
+  });
   if (cmd === "catalog") return p.then((list) => list.map(tidy));
   if (cmd === "meta") return p.then(tidy);
   return p;
@@ -4018,12 +4021,12 @@ document.addEventListener("mouseup", (e) => { if (e.button === 3) back(); });
   });
   listen("player-ended", ({ payload }) => {
     if (!pl.open || payload.session !== pl.session) return;
-    if (payload.error) toast(tr("pl.error", { e: payload.error }), true);
+    if (payload.error) toast(tr("pl.error", { e: errText(payload.error) }), true);
     if (payload.ended && nextEpisode() && !roomGuest()) { playNext(true); return; }
     closePlayer(false);
   });
   listen("library-changed", async ({ payload }) => {
-    if (payload && payload.error) toast(tr("pl.progressFail", { e: payload.error }), true);
+    if (payload && payload.error) toast(tr("pl.progressFail", { e: errText(payload.error) }), true);
     if (payload && payload.quiet) return;
     await refreshLibrary();
     const cur = app.stack[app.stack.length - 1];

@@ -72,7 +72,7 @@ pub async fn login(st: State<'_, AppState>, email: String, password: String) -> 
     let res = api::login(&st.http, email.trim(), &password).await?;
     let auth_key = res["authKey"]
         .as_str()
-        .ok_or("Đăng nhập thất bại")?
+        .ok_or_else(|| crate::util::msg("err.loginFailed"))?
         .to_string();
     let user = crate::state::slim_user(&res["user"]);
     st.set_session(Some(Session {
@@ -139,7 +139,7 @@ pub async fn meta(st: State<'_, AppState>, kind: String, id: String) -> R<Value>
             Err(e) => last_err = Some(e),
         }
     }
-    Err(last_err.unwrap_or_else(|| "Không tìm thấy thông tin phim".into()))
+    Err(last_err.unwrap_or_else(|| crate::util::msg("err.noMeta")))
 }
 
 #[tauri::command]
@@ -158,7 +158,7 @@ pub async fn streams_from(st: State<'_, AppState>, url: String, kind: String, id
     let a = list
         .into_iter()
         .find(|a| a.transport_url == url && a.supports("stream", &kind, &id))
-        .ok_or("Addon này không còn được cài")?;
+        .ok_or_else(|| crate::util::msg("err.addonGone"))?;
     let v = addons::get_json(&st.http, &a.resource_url("stream", &kind, &id, &[])).await?;
     let streams = v["streams"].as_array().cloned().unwrap_or_default();
     Ok(json!({ "addon": a.name(), "logo": a.manifest["logo"], "streams": streams }))
@@ -193,14 +193,14 @@ pub async fn profiles(st: State<'_, AppState>) -> R<Value> {
 
 #[tauri::command]
 pub async fn profiles_save(st: State<'_, AppState>, list: Value, tokens: Option<Value>) -> R<Value> {
-    let key = st.auth_key().ok_or("Đăng nhập tài khoản Stremio để dùng hồ sơ")?;
+    let key = st.auth_key().ok_or_else(|| crate::util::msg("err.loginProfiles"))?;
     let list = api::profiles_set(&st.http, &key, &list, &tokens.unwrap_or_else(|| json!({}))).await?;
     profile_list(&st, list)
 }
 
 #[tauri::command]
 pub async fn room_create(st: State<'_, AppState>) -> R<Value> {
-    let key = st.auth_key().ok_or("Đăng nhập tài khoản Stremio để tạo phòng xem chung")?;
+    let key = st.auth_key().ok_or_else(|| crate::util::msg("room.needLogin"))?;
     api::room_create(&st.http, &key).await
 }
 
@@ -219,14 +219,14 @@ pub async fn prefs_set(st: State<'_, AppState>, prefs: Value, profile: Option<St
     };
     let active = st.profile();
     if profile.is_some_and(|p| p != active.id) {
-        return Err("Hồ sơ đã đổi".into());
+        return Err(crate::util::msg("err.profileChanged"));
     }
     api::prefs_set(&st.http, &key, &active, &prefs).await
 }
 
 #[tauri::command]
 pub async fn profile_unlock(st: State<'_, AppState>, id: String, pin: String) -> R<String> {
-    let key = st.auth_key().ok_or("Đăng nhập tài khoản Stremio để dùng hồ sơ")?;
+    let key = st.auth_key().ok_or_else(|| crate::util::msg("err.loginProfiles"))?;
     api::profile_unlock(&st.http, &key, &id, &pin).await
 }
 
@@ -279,8 +279,8 @@ fn cached_item(st: &AppState, id: &str) -> Option<Value> {
 pub async fn library_toggle(st: State<'_, AppState>, meta: Value) -> R<bool> {
     let key = st
         .auth_key()
-        .ok_or("Đăng nhập tài khoản Stremio để dùng Thư viện")?;
-    let id = meta["id"].as_str().ok_or("Thiếu mã phim")?.to_string();
+        .ok_or_else(|| crate::util::msg("err.loginLibrary"))?;
+    let id = meta["id"].as_str().ok_or_else(|| crate::util::msg("err.noId"))?.to_string();
     let now = now_iso();
     let mut item = cached_item(&st, &id)
         .unwrap_or_else(|| new_item(&id, &meta["name"], &meta["type"], &meta["poster"], &now));
@@ -297,13 +297,13 @@ pub async fn library_toggle(st: State<'_, AppState>, meta: Value) -> R<bool> {
 pub async fn library_rewind(st: State<'_, AppState>, id: String) -> R<()> {
     let key = st
         .auth_key()
-        .ok_or("Đăng nhập tài khoản Stremio để dùng Thư viện")?;
+        .ok_or_else(|| crate::util::msg("err.loginLibrary"))?;
     let profile = st.profile();
     let mut item = match cached_item(&st, &id) {
         Some(item) => item,
         None => api::library_get_one(&st.http, &key, &profile, &id)
             .await?
-            .ok_or("Không tìm thấy phim trong lịch sử xem")?,
+            .ok_or_else(|| crate::util::msg("err.notInHistory"))?,
     };
     if !item["state"].is_object() {
         item["state"] = json!({});
@@ -333,7 +333,7 @@ pub struct PlayCtx {
 
 fn open_external(app: &AppHandle, url: &str) -> R<()> {
     if !(url.starts_with("https://") || url.starts_with("http://")) {
-        return Err("Liên kết ngoài không hợp lệ".into());
+        return Err(crate::util::msg("err.badLink"));
     }
     #[cfg(mobile)]
     {
@@ -378,7 +378,7 @@ async fn video_target(app: &AppHandle, _st: &AppState) -> R<Target> {
 
 #[cfg(windows)]
 async fn video_target(app: &AppHandle, _st: &AppState) -> R<Target> {
-    let window = app.get_webview_window("main").ok_or("Không tìm thấy cửa sổ chính")?;
+    let window = app.get_webview_window("main").ok_or_else(|| crate::util::msg("err.noWindow"))?;
     let hwnd = window.hwnd().map(|h| h.0 as i64).map_err(|e| e.to_string())?;
     Ok((hwnd, Vec::new()))
 }
@@ -399,7 +399,7 @@ fn mpv_config_dir(st: &AppState) -> R<String> {
         let src = SYSTEM_FONTS
             .iter()
             .find(|p| std::path::Path::new(p).is_file())
-            .ok_or("Không tìm thấy phông chữ hệ thống cho phụ đề")?;
+            .ok_or_else(|| crate::util::msg("err.noFont"))?;
         std::fs::copy(src, &font).map_err(|e| e.to_string())?;
     }
     Ok(dir.to_string_lossy().into_owned())
@@ -418,7 +418,7 @@ async fn video_target(_app: &AppHandle, st: &AppState) -> R<Target> {
             break s;
         }
         if Instant::now() >= until {
-            return Err("Chưa có vùng hiển thị video".into());
+            return Err(crate::util::msg("err.noSurface"));
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     };
@@ -451,9 +451,9 @@ async fn resolve(st: &AppState, stream: &Value) -> R<String> {
         return server::torrent_url(st, hash, stream["fileIdx"].as_i64(), sources).await;
     }
     if stream["ytId"].is_string() {
-        return Err("Nguồn YouTube chưa được hỗ trợ".into());
+        return Err(crate::util::msg("err.youtube"));
     }
-    Err("Không hỗ trợ loại nguồn này".into())
+    Err(crate::util::msg("err.sourceType"))
 }
 
 #[tauri::command]
@@ -649,7 +649,7 @@ pub async fn screen_brightness(app: AppHandle, level: Option<f64>) -> R<f64> {
 #[tauri::command]
 pub async fn screen_brightness(level: Option<f64>) -> R<f64> {
     let _ = level;
-    Err("Máy tính không chỉnh độ sáng màn hình trong app".into())
+    Err(crate::util::msg("err.noBrightness"))
 }
 
 #[cfg(desktop)]
@@ -716,7 +716,7 @@ pub async fn subtitles(st: State<'_, AppState>, kind: String, id: String) -> R<V
 #[tauri::command]
 pub async fn subtitle_info(st: State<'_, AppState>, url: String) -> R<Value> {
     if !(url.starts_with("https://") || url.starts_with("http://")) {
-        return Err("Địa chỉ phụ đề không hợp lệ".into());
+        return Err(crate::util::msg("err.badSubUrl"));
     }
     let mut resp = st.http.get(&url).send().await.map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
@@ -726,7 +726,7 @@ pub async fn subtitle_info(st: State<'_, AppState>, url: String) -> R<Value> {
     while let Some(chunk) = resp.chunk().await.map_err(|e| e.to_string())? {
         body.extend_from_slice(&chunk);
         if body.len() > crate::subinfo::MAX_BYTES {
-            return Err("Tệp phụ đề quá lớn".into());
+            return Err(crate::util::msg("err.subTooBig"));
         }
     }
     Ok(crate::subinfo::summarize(&String::from_utf8_lossy(&body)))
@@ -739,7 +739,7 @@ fn manifest_url(raw: &str) -> R<String> {
         None => u.to_string(),
     };
     if !(u.starts_with("https://") || u.starts_with("http://")) {
-        return Err("Địa chỉ addon phải bắt đầu bằng https:// hoặc stremio://".into());
+        return Err(crate::util::msg("err.addonUrl"));
     }
     Ok(u)
 }
@@ -747,7 +747,7 @@ fn manifest_url(raw: &str) -> R<String> {
 fn position_of(list: &[Value], url: &str) -> R<usize> {
     list.iter()
         .position(|a| a["transportUrl"].as_str() == Some(url))
-        .ok_or_else(|| "Không tìm thấy addon này".to_string())
+        .ok_or_else(|| crate::util::msg("err.addonMissing"))
 }
 
 fn is_protected(a: &Value) -> bool {
@@ -756,18 +756,18 @@ fn is_protected(a: &Value) -> bool {
 
 #[tauri::command]
 pub async fn addon_install(st: State<'_, AppState>, url: String) -> R<Vec<Addon>> {
-    let key = st.auth_key().ok_or("Đăng nhập tài khoản Stremio để cài addon")?;
+    let key = st.auth_key().ok_or_else(|| crate::util::msg("err.loginInstall"))?;
     let url = manifest_url(&url)?;
     let manifest = addons::get_json(&st.http, &url)
         .await
-        .map_err(|e| format!("Không đọc được manifest: {e}"))?;
+        .map_err(|e| crate::util::msg_with("err.manifest", &[("e", e.to_string())]))?;
     let id = manifest["id"]
         .as_str()
-        .ok_or("Địa chỉ này không phải manifest của addon Stremio")?
+        .ok_or_else(|| crate::util::msg("err.notManifest"))?
         .to_string();
     let mut list = api::addon_collection_raw(&st.http, &key).await?;
     if list.iter().any(|a| a["transportUrl"].as_str() == Some(url.as_str())) {
-        return Err(format!("{} đã được cài", manifest["name"].as_str().unwrap_or(&id)));
+        return Err(crate::util::msg_with("err.alreadyInstalled", &[("name", manifest["name"].as_str().unwrap_or(&id).to_string())]));
     }
     let entry = json!({
         "transportUrl": url,
@@ -776,7 +776,7 @@ pub async fn addon_install(st: State<'_, AppState>, url: String) -> R<Vec<Addon>
         "flags": { "official": false, "protected": false },
     });
     match list.iter().position(|a| a["manifest"]["id"].as_str() == Some(id.as_str())) {
-        Some(i) if is_protected(&list[i]) => return Err("Không thay được addon gốc của Stremio".into()),
+        Some(i) if is_protected(&list[i]) => return Err(crate::util::msg("err.protectedReplace")),
         Some(i) => list[i] = entry,
         None => list.push(entry),
     }
@@ -786,11 +786,11 @@ pub async fn addon_install(st: State<'_, AppState>, url: String) -> R<Vec<Addon>
 
 #[tauri::command]
 pub async fn addon_remove(st: State<'_, AppState>, url: String) -> R<Vec<Addon>> {
-    let key = st.auth_key().ok_or("Đăng nhập tài khoản Stremio để gỡ addon")?;
+    let key = st.auth_key().ok_or_else(|| crate::util::msg("err.loginRemove"))?;
     let mut list = api::addon_collection_raw(&st.http, &key).await?;
     let pos = position_of(&list, &url)?;
     if is_protected(&list[pos]) {
-        return Err("Đây là addon gốc của Stremio, không gỡ được".into());
+        return Err(crate::util::msg("err.protectedRemove"));
     }
     list.remove(pos);
     api::addon_collection_set(&st.http, &key, &list).await?;
@@ -799,7 +799,7 @@ pub async fn addon_remove(st: State<'_, AppState>, url: String) -> R<Vec<Addon>>
 
 #[tauri::command]
 pub async fn addon_move(st: State<'_, AppState>, url: String, delta: i64) -> R<Vec<Addon>> {
-    let key = st.auth_key().ok_or("Đăng nhập tài khoản Stremio để sắp xếp addon")?;
+    let key = st.auth_key().ok_or_else(|| crate::util::msg("err.loginOrder"))?;
     let mut list = api::addon_collection_raw(&st.http, &key).await?;
     let pos = position_of(&list, &url)?;
     let target = (pos as i64 + delta).clamp(0, list.len() as i64 - 1) as usize;
@@ -835,7 +835,7 @@ pub async fn addon_discover(st: State<'_, AppState>) -> R<Vec<Value>> {
         }
     }
     if out.is_empty() {
-        return Err(last_err.unwrap_or_else(|| "Không tải được danh sách addon".into()));
+        return Err(last_err.unwrap_or_else(|| crate::util::msg("err.addonsLoad")));
     }
     Ok(out)
 }

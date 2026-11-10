@@ -49,6 +49,20 @@ export function t(key, params) {
   return params ? s.replace(/\{(\w+)\}/g, (m, k) => (params[k] == null ? m : String(params[k]))) : s;
 }
 
+export function errText(e) {
+  const raw = typeof e === "string" ? e : e && typeof e.message === "string" ? e.message : String(e);
+  if (!raw.startsWith("\u0001")) return raw;
+  try {
+    const { k, ...params } = JSON.parse(raw.slice(1));
+    for (const [name, v] of Object.entries(params)) {
+      params[name] = v.startsWith("\u0001") ? errText(v) : v.startsWith("who.") && v in DICTS.vi ? t(v) : v;
+    }
+    return t(k, params);
+  } catch (x) {
+    return raw;
+  }
+}
+
 export const formatDate = (d, opts) => d.toLocaleDateString(LOCALES[lang], opts);
 
 export function translateDom(root = document) {

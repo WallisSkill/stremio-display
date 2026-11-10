@@ -1,3 +1,5 @@
+import { t as tr } from "./i18n.js";
+
 const API = "https://api.strem.io/api/";
 const CINEMETA = "https://v3-cinemeta.strem.io/manifest.json";
 const COLLECTIONS = ["https://api.strem.io/addonsofficialcollection.json", "https://api.strem.io/addonscollection.json"];
@@ -31,11 +33,11 @@ async function api(method, body) {
   try {
     res = await fetch(API + method, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   } catch (e) {
-    throw "Không kết nối được Stremio";
+    throw tr("web.connect", { who: "Stremio" });
   }
   const data = await res.json().catch(() => null);
-  if (!data) throw "Phản hồi Stremio không hợp lệ";
-  if (data.error) throw (data.error.message || "Lỗi API Stremio");
+  if (!data) throw tr("web.badReply", { who: "Stremio" });
+  if (data.error) throw (data.error.message || tr("web.apiError"));
   return data.result;
 }
 
@@ -58,15 +60,15 @@ async function workerApi(base, who, method, body) {
   try {
     res = await fetch(base + method, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   } catch (e) {
-    throw `Không kết nối được ${who}`;
+    throw tr("web.connect", { who });
   }
   const data = await res.json().catch(() => null);
-  if (!data) throw `Phản hồi ${who} không hợp lệ`;
+  if (!data) throw tr("web.badReply", { who });
   if (data.error) throw (data.error.message || data.error);
   return data.result;
 }
 
-const profileApi = (method, body) => workerApi(PROFILE_API, "máy chủ hồ sơ", method, body);
+const profileApi = (method, body) => workerApi(PROFILE_API, tr("who.profiles"), method, body);
 
 const datastore = (profile, method, body) =>
   profile.id === MAIN_PROFILE ? api(method, body) : profileApi(method, { ...body, profile: profile.id, token: profile.token });
@@ -166,7 +168,7 @@ function summarizeSub(raw) {
 
 async function getJson(url) {
   let res;
-  try { res = await fetch(url); } catch (e) { throw "Không kết nối được addon"; }
+  try { res = await fetch(url); } catch (e) { throw tr("web.addonConnect"); }
   if (!res.ok) throw `HTTP ${res.status}`;
   return res.json();
 }
@@ -279,14 +281,14 @@ async function torrentMedia(base, stream) {
   try {
     const res = await fetch(`${base}/${hash}/create`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     created = await res.json();
-  } catch (e) { throw "Không mở được torrent qua máy tính"; }
+  } catch (e) { throw tr("web.torrentPc"); }
   let idx = stream.fileIdx ?? created?.guessedFileIdx;
   if (idx == null && Array.isArray(created?.files)) {
     let best = -1;
     created.files.forEach((f, i) => { if (best < 0 || (f.length || 0) > (created.files[best].length || 0)) best = i; });
     idx = best >= 0 ? best : null;
   }
-  if (idx == null) throw "Không tìm thấy tệp video trong torrent";
+  if (idx == null) throw tr("err.torrentNoVideo");
   return `${LOCAL_SERVER}/${hash}/${idx}`;
 }
 
@@ -299,7 +301,7 @@ function loadHls() {
       s.src = HLS_JS;
       s.crossOrigin = "anonymous";
       s.onload = () => resolve(window.Hls);
-      s.onerror = () => { hlsLoading = null; reject("Không tải được thư viện phát HLS"); };
+      s.onerror = () => { hlsLoading = null; reject(tr("web.hlsLib")); };
       document.head.append(s);
     });
   }
@@ -383,7 +385,7 @@ function ensureDom() {
   v.addEventListener("error", () => {
     if (P.finished || !v.error) return;
     if (useFallback()) return;
-    finish({ error: P.base ? "Không phát được nguồn này" : "Trình duyệt không phát được định dạng này. Bật WiS TV Relay trên máy tính để xem mọi định dạng." });
+    finish({ error: P.base ? tr("web.cantPlay") : tr("web.format") });
   });
   window.addEventListener("resize", paintStyle);
 }
@@ -513,11 +515,11 @@ async function addSubtitle(url, title, lang) {
   let text;
   try { const res = await fetch(via); if (!res.ok) throw 0; text = await res.text(); }
   catch (e) {
-    if (via === url) throw "Không tải được phụ đề";
-    try { text = await (await fetch(url)).text(); } catch (x) { throw "Không tải được phụ đề"; }
+    if (via === url) throw tr("web.subLoad");
+    try { text = await (await fetch(url)).text(); } catch (x) { throw tr("web.subLoad"); }
   }
   const cues = parseSubs(text);
-  if (!cues.length) throw "Tệp phụ đề trống hoặc không đọc được";
+  if (!cues.length) throw tr("web.subEmpty");
   P.ext.push({ title, lang, cues, url });
   P.sid = P.ext.length;
 }
@@ -608,7 +610,7 @@ function useFallback() {
       if (P.ctx.start > 0) P.video.addEventListener("loadedmetadata", () => { P.video.currentTime = P.ctx.start / 1000; }, { once: true });
       return P.video.play();
     })
-    .catch((e) => { if (!P.finished) finish({ error: typeof e === "string" ? e : "Không phát được nguồn này" }); });
+    .catch((e) => { if (!P.finished) finish({ error: typeof e === "string" ? e : tr("web.cantPlay") }); });
   return true;
 }
 
@@ -636,13 +638,13 @@ async function attach(src, isHls) {
       });
       P.hls.on(Hls.Events.ERROR, (_, data) => {
         if (!data.fatal || P.finished) return;
-        if (!useFallback()) finish({ error: "Lỗi phát luồng HLS" });
+        if (!useFallback()) finish({ error: tr("web.hlsError") });
       });
       P.hls.loadSource(src);
       P.hls.attachMedia(v);
       return;
     }
-    if (!v.canPlayType("application/vnd.apple.mpegurl")) throw "Trình duyệt này không phát được luồng HLS";
+    if (!v.canPlayType("application/vnd.apple.mpegurl")) throw tr("web.noHls");
   }
   v.src = src;
 }
@@ -675,14 +677,14 @@ async function play({ stream, ctx }) {
   if (P.finished || P.session !== ctx.session) return;
   let media;
   if (stream.infoHash) {
-    if (!P.base) { P.finished = true; destroyMedia(); throw "Phim torrent cần máy tính đang bật WiS TV Relay. Kiểm tra trong Cài đặt."; }
+    if (!P.base) { P.finished = true; destroyMedia(); throw tr("web.torrentNeedsPc"); }
     media = await torrentMedia(P.base, stream);
   } else if (stream.url) {
     media = stream.url;
   } else {
     P.finished = true;
     destroyMedia();
-    throw "Không hỗ trợ loại nguồn này";
+    throw tr("err.sourceType");
   }
   if (P.finished || P.session !== ctx.session) return;
   P.fallback = P.base && !stream.infoHash && /^https?:/i.test(media) ? media : null;
@@ -706,7 +708,7 @@ async function play({ stream, ctx }) {
 }
 
 function command({ args }) {
-  if (P.finished) throw "Trình phát chưa chạy";
+  if (P.finished) throw tr("err.playerIdle");
   const v = P.video;
   const [c, a, b] = args;
   if (c === "cycle" && a === "pause") { if (v.paused) v.play().catch(() => {}); else v.pause(); return; }
@@ -720,14 +722,14 @@ function command({ args }) {
     return;
   }
   if (c === "add" && a === "sub-delay") { P.subDelay = Math.round((P.subDelay + Number(b)) * 10) / 10; return; }
-  if (c === "sub-add") return addSubtitle(a, args[3] || "Phụ đề", args[4] || "");
+  if (c === "sub-add") return addSubtitle(a, args[3] || tr("set.subs"), args[4] || "");
   if (c === "quit") { finish({}); return; }
-  throw `Lệnh không hỗ trợ: ${c}`;
+  throw tr("web.badCommand", { c });
 }
 
 function setProp({ name, value }) {
   if (setStyleProp(name, value)) return;
-  if (P.finished) throw "Trình phát chưa chạy";
+  if (P.finished) throw tr("err.playerIdle");
   const v = P.video;
   if (name === "volume") { v.volume = Math.max(0, Math.min(1, Number(value) / 100)); if (v.volume > 0) v.muted = false; return; }
   if (name === "speed") { v.playbackRate = Number(value) || 1; return; }
@@ -735,7 +737,7 @@ function setProp({ name, value }) {
   if (name === "sid") { const n = Number(value); P.sid = n > 0 && n <= P.ext.length ? n : null; return; }
   if (name === "aid") { if (P.hls) P.hls.audioTrack = Math.max(0, Number(value) - 1); return; }
   if (name === "sub-back-color" || name === "sub-outline-color" || name === "sub-border-color") return;
-  throw `Không hỗ trợ ${name}`;
+  throw tr("web.unsupportedProp", { name });
 }
 
 const pageFs = () => document.fullscreenElement || document.webkitFullscreenElement || null;
@@ -758,7 +760,7 @@ document.addEventListener("webkitfullscreenchange", fullscreenChanged);
 function nativeSubs(show) {
   const v = P.video;
   if (!v || !v.addTextTrack || typeof VTTCue === "undefined") return;
-  if (!P.track) P.track = v.addTextTrack("subtitles", "Phụ đề", "vi");
+  if (!P.track) P.track = v.addTextTrack("subtitles", tr("set.subs"), "vi");
   const t = P.track;
   for (const c of [...(t.cues || [])]) t.removeCue(c);
   const list = show && P.sid ? P.ext[P.sid - 1]?.cues : null;
@@ -787,10 +789,10 @@ async function fullscreen({ on }) {
       return !!pageFs();
     }
     const v = P.video;
-    if (!v || !v.webkitEnterFullscreen) throw "Trình duyệt này không hỗ trợ toàn màn hình";
-    if (P.finished || v.readyState < 1) throw "Chờ phim tải xong rồi bấm toàn màn hình";
+    if (!v || !v.webkitEnterFullscreen) throw tr("web.noFs");
+    if (P.finished || v.readyState < 1) throw tr("web.fsWait");
     nativeSubs(true);
-    try { v.webkitEnterFullscreen(); } catch (e) { nativeSubs(false); throw "Không mở được toàn màn hình"; }
+    try { v.webkitEnterFullscreen(); } catch (e) { nativeSubs(false); throw tr("web.fsFail"); }
     return true;
   }
   if (videoFs) {
@@ -806,7 +808,7 @@ export const web = {
   async session() { return session()?.user || null; },
   async login({ email, password }) {
     const res = await api("login", { type: "Login", email: String(email || "").trim(), password, facebook: false });
-    if (!res?.authKey) throw "Đăng nhập thất bại";
+    if (!res?.authKey) throw tr("err.loginFailed");
     const u = res.user || {};
     const user = { _id: u._id, email: u.email, fullname: u.fullname, avatar: u.avatar };
     store.set("wistv.session", { authKey: res.authKey, user });
@@ -835,14 +837,14 @@ export const web = {
     for (const a of (await loadAddons()).filter((x) => supports(x, "meta", kind, id))) {
       try { const r = await getJson(resourceUrl(a, "meta", kind, id)); if (r && r.meta) return r.meta; } catch (e) { lastErr = e; }
     }
-    throw lastErr || "Không tìm thấy thông tin phim";
+    throw lastErr || tr("err.noMeta");
   },
   async stream_addons({ kind, id }) {
     return (await loadAddons()).filter((a) => supports(a, "stream", kind, id)).map((a) => ({ url: a.transportUrl, addon: addonName(a), logo: a.manifest?.logo }));
   },
   async streams_from({ url, kind, id }) {
     const a = (await loadAddons()).find((x) => x.transportUrl === url && supports(x, "stream", kind, id));
-    if (!a) throw "Addon này không còn được cài";
+    if (!a) throw tr("err.addonGone");
     const v = await getJson(resourceUrl(a, "stream", kind, id));
     return { addon: addonName(a), logo: a.manifest?.logo, streams: Array.isArray(v?.streams) ? v.streams : [] };
   },
@@ -854,11 +856,11 @@ export const web = {
     return out;
   },
   async subtitle_info({ url }) {
-    if (!/^https?:\/\//.test(url)) throw "Địa chỉ phụ đề không hợp lệ";
+    if (!/^https?:\/\//.test(url)) throw tr("err.badSubUrl");
     const r = await fetch(url);
     if (!r.ok) throw `HTTP ${r.status}`;
     const text = await r.text();
-    if (text.length > 4 << 20) throw "Tệp phụ đề quá lớn";
+    if (text.length > 4 << 20) throw tr("err.subTooBig");
     return summarizeSub(text);
   },
   async library() {
@@ -875,13 +877,13 @@ export const web = {
     return profileList(Array.isArray(list) ? list : []);
   },
   async profiles_save({ list, tokens }) {
-    const key = needKey("Đăng nhập tài khoản Stremio để dùng hồ sơ");
+    const key = needKey(tr("err.loginProfiles"));
     const saved = await profileApi("profilesSet", { authKey: key, profiles: list, tokens: tokens || {} });
     return profileList(Array.isArray(saved) ? saved : []);
   },
   async room_create() {
-    const key = needKey("Đăng nhập tài khoản Stremio để tạo phòng xem chung");
-    return workerApi(ROOM_API, "máy chủ xem chung", "create", { authKey: key });
+    const key = needKey(tr("room.needLogin"));
+    return workerApi(ROOM_API, tr("who.rooms"), "create", { authKey: key });
   },
   async prefs_get() {
     const key = authKey();
@@ -893,24 +895,24 @@ export const web = {
     const key = authKey();
     if (!key) return;
     const p = activeProfile();
-    if (profile && profile !== p.id) throw "Hồ sơ đã đổi";
+    if (profile && profile !== p.id) throw tr("err.profileChanged");
     await profileApi("prefsSet", { authKey: key, profile: p.id, token: p.token, prefs });
   },
   async profile_unlock({ id, pin }) {
-    const key = needKey("Đăng nhập tài khoản Stremio để dùng hồ sơ");
+    const key = needKey(tr("err.loginProfiles"));
     const res = await profileApi("profileUnlock", { authKey: key, profile: id, pin });
     return String(res?.token || "");
   },
   async profile_use({ id, token }) {
     const user = session()?.user?._id;
-    if (!user) throw "Chưa đăng nhập";
+    if (!user) throw tr("err.notSignedIn");
     store.set("wistv.profile", { user, id, token: token || "" });
     libraryCache = [];
   },
   async library_rewind({ id }) {
-    const key = needKey("Đăng nhập tài khoản Stremio để dùng Thư viện");
+    const key = needKey(tr("err.loginLibrary"));
     const found = libraryCache.find((i) => i._id === id);
-    if (!found) throw "Không tìm thấy phim trong lịch sử xem";
+    if (!found) throw tr("err.notInHistory");
     const item = structuredClone(found);
     item.state = { ...(item.state || {}), timeOffset: 0 };
     item._mtime = nowIso();
@@ -918,8 +920,8 @@ export const web = {
     Object.assign(found, item);
   },
   async library_toggle({ meta }) {
-    const key = needKey("Đăng nhập tài khoản Stremio để dùng Thư viện");
-    if (!meta?.id) throw "Thiếu mã phim";
+    const key = needKey(tr("err.loginLibrary"));
+    if (!meta?.id) throw tr("err.noId");
     const now = nowIso();
     const item = structuredClone(libraryCache.find((i) => i._id === meta.id) || newItem(meta.id, meta.name, meta.type, meta.poster, now));
     const inLib = !item.removed && !item.temp;
@@ -930,35 +932,35 @@ export const web = {
     return !inLib;
   },
   async addon_install({ url }) {
-    const key = needKey("Đăng nhập tài khoản Stremio để cài addon");
+    const key = needKey(tr("err.loginInstall"));
     let u = String(url || "").trim();
     if (u.startsWith("stremio://")) u = "https://" + u.slice(10);
-    if (!/^https?:\/\//.test(u)) throw "Địa chỉ addon phải bắt đầu bằng https:// hoặc stremio://";
+    if (!/^https?:\/\//.test(u)) throw tr("err.addonUrl");
     let manifest;
-    try { manifest = await getJson(u); } catch (e) { throw `Không đọc được manifest: ${e}`; }
-    if (!manifest?.id) throw "Địa chỉ này không phải manifest của addon Stremio";
+    try { manifest = await getJson(u); } catch (e) { throw tr("err.manifest", { e }); }
+    if (!manifest?.id) throw tr("err.notManifest");
     const list = await rawCollection(key);
-    if (list.some((a) => a.transportUrl === u)) throw `${manifest.name || manifest.id} đã được cài`;
+    if (list.some((a) => a.transportUrl === u)) throw tr("err.alreadyInstalled", { name: manifest.name || manifest.id });
     const entry = { transportUrl: u, transportName: "", manifest, flags: { official: false, protected: false } };
     const i = list.findIndex((a) => a.manifest?.id === manifest.id);
-    if (i >= 0 && list[i].flags?.protected) throw "Không thay được addon gốc của Stremio";
+    if (i >= 0 && list[i].flags?.protected) throw tr("err.protectedReplace");
     if (i >= 0) list[i] = entry; else list.push(entry);
     return setCollection(key, list);
   },
   async addon_remove({ url }) {
-    const key = needKey("Đăng nhập tài khoản Stremio để gỡ addon");
+    const key = needKey(tr("err.loginRemove"));
     const list = await rawCollection(key);
     const i = list.findIndex((a) => a.transportUrl === url);
-    if (i < 0) throw "Không tìm thấy addon này";
-    if (list[i].flags?.protected) throw "Đây là addon gốc của Stremio, không gỡ được";
+    if (i < 0) throw tr("err.addonMissing");
+    if (list[i].flags?.protected) throw tr("err.protectedRemove");
     list.splice(i, 1);
     return setCollection(key, list);
   },
   async addon_move({ url, delta }) {
-    const key = needKey("Đăng nhập tài khoản Stremio để sắp xếp addon");
+    const key = needKey(tr("err.loginOrder"));
     const list = await rawCollection(key);
     const i = list.findIndex((a) => a.transportUrl === url);
-    if (i < 0) throw "Không tìm thấy addon này";
+    if (i < 0) throw tr("err.addonMissing");
     const t = Math.max(0, Math.min(list.length - 1, i + delta));
     if (t === i) return loadAddons(true);
     const [item] = list.splice(i, 1);
@@ -968,7 +970,7 @@ export const web = {
   async addon_discover() {
     const lists = await Promise.all(COLLECTIONS.map((u) => getJson(u).catch(() => [])));
     const out = lists.flat().filter((a, i, all) => a && /^https?:/.test(a.transportUrl || "") && all.findIndex((b) => b.transportUrl === a.transportUrl) === i);
-    if (!out.length) throw "Không tải được danh sách addon";
+    if (!out.length) throw tr("err.addonsLoad");
     return out;
   },
   async open_url({ url }) { window.open(url, "_blank", "noopener"); },

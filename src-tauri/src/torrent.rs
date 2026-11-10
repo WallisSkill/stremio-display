@@ -27,7 +27,7 @@ pub async fn engine(dir: PathBuf) -> Result<Arc<Engine>, String> {
             tokio::fs::create_dir_all(&dir).await.map_err(|e| e.to_string())?;
             let session = Session::new_with_opts(dir, SessionOptions::default())
                 .await
-                .map_err(|e| format!("Không khởi động được máy chủ torrent: {e}"))?;
+                .map_err(|e| crate::util::msg_with("err.torrentServer", &[("e", e.to_string())]))?;
             let listener = TcpListener::bind(("127.0.0.1", 0)).await.map_err(|e| e.to_string())?;
             let port = listener.local_addr().map_err(|e| e.to_string())?.port();
             let engine = Arc::new(Engine { session, port, streams: Mutex::new(HashMap::new()) });
@@ -83,7 +83,7 @@ impl Engine {
     pub async fn open(&self, hash: &str, file_idx: Option<i64>, sources: &[String]) -> Result<String, String> {
         let hash = hash.to_lowercase();
         if !hash.chars().all(|c| c.is_ascii_hexdigit()) || hash.len() != 40 {
-            return Err("Mã torrent không hợp lệ".into());
+            return Err(crate::util::msg("err.torrentHash"));
         }
         let key = format!("{hash}-{}", file_idx.unwrap_or(-1));
         if self.streams.lock().unwrap().contains_key(&key) {
@@ -98,16 +98,16 @@ impl Engine {
                     .session
                     .add_torrent(AddTorrent::from_url(&link), Some(AddTorrentOptions { list_only: true, ..Default::default() }))
                     .await
-                    .map_err(|e| format!("Không đọc được torrent: {e}"))?;
+                    .map_err(|e| crate::util::msg_with("err.torrentRead", &[("e", e.to_string())]))?;
                 let AddTorrentResponse::ListOnly(list) = listed else {
-                    return Err("Không đọc được danh sách tệp của torrent".into());
+                    return Err(crate::util::msg("err.torrentFiles"));
                 };
                 list.info
                     .iter_file_lengths()
                     .enumerate()
                     .max_by_key(|(_, len)| *len)
                     .map(|(i, _)| i)
-                    .ok_or("Không tìm thấy tệp video trong torrent")?
+                    .ok_or_else(|| crate::util::msg("err.torrentNoVideo"))?
             }
         };
         let added = self
@@ -117,11 +117,11 @@ impl Engine {
                 Some(AddTorrentOptions { only_files: Some(vec![file]), overwrite: true, ..Default::default() }),
             )
             .await
-            .map_err(|e| format!("Không mở được torrent: {e}"))?;
-        let handle = added.into_handle().ok_or("Không mở được torrent")?;
+            .map_err(|e| crate::util::msg_with("err.torrentOpenE", &[("e", e.to_string())]))?;
+        let handle = added.into_handle().ok_or_else(|| crate::util::msg("err.torrentOpen"))?;
         tokio::time::timeout(Duration::from_secs(60), handle.wait_until_initialized())
             .await
-            .map_err(|_| "Không tìm được nguồn cho torrent này".to_string())?
+            .map_err(|_| crate::util::msg("err.torrentPeers"))?
             .map_err(|e| e.to_string())?;
         self.streams.lock().unwrap().insert(key.clone(), Entry { handle, file });
         Ok(format!("http://127.0.0.1:{}/{key}", self.port))
