@@ -635,14 +635,17 @@ pub fn player_fullscreen(app: AppHandle, on: Option<bool>) -> R<bool> {
 
 #[cfg(mobile)]
 #[tauri::command]
-pub fn screen_brightness(app: AppHandle, level: Option<f64>) -> R<f64> {
+pub async fn screen_brightness(app: AppHandle, level: Option<f64>) -> R<f64> {
     use tauri_plugin_wistv_video::VideoExt;
-    app.video().brightness(level.unwrap_or(-2.0))
+    let level = level.unwrap_or(-2.0);
+    tauri::async_runtime::spawn_blocking(move || app.video().brightness(level))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[cfg(desktop)]
 #[tauri::command]
-pub fn screen_brightness(level: Option<f64>) -> R<f64> {
+pub async fn screen_brightness(level: Option<f64>) -> R<f64> {
     let _ = level;
     Err("Máy tính không chỉnh độ sáng màn hình trong app".into())
 }
