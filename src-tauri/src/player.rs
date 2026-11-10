@@ -435,6 +435,10 @@ impl Player {
         let _ = self.command(&["quit".to_string()]);
     }
 
+    pub fn active(&self) -> bool {
+        self.live.lock().unwrap().is_some()
+    }
+
     pub fn set_crop(&self, on: bool) {
         self.crop.store(on, Ordering::Relaxed);
     }

@@ -453,7 +453,6 @@ pub async fn play(
         wid,
         extra,
     };
-    keep_awake(&app, true);
     let awake_app = app.clone();
     let state_app = app.clone();
     let session = ctx.session;
@@ -486,7 +485,9 @@ pub async fn play(
             }
         },
         move |out| {
-            keep_awake(&app, false);
+            if !app.state::<AppState>().player.active() {
+                keep_awake(&app, false);
+            }
             let _ = app.emit(
                 "player-ended",
                 json!({
@@ -517,7 +518,9 @@ pub async fn play(
             });
         },
     )
-    .inspect_err(|_| keep_awake(&awake_app, false))
+    .inspect_err(|_| keep_awake(&awake_app, false))?;
+    keep_awake(&awake_app, true);
+    Ok(())
 }
 
 async fn off_main<T: Send + 'static>(app: AppHandle, f: impl FnOnce(&AppState) -> R<T> + Send + 'static) -> R<T> {
