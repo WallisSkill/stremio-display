@@ -320,6 +320,8 @@ pub struct PlayCtx {
     pub id: String,
     pub kind: String,
     pub name: String,
+    #[serde(default)]
+    pub title: Option<String>,
     pub poster: Option<String>,
     pub video: String,
     pub start: Option<u64>,
@@ -482,7 +484,7 @@ pub async fn play(
     }
     let req = player::Request {
         url,
-        title: ctx.name.clone(),
+        title: ctx.title.clone().unwrap_or_else(|| ctx.name.clone()),
         start_ms: ctx.start.unwrap_or(0),
         headers,
         wid,

@@ -297,7 +297,7 @@ const PROFILE_COLORS = ["#e50914", "#f59e0b", "#22c55e", "#3b82f6", "#a855f7", "
 const MAX_PROFILES = 8;
 const NO_PROFILES = () => ({ active: "main", list: [] });
 const profilesKey = () => `profiles:${app.user?._id || app.user?.email || ""}`;
-const profileName = (p) => p.name || app.user?.fullname || String(app.user?.email || "").split("@")[0] || "Chính";
+const profileName = (p) => p.name || app.user?.fullname || String(app.user?.email || "").split("@")[0] || tr("pf.main");
 const currentProfile = () => app.profiles.list.find((p) => p.id === app.profiles.active) || { id: "main", name: "", color: 0, locked: false };
 const hasProfiles = () => app.profiles.list.length > 1 || app.profiles.list.some((p) => p.locked);
 const firstLetter = (n) => ([...String(n).trim()][0] || "?").toUpperCase();
@@ -371,7 +371,7 @@ function pinPrompt({ face, title, check }) {
     const paint = () => put(dots, ...Array.from({ length: 6 }, (_, i) => h("i", { class: i < digits.length ? "on" : "" })));
     const submit = async () => {
       busy = true;
-      msg.textContent = "Đang kiểm tra…";
+      msg.textContent = tr("pf.checking");
       msg.classList.remove("bad");
       try { done(await check(digits)); }
       catch (e) {
@@ -400,14 +400,14 @@ function pinPrompt({ face, title, check }) {
     const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "cancel", "0", "del"];
     const pad = h("div", { class: "pin-pad" }, keys.map((k) =>
       h("button", { class: `pin-key focusable ${k.length > 1 ? "fn" : ""}`, onclick: () => (k === "cancel" ? done(null) : press(k)) },
-        k === "del" ? "⌫" : k === "cancel" ? "Huỷ" : k)));
+        k === "del" ? "⌫" : k === "cancel" ? tr("common.cancel") : k)));
     put(box, h("div", { class: "pin-card" }, profileFace(face, "pf-face big"), h("h2", {}, title), dots, msg, pad));
     paint();
     $(".pin-key", pad)?.focus({ preventScroll: true });
   });
 }
 
-const unlockPrompt = (p, title) => pinPrompt({ face: p, title: title || `Nhập mã PIN của ${profileName(p)}`, check: (pin) => call("profile_unlock", { id: p.id, pin }) });
+const unlockPrompt = (p, title) => pinPrompt({ face: p, title: title || tr("pf.enterPin", { name: profileName(p) }), check: (pin) => call("profile_unlock", { id: p.id, pin }) });
 
 async function switchProfile(p, token, startup) {
   await flushPrefs();
@@ -422,7 +422,7 @@ async function switchProfile(p, token, startup) {
   const hit = cacheGet(bootKey());
   app.library = Array.isArray(hit?.v?.library) ? hit.v.library : [];
   go("home");
-  toast(`Đang xem với hồ sơ ${profileName(p)}`);
+  toast(tr("pf.switched", { name: profileName(p) }));
   refreshLibrary().then(() => {
     const cur = app.stack[app.stack.length - 1];
     if (cur?.route === "home" && !pl.open && $("#sheet").hidden && !topLayer()) render();
@@ -447,17 +447,17 @@ function openProfiles({ startup = false, manage = false } = {}) {
     const draw = () => {
       const tiles = app.profiles.list.map((p) =>
         h("button", { class: `pf-tile focusable ${p.id === app.profiles.active ? "on" : ""}`, onclick: () => (managing ? editProfile(p).then(draw) : choose(p)) },
-          profileFace(p), h("span", { class: "pf-name" }, profileName(p)), managing ? h("span", { class: "pf-edit" }, "Sửa") : null));
+          profileFace(p), h("span", { class: "pf-name" }, profileName(p)), managing ? h("span", { class: "pf-edit" }, tr("pf.edit")) : null));
       if (managing && app.profiles.list.length < MAX_PROFILES) {
         tiles.push(h("button", { class: "pf-tile add focusable", onclick: () => editProfile(null).then(draw) },
-          h("span", { class: "pf-face add" }, "+"), h("span", { class: "pf-name" }, "Thêm hồ sơ")));
+          h("span", { class: "pf-face add" }, "+"), h("span", { class: "pf-name" }, tr("pf.add"))));
       }
-      const actions = [h("button", { class: "btn focusable", onclick: () => { managing = !managing; draw(); } }, managing ? "Xong" : "Quản lý hồ sơ")];
-      if (startup) actions.push(h("button", { class: "btn focusable", onclick: async () => { await logout(); close(false); } }, "Đăng xuất"));
-      else actions.push(h("button", { class: "btn focusable", onclick: () => close(false) }, "Đóng"));
+      const actions = [h("button", { class: "btn focusable", onclick: () => { managing = !managing; draw(); } }, managing ? tr("common.done") : tr("set.profilesManage"))];
+      if (startup) actions.push(h("button", { class: "btn focusable", onclick: async () => { await logout(); close(false); } }, tr("set.logout")));
+      else actions.push(h("button", { class: "btn focusable", onclick: () => close(false) }, tr("common.close")));
       put(box, h("div", { class: "pf-screen" },
-        h("h1", {}, managing ? "Quản lý hồ sơ" : "Ai đang xem?"),
-        managing ? h("p", { class: "hint" }, "Các hồ sơ dùng chung addon, mỗi hồ sơ có Thư viện và lịch sử xem riêng.") : null,
+        h("h1", {}, managing ? tr("set.profilesManage") : tr("pf.who")),
+        managing ? h("p", { class: "hint" }, tr("pf.manageHint")) : null,
         h("div", { class: "pf-grid" }, tiles),
         h("div", { class: "pf-actions" }, actions)));
       ($(".pf-tile.on", box) || $(".pf-tile", box))?.focus({ preventScroll: true });
@@ -471,7 +471,7 @@ function editProfile(p) {
     const isNew = !p;
     const tokens = {};
     if (p?.locked) {
-      const t = await unlockPrompt(p, `Nhập mã PIN của ${profileName(p)} để sửa`);
+      const t = await unlockPrompt(p, tr("pf.enterPinEdit", { name: profileName(p) }));
       if (t === null) { resolve(false); return; }
       tokens[p.id] = t;
     }
@@ -480,13 +480,13 @@ function editProfile(p) {
     let armed = false;
     const close = (v) => { box.remove(); resolve(v); };
     const box = layer("pf-layer edit", () => close(false));
-    const nameInput = h("input", { class: "pf-input", maxlength: "20", value: draft.name, placeholder: draft.id === "main" ? profileName({ name: "" }) : "Tên hồ sơ", autocomplete: "off" });
+    const nameInput = h("input", { class: "pf-input", maxlength: "20", value: draft.name, placeholder: draft.id === "main" ? profileName({ name: "" }) : tr("pf.namePh"), autocomplete: "off" });
     const msg = h("p", { class: "pin-msg" });
     const lockedNow = () => (pin === undefined ? draft.locked : typeof pin === "string");
     const setPin = async () => {
-      const first = await pinPrompt({ face: { ...draft, locked: false }, title: "Đặt mã PIN 6 số", check: async (d) => d });
+      const first = await pinPrompt({ face: { ...draft, locked: false }, title: tr("pf.setPin6"), check: async (d) => d });
       if (first === null) return;
-      const again = await pinPrompt({ face: { ...draft, locked: false }, title: "Nhập lại mã PIN", check: async (d) => { if (d !== first) throw "Hai lần nhập không khớp, nhập lại"; return d; } });
+      const again = await pinPrompt({ face: { ...draft, locked: false }, title: tr("pf.repeatPin"), check: async (d) => { if (d !== first) throw tr("pf.pinMismatch"); return d; } });
       if (again === null) return;
       pin = first;
       draw();
@@ -494,7 +494,7 @@ function editProfile(p) {
     };
     const save = async (remove) => {
       const name = nameInput.value.trim();
-      if (!remove && !name && draft.id !== "main") { msg.textContent = "Hãy đặt tên cho hồ sơ"; msg.classList.add("bad"); nameInput.focus(); return; }
+      if (!remove && !name && draft.id !== "main") { msg.textContent = tr("pf.needName"); msg.classList.add("bad"); nameInput.focus(); return; }
       const base = app.profiles.list.length ? app.profiles.list : [{ id: "main", name: "", color: 0 }];
       const others = base.map((x) => ({ id: x.id, name: x.name, color: x.color }));
       let list;
@@ -505,7 +505,7 @@ function editProfile(p) {
         list = isNew ? [...others, mine] : others.map((x) => (x.id === draft.id ? mine : x));
       }
       const before = app.profiles.active;
-      msg.textContent = "Đang lưu…";
+      msg.textContent = tr("common.saving");
       msg.classList.remove("bad");
       try {
         const saved = await call("profiles_save", { list, tokens });
@@ -522,25 +522,25 @@ function editProfile(p) {
     };
     const draw = () => {
       const swatches = PROFILE_COLORS.map((c, i) =>
-        h("button", { class: `pf-swatch focusable ${i === draft.color ? "on" : ""}`, style: `background:${c}`, "aria-label": `Màu ${i + 1}`, onclick: () => { draft.color = i; draw(); $(".pf-swatch.on", box)?.focus({ preventScroll: true }); } }));
+        h("button", { class: `pf-swatch focusable ${i === draft.color ? "on" : ""}`, style: `background:${c}`, "aria-label": tr("pf.color", { n: i + 1 }), onclick: () => { draft.color = i; draw(); $(".pf-swatch.on", box)?.focus({ preventScroll: true }); } }));
       const pinButtons = lockedNow()
-        ? [h("button", { class: "btn focusable", onclick: setPin }, "Đổi mã PIN"), h("button", { class: "btn focusable", onclick: () => { pin = null; draw(); } }, "Bỏ mã PIN")]
-        : [h("button", { class: "btn focusable", onclick: setPin }, "Đặt mã PIN")];
+        ? [h("button", { class: "btn focusable", onclick: setPin }, tr("pf.changePin")), h("button", { class: "btn focusable", onclick: () => { pin = null; draw(); } }, tr("pf.removePin"))]
+        : [h("button", { class: "btn focusable", onclick: setPin }, tr("pf.setPin"))];
       const del = !isNew && draft.id !== "main"
         ? h("button", { class: `btn danger focusable ${armed ? "armed" : ""}`, onclick: () => { if (!armed) { armed = true; draw(); $(".btn.danger", box)?.focus(); return; } save(true); } },
-          armed ? "Bấm lần nữa để xoá hẳn" : "Xoá hồ sơ")
+          armed ? tr("pf.confirmDelete") : tr("pf.delete"))
         : null;
       put(box, h("div", { class: "pf-card" },
         profileFace({ ...draft, name: nameInput.value.trim() || draft.name, locked: lockedNow() }, "pf-face big"),
-        h("h2", {}, isNew ? "Thêm hồ sơ" : "Sửa hồ sơ"),
-        h("label", { class: "pf-label" }, "Tên"), nameInput,
-        h("label", { class: "pf-label" }, "Màu"), h("div", { class: "pf-swatches" }, swatches),
-        h("label", { class: "pf-label" }, "Mã PIN"),
-        h("p", { class: "hint" }, lockedNow() ? "Phải nhập mã PIN 6 số mỗi khi chọn hồ sơ này." : "Chưa có mã PIN, ai cũng chọn được hồ sơ này."),
+        h("h2", {}, isNew ? tr("pf.add") : tr("pf.editTitle")),
+        h("label", { class: "pf-label" }, tr("pf.name")), nameInput,
+        h("label", { class: "pf-label" }, tr("pf.colorLabel")), h("div", { class: "pf-swatches" }, swatches),
+        h("label", { class: "pf-label" }, tr("pf.pin")),
+        h("p", { class: "hint" }, lockedNow() ? tr("pf.lockedHint") : tr("pf.openHint")),
         h("div", { class: "pf-row pf-pin" }, pinButtons),
-        armed ? h("p", { class: "pin-msg bad" }, `Thư viện và lịch sử xem của ${profileName(p)} sẽ bị xoá.`) : null,
+        armed ? h("p", { class: "pin-msg bad" }, tr("pf.deleteWarn", { name: profileName(p) })) : null,
         msg,
-        h("div", { class: "pf-row end" }, del, h("button", { class: "btn focusable", onclick: () => close(false) }, "Huỷ"), h("button", { class: "btn primary focusable", onclick: () => save(false) }, "Lưu"))));
+        h("div", { class: "pf-row end" }, del, h("button", { class: "btn focusable", onclick: () => close(false) }, tr("common.cancel")), h("button", { class: "btn primary focusable", onclick: () => save(false) }, tr("common.save")))));
     };
     nameInput.addEventListener("keydown", (e) => { if (e.key === "Enter") save(false); });
     draw();
@@ -608,7 +608,7 @@ function card(m, shape = "poster", opts = {}) {
   const el = h("button", { class: `card ${shape} focusable`, title: m.name }, art, cap);
   el.addEventListener("click", opts.onClick || (() => go("detail", { kind: m.type, id: m.id, video: opts.video })));
   if (opts.onDismiss) {
-    const x = h("span", { class: "card-x", role: "button", "aria-label": "Xoá khỏi lịch sử xem", title: "Xoá khỏi lịch sử xem", html: ICON.close });
+    const x = h("span", { class: "card-x", role: "button", "aria-label": tr("home.removeHistory"), title: tr("home.removeHistory"), html: ICON.close });
     const dismiss = (e) => { e.preventDefault(); e.stopPropagation(); opts.onDismiss(el); };
     x.addEventListener("pointerdown", (e) => e.stopPropagation());
     x.addEventListener("click", dismiss);
@@ -691,8 +691,8 @@ function setHero(m, info, dots, idx) {
       metaLine(m),
       m.description ? h("p", { class: "desc" }, m.description) : null,
       h("div", { class: "actions" },
-        h("button", { class: "btn primary focusable", html: `${ICON.play}<span>Xem ngay</span>`, onclick: () => go("detail", { kind: m.type, id: m.id, autoplay: true }) }),
-        h("button", { class: "btn focusable", html: `${ICON.info}<span>Chi tiết</span>`, onclick: () => go("detail", { kind: m.type, id: m.id }) })));
+        h("button", { class: "btn primary focusable", html: `${ICON.play}<span>${tr("home.playNow")}</span>`, onclick: () => go("detail", { kind: m.type, id: m.id, autoplay: true }) }),
+        h("button", { class: "btn focusable", html: `${ICON.info}<span>${tr("det.details")}</span>`, onclick: () => go("detail", { kind: m.type, id: m.id }) })));
     if (focusedIdx >= 0) $$(".btn", info)[focusedIdx]?.focus({ preventScroll: true });
     info.classList.remove("fade");
   }, 260);
@@ -758,19 +758,19 @@ function renderBrowse(view, filterType) {
     const hasSeries = app.library.some((i) => i.type === "series" && (!i.removed || i.temp) && i.state?.lastWatched);
     if (continueItems().length || hasSeries) {
       let fresh = new Map();
-      const sec = shelf("Xem tiếp", null, "wide", async () => {
+      const sec = shelf(tr("home.continue"), null, "wide", async () => {
         fresh = await Promise.race([freshEpisodes(), new Promise((r) => setTimeout(() => r(new Map()), 4000))]);
         return continueItems(fresh).slice(0, 20);
       }, {
         eager: true,
         render: (li) => {
           const st = li.state || {};
-          const m = { id: li._id, type: li.type, name: li.name, poster: li.poster };
+          const m = { id: li._id, type: li.type, name: plainName(li.name), poster: li.poster };
           const add = fresh.get(li._id);
           const vid = add && !(st.timeOffset > 0) ? add.first.id : st.video_id;
           const ep = li.type === "series" ? epLabelFromId(vid) : "";
           return card(m, "wide", {
-            label: ep ? `${li.name} · ${ep}` : li.name,
+            label: ep ? `${m.name} · ${ep}` : m.name,
             progress: st.timeOffset > 0 && st.duration ? st.timeOffset / st.duration : null,
             badge: add ? `+${add.count}` : null,
             onClick: () => go("detail", { kind: li.type, id: li._id, video: vid, autoplay: true }),
@@ -795,7 +795,7 @@ function renderBrowse(view, filterType) {
 
   const cats = catalogsOf(filterType).filter((c) => filterType || c.cat.type !== "tv").slice(0, 16);
   if (!cats.length) {
-    info.append(h("h1", { class: "title-text" }, "Chưa có danh mục"), h("p", { class: "desc" }, "Mở mục Addon để cài thêm addon có danh mục phim."));
+    info.append(h("h1", { class: "title-text" }, tr("home.noCatalog")), h("p", { class: "desc" }, tr("home.noCatalogHint")));
   }
   cats.forEach(({ addon, cat }, i) => {
     const shape = i === 0 ? "wide" : "poster";
@@ -807,7 +807,7 @@ function renderBrowse(view, filterType) {
       onLoaded: i === 0 ? (items) => {
         featured = items.filter((m) => m.description || m.background);
         if (!featured.length) featured = items.slice();
-        put(dots, h("div", { class: "hero-track" }, ...featured.map((m, k) => h("button", { class: "hero-dot", tabindex: "-1", "aria-label": m.name || `Phim ${k + 1}`, onclick: () => showFeatured(k) }, h("i")))));
+        put(dots, h("div", { class: "hero-track" }, ...featured.map((m, k) => h("button", { class: "hero-dot", tabindex: "-1", "aria-label": m.name || tr("home.slide", { n: k + 1 }), onclick: () => showFeatured(k) }, h("i")))));
         fi = 0;
         setHero(featured[0], info, dots, 0);
         rotate();
@@ -817,9 +817,11 @@ function renderBrowse(view, filterType) {
   });
 }
 
+const plainName = (name) => String(name || "").replace(/ · M\d+:T\d+( · .*)?$/, "");
+
 function epLabelFromId(vid) {
   const m = /:(\d+):(\d+)$/.exec(vid || "");
-  return m ? `M${m[1]} · T${m[2]}` : "";
+  return m ? tr("ep.label", { s: m[1], e: m[2] }) : "";
 }
 
 async function renderDetail(view, { kind, id, video, autoplay }) {
@@ -833,14 +835,14 @@ async function renderDetail(view, { kind, id, video, autoplay }) {
   showArt(m);
 
   const libBtn = h("button", { class: "btn focusable" });
-  const syncLib = () => { libBtn.innerHTML = inLibrary(m.id) ? `${ICON.check}<span>Trong thư viện</span>` : `${ICON.plus}<span>Thư viện</span>`; };
+  const syncLib = () => { libBtn.innerHTML = inLibrary(m.id) ? `${ICON.check}<span>${tr("det.inLibrary")}</span>` : `${ICON.plus}<span>${tr("nav.library")}</span>`; };
   syncLib();
   libBtn.addEventListener("click", async () => {
     try {
       const now = await call("library_toggle", { meta: { id: m.id, name: m.name, type: m.type, poster: m.poster } });
       await refreshLibrary();
       syncLib();
-      toast(now ? "Đã thêm vào Thư viện" : "Đã xóa khỏi Thư viện");
+      toast(now ? tr("det.added") : tr("det.removed"));
     } catch (e) { toast(e, true); }
   });
 
@@ -856,7 +858,7 @@ async function renderDetail(view, { kind, id, video, autoplay }) {
   };
   const target = playTarget();
   const resumeMs = entry?.state?.video_id === target.vid ? entry.state.timeOffset : 0;
-  const playLabel = resumeMs > 0 ? `Tiếp tục ${isSeries && target.video ? epShort(target.video) : ""}`.trim() : isSeries && target.video ? `Xem ${epShort(target.video)}` : "Xem";
+  const playLabel = resumeMs > 0 ? tr("det.resume", { ep: isSeries && target.video ? epShort(target.video) : "" }).trim() : isSeries && target.video ? tr("det.playEp", { ep: epShort(target.video) }) : tr("det.play");
   const playBtn = h("button", { class: "btn primary focusable", html: `${ICON.play}<span>${playLabel}</span>`, onclick: () => openStreams(m, target.vid, target.label) });
 
   const cast = (m.cast || []).slice(0, 5).join(", ");
@@ -865,7 +867,7 @@ async function renderDetail(view, { kind, id, video, autoplay }) {
     titleBlock(m),
     metaLine(m),
     m.description ? h("p", { class: "desc" }, m.description) : null,
-    cast || dir ? h("div", { class: "credits" }, cast ? h("div", {}, h("b", {}, "Diễn viên "), cast) : null, dir ? h("div", {}, h("b", {}, "Đạo diễn "), dir) : null) : null,
+    cast || dir ? h("div", { class: "credits" }, cast ? h("div", {}, h("b", {}, tr("det.cast") + " "), cast) : null, dir ? h("div", {}, h("b", {}, tr("det.director") + " "), dir) : null) : null,
     h("div", { class: "actions" }, playBtn, libBtn));
   put(page, top);
 
@@ -875,7 +877,7 @@ async function renderDetail(view, { kind, id, video, autoplay }) {
     const pills = h("div", { class: "seasons" });
     const row = h("div", { class: "row" });
     const drawSeason = () => {
-      put(pills, ...seasons.map((s) => h("button", { class: `pill focusable ${s === cur ? "on" : ""}`, onclick: () => { cur = s; drawSeason(); } }, s === 0 ? "Đặc biệt" : `Mùa ${s}`)));
+      put(pills, ...seasons.map((s) => h("button", { class: `pill focusable ${s === cur ? "on" : ""}`, onclick: () => { cur = s; drawSeason(); } }, s === 0 ? tr("ep.special") : tr("ep.season", { n: s }))));
       const eps = videos.filter((v) => (v.season ?? 0) === cur).sort(epSort);
       put(row, ...eps.map((v) => episodeCard(m, v, entry)));
       row.scrollLeft = 0;
@@ -884,7 +886,7 @@ async function renderDetail(view, { kind, id, video, autoplay }) {
     };
     drawSeason();
     page.append(h("section", { class: "shelf", style: "padding-bottom:80px" },
-      h("div", { class: "shelf-head", style: "padding:0" }, h("h2", { class: "shelf-title" }, "Các tập")),
+      h("div", { class: "shelf-head", style: "padding:0" }, h("h2", { class: "shelf-title" }, tr("ep.list"))),
       pills, row));
   } else {
     page.lastChild.style.paddingBottom = "80px";
@@ -899,8 +901,8 @@ async function renderDetail(view, { kind, id, video, autoplay }) {
 }
 
 const epSort = (a, b) => (a.season ?? 0) - (b.season ?? 0) || (a.episode ?? a.number ?? 0) - (b.episode ?? b.number ?? 0);
-const epShort = (v) => `M${v.season ?? 0}:T${v.episode ?? v.number ?? "?"}`;
-const epName = (v) => `${epShort(v)} · ${v.title || v.name || "Tập " + (v.episode ?? "")}`;
+const epShort = (v) => tr("ep.short", { s: v.season ?? 0, e: v.episode ?? v.number ?? "?" });
+const epName = (v) => `${epShort(v)} · ${v.title || v.name || tr("ep.n", { n: v.episode ?? "" })}`;
 
 function episodeCard(m, v, entry) {
   const thumb = v.thumbnail || thumbOf(m);
@@ -912,7 +914,7 @@ function episodeCard(m, v, entry) {
   const future = released && released > new Date();
   const el = h("button", { class: "card ep focusable", "data-vid": v.id },
     art,
-    h("div", { class: "ep-num" }, `Tập ${v.episode ?? v.number ?? "?"}${future ? " · " + formatDate(released) : ""}`),
+    h("div", { class: "ep-num" }, `${tr("ep.n", { n: v.episode ?? v.number ?? "?" })}${future ? " · " + formatDate(released) : ""}`),
     h("div", { class: "ep-title" }, v.title || v.name || ""),
     v.overview || v.description ? h("div", { class: "ep-over" }, v.overview || v.description) : null);
   el.addEventListener("click", () => openStreams(m, v.id, epName(v)));
@@ -954,12 +956,12 @@ async function openStreams(m, vid, label) {
     put(tools, );
     if (resumeMs > 0) {
       tools.append(
-        h("button", { class: `pill focusable ${resume ? "on" : ""}`, onclick: () => { resume = true; drawTools(); } }, `Tiếp tục từ ${fmtTime(resumeMs)}`),
-        h("button", { class: `pill focusable ${!resume ? "on" : ""}`, onclick: () => { resume = false; drawTools(); } }, "Xem từ đầu"));
+        h("button", { class: `pill focusable ${resume ? "on" : ""}`, onclick: () => { resume = true; drawTools(); } }, tr("src.resumeFrom", { time: fmtTime(resumeMs) })),
+        h("button", { class: `pill focusable ${!resume ? "on" : ""}`, onclick: () => { resume = false; drawTools(); } }, tr("src.fromStart")));
     }
   };
   drawTools();
-  put(sheet, h("div", { class: "sheet-head" }, h("h2", {}, "Chọn nguồn phát"), h("p", {}, label || m.name), tools), body);
+  put(sheet, h("div", { class: "sheet-head" }, h("h2", {}, tr("src.pick")), h("p", {}, label || m.name), tools), body);
   sheet.hidden = false;
   $("#scrim").hidden = false;
   navSync();
@@ -976,7 +978,7 @@ async function openStreams(m, vid, label) {
       const metaBits = [q.size, q.seeds ? `${q.seeds} seed` : ""].filter(Boolean).join(" · ");
       const btn = h("button", { class: "stream focusable" },
         h("div", { class: "s-name" }, q.tags.map(([t, solid]) => h("span", { class: `badge ${solid ? "solid" : ""}` }, t)), firstLine),
-        h("div", { class: "s-meta" }, metaBits || (s.infoHash ? "Torrent" : s.externalUrl ? "Mở ngoài" : "")),
+        h("div", { class: "s-meta" }, metaBits || (s.infoHash ? "Torrent" : s.externalUrl ? tr("src.external") : "")),
         sub ? h("div", { class: "s-sub" }, sub) : null);
       btn.addEventListener("click", () => startPlayback(m, vid, label, s, resume ? resumeMs : 0, g.addon));
       slot.append(btn);
@@ -985,10 +987,10 @@ async function openStreams(m, vid, label) {
   await watchStreams(m.type, vid, (e) => {
     if (sheet.hidden || !e.addons) return;
     if (e.error) { put(body, h("div", { class: "empty" }, e.error)); return; }
-    if (!e.addons.length) { put(body, h("div", { class: "empty" }, "Chưa có addon nguồn phát nào cho mục này.\nHãy cài addon nguồn phát trong mục Addon.")); return; }
+    if (!e.addons.length) { put(body, h("div", { class: "empty" }, tr("src.noAddons"))); return; }
     if (!slots) {
       slots = e.addons.map((a) => h("div", { class: "stream-group" },
-        h("div", { class: "group-title" }, a.logo ? h("img", { src: a.logo, alt: "" }) : null, a.addon, h("span", { class: "group-wait" }, h("i", { class: "spinner tiny" }), "đang tải"))));
+        h("div", { class: "group-title" }, a.logo ? h("img", { src: a.logo, alt: "" }) : null, a.addon, h("span", { class: "group-wait" }, h("i", { class: "spinner tiny" }), tr("src.loading")))));
       put(body, ...slots);
     }
     e.slots.forEach((g, i) => {
@@ -999,7 +1001,7 @@ async function openStreams(m, vid, label) {
       shown++;
     });
     if (shown && !body.contains(document.activeElement)) $(".stream", body)?.focus({ preventScroll: true });
-    if (e.done && !shown) put(body, h("div", { class: "empty" }, "Không addon nào trả về nguồn cho mục này.\nHãy cài addon nguồn phát trong mục Addon."));
+    if (e.done && !shown) put(body, h("div", { class: "empty" }, tr("src.none")));
   });
 }
 
@@ -1067,49 +1069,49 @@ function buildPlayer() {
   ui.hover = h("div", { class: "pl-hover" });
   ui.tip = h("div", { class: "pl-tip" });
   ui.seek = h("div", { class: "pl-seek" }, h("div", { class: "pl-track" }, ui.buf, ui.hover, ui.fill), ui.knob, ui.tip);
-  ui.play = iconBtn("pause", "Dừng (Space)", togglePause, "big");
-  ui.next = iconBtn("next", "Tập tiếp (N)", () => playNext(false));
+  ui.play = iconBtn("pause", tr("pl.pause"), togglePause, "big");
+  ui.next = iconBtn("next", tr("pl.nextEp"), () => playNext(false));
   ui.time = h("span", { class: "pl-time" });
-  ui.volBtn = iconBtn("vol", "Tắt tiếng (M)", () => call("player_command", { args: ["cycle", "mute"] }).catch(() => {}));
+  ui.volBtn = iconBtn("vol", tr("pl.mute"), () => call("player_command", { args: ["cycle", "mute"] }).catch(() => {}));
   ui.vol = h("input", { type: "range", min: "0", max: "150", step: "1", value: "100", tabindex: "-1", class: "pl-vol" });
   ui.vol.addEventListener("input", () => setVolume(Number(ui.vol.value)));
   ui.vol.addEventListener("pointerdown", (e) => e.stopPropagation());
-  ui.cc = iconBtn("cc", "Âm thanh và phụ đề (C)", () => toggleMenu("tracks"));
-  ui.eps = iconBtn("list", "Các tập (E)", () => toggleMenu("episodes"));
-  ui.src = iconBtn("source", "Nguồn phát (S)", () => toggleMenu("sources"));
-  ui.room = iconBtn("people", "Xem chung (W)", () => roomMenu(), "room-btn");
+  ui.cc = iconBtn("cc", tr("pl.tracks"), () => toggleMenu("tracks"));
+  ui.eps = iconBtn("list", tr("pl.episodes"), () => toggleMenu("episodes"));
+  ui.src = iconBtn("source", tr("pl.sources"), () => toggleMenu("sources"));
+  ui.room = iconBtn("people", tr("pl.together"), () => roomMenu(), "room-btn");
   ui.roomCount = h("span", { class: "room-count", hidden: true });
   ui.room.append(ui.roomCount);
   ui.nextUp = h("button", { class: "pl-nextup", tabindex: "-1", hidden: true, onclick: (e) => { e.stopPropagation(); playNext(false); } });
   ui.speedVal = h("span", {}, "1×");
-  ui.speed = h("button", { class: "pl-btn pl-speed", tabindex: "-1", title: "Tốc độ", onclick: (e) => { e.stopPropagation(); toggleMenu("speed"); } }, ...(TOUCH ? [h("span", { html: ICON.speed }), h("span", { class: "pl-label" }, "Tốc độ (", ui.speedVal, ")")] : [ui.speedVal]));
-  ui.fs = iconBtn("full", "Toàn màn hình (F)", toggleFullscreen);
+  ui.speed = h("button", { class: "pl-btn pl-speed", tabindex: "-1", title: tr("pl.speed"), onclick: (e) => { e.stopPropagation(); toggleMenu("speed"); } }, ...(TOUCH ? [h("span", { html: ICON.speed }), h("span", { class: "pl-label" }, tr("pl.speed") + " (", ui.speedVal, ")")] : [ui.speedVal]));
+  ui.fs = iconBtn("full", tr("pl.fullscreen"), toggleFullscreen);
   ui.menu = h("div", { class: "pl-menu", hidden: true });
   ui.menu.addEventListener("pointerdown", (e) => e.stopPropagation());
   ui.menu.addEventListener("click", (e) => e.stopPropagation());
-  ui.stretch = iconBtn(fillMode ? "fit" : "fill", fillMode ? "Giữ đúng tỉ lệ (Z)" : "Dãn kín màn hình (Z)", () => setFill(!fillMode, true));
+  ui.stretch = iconBtn(fillMode ? "fit" : "fill", fillMode ? tr("pl.fit") : tr("pl.fill"), () => setFill(!fillMode, true));
   ui.clock = h("span", { class: "pl-clock" });
   ui.batt = h("span", { class: "pl-batt", hidden: true });
   if (TOUCH) {
-    ui.lock = h("button", { class: "pl-lock", tabindex: "-1", title: "Khoá màn hình", "aria-label": "Khoá màn hình", onclick: (e) => { e.stopPropagation(); setLock(true); } }, h("span", { html: ICON.lock }), h("span", { class: "pl-label" }, "Khoá"));
+    ui.lock = h("button", { class: "pl-lock", tabindex: "-1", title: tr("pl.lockScreen"), "aria-label": tr("pl.lockScreen"), onclick: (e) => { e.stopPropagation(); setLock(true); } }, h("span", { html: ICON.lock }), h("span", { class: "pl-label" }, tr("pl.lock")));
   }
-  const top = h("div", { class: "pl-top" }, h("div", { class: "pl-lead" }, iconBtn("left", "Quay lại (Esc)", () => closePlayer()), h("div", { class: "pl-titles" }, ui.title, ui.sub)), ...(ui.lock ? [ui.lock] : []), h("div", { class: "pl-status" }, ui.clock, ui.batt));
-  const back10 = iconBtn("back10", "Lùi 10 giây (←)", () => seekBy(-10));
-  const fwd10 = iconBtn("fwd10", "Tới 10 giây (→)", () => seekBy(10));
+  const top = h("div", { class: "pl-top" }, h("div", { class: "pl-lead" }, iconBtn("left", tr("pl.back"), () => closePlayer()), h("div", { class: "pl-titles" }, ui.title, ui.sub)), ...(ui.lock ? [ui.lock] : []), h("div", { class: "pl-status" }, ui.clock, ui.batt));
+  const back10 = iconBtn("back10", tr("pl.back10"), () => seekBy(-10));
+  const fwd10 = iconBtn("fwd10", tr("pl.fwd10"), () => seekBy(10));
   const seekRow = h("div", { class: "pl-seekrow" }, ui.seek, ui.time);
   let center = null;
   let bottom;
   if (TOUCH) {
-    for (const [btn, text] of [[ui.room, "Xem chung"], [ui.eps, "Các tập"], [ui.src, "Nguồn"], [ui.cc, "Phụ đề"], [ui.next, "Tập tiếp"]]) {
+    for (const [btn, text] of [[ui.room, tr("nav.togetherShort")], [ui.eps, tr("ep.list")], [ui.src, tr("pl.src")], [ui.cc, tr("set.subs")], [ui.next, tr("pl.next")]]) {
       btn.classList.add("act");
       btn.append(h("span", { class: "pl-label" }, text));
     }
     ui.speed.classList.add("act");
     ui.fillIcon = h("span", { html: ICON[fillMode ? "fit" : "fill"] });
-    ui.fillLabel = h("span", { class: "pl-label" }, fillMode ? "Vừa hình" : "Dãn hình");
+    ui.fillLabel = h("span", { class: "pl-label" }, fillMode ? tr("pl.fitShort") : tr("pl.fillShort"));
     ui.stretch.classList.add("act");
     put(ui.stretch, ui.fillIcon, ui.fillLabel);
-    ui.unlock = h("button", { class: "pl-unlock", tabindex: "-1", onclick: (e) => { e.stopPropagation(); setLock(false); } }, h("span", { html: ICON.unlock }), h("span", {}, "Mở khoá"));
+    ui.unlock = h("button", { class: "pl-unlock", tabindex: "-1", onclick: (e) => { e.stopPropagation(); setLock(false); } }, h("span", { html: ICON.unlock }), h("span", {}, tr("pl.unlock")));
     ui.play.classList.add("huge");
     back10.classList.add("big");
     fwd10.classList.add("big");
@@ -1301,7 +1303,7 @@ function flash(icon) {
 const SUB_BASE = 20;
 const SUB_DEFAULT = { scale: 1, height: SUB_BASE, color: "#FFFFFF", box: false, font: "Segoe UI Semibold", bold: false, italic: false, outline: 2.4, shadow: 1 };
 const SUB_FONTS = [["Segoe UI Semibold", "Segoe"], ["Arial", "Arial"], ["Tahoma", "Tahoma"], ["Verdana", "Verdana"], ["Calibri", "Calibri"], ["Times New Roman", "Times"], ["Georgia", "Georgia"]];
-const SUB_COLORS = [["#FFFFFF", "Trắng"], ["#FFE14D", "Vàng"], ["#7FE3FF", "Xanh"]];
+const SUB_COLORS = [["#FFFFFF", "sub.white"], ["#FFE14D", "sub.yellow"], ["#7FE3FF", "sub.cyan"]];
 const subPrefs = { ...SUB_DEFAULT };
 const subPlacement = (v) => (v <= SUB_BASE ? { pos: 100, margin: Math.round((v / SUB_BASE) * 60) } : { pos: 100 - (v - SUB_BASE), margin: 60 });
 const saveSubPrefs = () => setPref("sub", { ...subPrefs });
@@ -1334,12 +1336,12 @@ function setFill(on, announce) {
   setPref("fill", !!on);
   const applied = pl.open ? applyFill(on) : Promise.resolve(null);
   if (pl.ui) {
-    pl.ui.stretch.title = on ? "Giữ đúng tỉ lệ (Z)" : "Dãn kín màn hình (Z)";
-    if (pl.ui.fillIcon) { pl.ui.fillIcon.innerHTML = ICON[on ? "fit" : "fill"]; pl.ui.fillLabel.textContent = on ? "Vừa hình" : "Dãn hình"; }
+    pl.ui.stretch.title = on ? tr("pl.fit") : tr("pl.fill");
+    if (pl.ui.fillIcon) { pl.ui.fillIcon.innerHTML = ICON[on ? "fit" : "fill"]; pl.ui.fillLabel.textContent = on ? tr("pl.fitShort") : tr("pl.fillShort"); }
     else pl.ui.stretch.innerHTML = ICON[on ? "fit" : "fill"];
   }
   if (!announce) return;
-  const label = on ? "Dãn kín màn hình" : "Giữ đúng tỉ lệ hình";
+  const label = on ? tr("pl.fillToast") : tr("pl.fitToast");
   if (!TAURI || !TOUCH || ANDROID) { toast(label); return; }
   applied.then((d) => toast(d ? `${label} · ${fillReport(d)}` : label));
 }
@@ -1456,12 +1458,22 @@ function applyPrefs() {
   fillMode = !!pref("fill", TOUCH);
   subLang = String(pref("sublang", "vi"));
   const lang = pref("lang", null);
-  if (lang && setLang(lang) && app.stack.length) render();
+  if (lang && setLang(lang)) langChanged();
 }
 
 function chooseLang(code) {
   setPref("lang", code);
-  if (setLang(code)) { paintAvatar(); render(); }
+  if (setLang(code)) langChanged();
+}
+
+function langChanged() {
+  if (pl.ui && !pl.open) {
+    pl.ui.root.remove();
+    pl.ui = null;
+    buildPlayer();
+  }
+  paintAvatar();
+  if (app.stack.length) render();
 }
 
 const SUB_LANGS = [["", null], ["vi", "Tiếng Việt"], ["en", "English"], ["zh", "中文"], ["ko", "한국어"], ["ja", "日本語"]];
@@ -1576,25 +1588,25 @@ function subStylePanel() {
   const pick = (label, on, fn) => h("button", { class: `pl-mini ${on ? "on" : ""}`, tabindex: "-1", onclick: fn }, label);
   const set = (key, value) => { subPrefs[key] = value; saveSubPrefs(); applySubStyle([key]); renderMenu(); };
   return h("div", { class: "pl-substyle" },
-    h("h4", {}, "Kiểu phụ đề"),
-    subSlider("Cỡ chữ", 50, 250, 5, Math.round(subPrefs.scale * 100), (v) => `${v}%`, (v) => { subPrefs.scale = v / 100; saveSubPrefs(); applySubStyle(["scale"]); }),
-    subSlider("Vị trí", 0, 100, 1, Math.round(subPrefs.height), (v) => (v === 0 ? "Sát mép dưới" : v === SUB_BASE ? "Mặc định" : v < SUB_BASE ? `Thấp ${SUB_BASE - v}` : `Cao ${v - SUB_BASE}`), (v) => { subPrefs.height = v; saveSubPrefs(); applySubStyle(["height"]); }),
-    h("div", { class: "pl-choice wrap" }, h("span", {}, "Font"),
+    h("h4", {}, tr("sub.style")),
+    subSlider(tr("sub.size"), 50, 250, 5, Math.round(subPrefs.scale * 100), (v) => `${v}%`, (v) => { subPrefs.scale = v / 100; saveSubPrefs(); applySubStyle(["scale"]); }),
+    subSlider(tr("sub.pos"), 0, 100, 1, Math.round(subPrefs.height), (v) => (v === 0 ? tr("sub.bottom") : v === SUB_BASE ? tr("common.default") : v < SUB_BASE ? tr("sub.lower", { n: SUB_BASE - v }) : tr("sub.higher", { n: v - SUB_BASE })), (v) => { subPrefs.height = v; saveSubPrefs(); applySubStyle(["height"]); }),
+    h("div", { class: "pl-choice wrap" }, h("span", {}, tr("sub.family")),
       SUB_FONTS.map(([font, label]) => h("button", { class: `pl-mini ${subPrefs.font === font ? "on" : ""}`, tabindex: "-1", style: `font-family:'${font}'`, onclick: () => set("font", font) }, label))),
-    h("div", { class: "pl-choice" }, h("span", {}, "Kiểu chữ"),
-      pick("Thường", !subPrefs.bold && !subPrefs.italic, () => { subPrefs.italic = false; set("bold", false); applySubStyle(["italic"]); }),
-      h("button", { class: `pl-mini ${subPrefs.bold ? "on" : ""}`, tabindex: "-1", style: "font-weight:800", onclick: () => set("bold", !subPrefs.bold) }, "Đậm"),
-      h("button", { class: `pl-mini ${subPrefs.italic ? "on" : ""}`, tabindex: "-1", style: "font-style:italic", onclick: () => set("italic", !subPrefs.italic) }, "Nghiêng")),
-    h("div", { class: "pl-choice" }, h("span", {}, "Màu chữ"),
-      SUB_COLORS.map(([c, label]) => pick(label, subPrefs.color === c, () => set("color", c)))),
-    h("div", { class: "pl-choice" }, h("span", {}, "Nền"),
-      pick("Viền", !subPrefs.box, () => set("box", false)),
-      pick("Nền tối", subPrefs.box, () => set("box", true))),
-    subSlider("Độ dày viền", 0, 6, 0.2, subPrefs.outline, (v) => (v === 0 ? "Không viền" : v.toFixed(1)), (v) => { subPrefs.outline = v; saveSubPrefs(); applySubStyle(["outline"]); }),
-    subSlider("Bóng chữ", 0, 4, 0.5, subPrefs.shadow, (v) => (v === 0 ? "Không bóng" : v.toFixed(1)), (v) => { subPrefs.shadow = v; saveSubPrefs(); applySubStyle(["shadow"]); }),
+    h("div", { class: "pl-choice" }, h("span", {}, tr("sub.font")),
+      pick(tr("sub.regular"), !subPrefs.bold && !subPrefs.italic, () => { subPrefs.italic = false; set("bold", false); applySubStyle(["italic"]); }),
+      h("button", { class: `pl-mini ${subPrefs.bold ? "on" : ""}`, tabindex: "-1", style: "font-weight:800", onclick: () => set("bold", !subPrefs.bold) }, tr("sub.bold")),
+      h("button", { class: `pl-mini ${subPrefs.italic ? "on" : ""}`, tabindex: "-1", style: "font-style:italic", onclick: () => set("italic", !subPrefs.italic) }, tr("sub.italic"))),
+    h("div", { class: "pl-choice" }, h("span", {}, tr("sub.color")),
+      SUB_COLORS.map(([c, label]) => pick(tr(label), subPrefs.color === c, () => set("color", c)))),
+    h("div", { class: "pl-choice" }, h("span", {}, tr("sub.bg")),
+      pick(tr("sub.outlineOpt"), !subPrefs.box, () => set("box", false)),
+      pick(tr("sub.box"), subPrefs.box, () => set("box", true))),
+    subSlider(tr("sub.outline"), 0, 6, 0.2, subPrefs.outline, (v) => (v === 0 ? tr("sub.noOutline") : v.toFixed(1)), (v) => { subPrefs.outline = v; saveSubPrefs(); applySubStyle(["outline"]); }),
+    subSlider(tr("sub.shadow"), 0, 4, 0.5, subPrefs.shadow, (v) => (v === 0 ? tr("sub.noShadow") : v.toFixed(1)), (v) => { subPrefs.shadow = v; saveSubPrefs(); applySubStyle(["shadow"]); }),
     h("div", { class: "pl-choice" },
-      h("button", { class: "pl-mini", tabindex: "-1", onclick: () => { Object.assign(subPrefs, SUB_DEFAULT); saveSubPrefs(); applySubStyle(); applySubStyle(["box"]); renderMenu(); } }, "Đặt lại")),
-    h("p", { class: "pl-none" }, "Lưu cho mọi phim. Phụ đề ASS có kiểu riêng chỉ đổi được cỡ chữ."));
+      h("button", { class: "pl-mini", tabindex: "-1", onclick: () => { Object.assign(subPrefs, SUB_DEFAULT); saveSubPrefs(); applySubStyle(); applySubStyle(["box"]); renderMenu(); } }, tr("common.reset"))),
+    h("p", { class: "pl-none" }, tr("sub.styleHint")));
 }
 
 const cmd = (...args) => call("player_command", { args: args.map(String) }).catch((e) => toast(e, true));
@@ -1726,10 +1738,10 @@ function paintState() {
   const ui = pl.ui;
   const s = pl.s;
   ui.play.innerHTML = s.paused ? ICON.play : ICON.pause;
-  ui.play.title = s.paused ? "Phát (Space)" : "Dừng (Space)";
+  ui.play.title = s.paused ? tr("pl.play") : tr("pl.pause");
   const showSpin = !s.loaded || s.buffering;
   ui.spin.hidden = !showSpin;
-  ui.bufText.textContent = !s.loaded ? (pl.ctx?.stream?.infoHash ? "Đang tải torrent…" : "Đang mở…") : s.cachePercent != null && s.cachePercent < 100 ? `Đang tải ${Math.round(s.cachePercent)}%` : "";
+  ui.bufText.textContent = !s.loaded ? (pl.ctx?.stream?.infoHash ? tr("pl.loadingTorrent") : tr("pl.opening")) : s.cachePercent != null && s.cachePercent < 100 ? tr("pl.buffering", { n: Math.round(s.cachePercent) }) : "";
   if (document.activeElement !== ui.vol && s.volume != null) ui.vol.value = String(Math.round(s.volume));
   ui.volBtn.innerHTML = s.mute || s.volume === 0 ? ICON.mute : ICON.vol;
   ui.vol.style.setProperty("--v", `${((s.mute ? 0 : s.volume ?? 100) / 150) * 100}%`);
@@ -1741,7 +1753,7 @@ function paintState() {
   ui.speed.hidden = guest;
   const left = (s.duration || 0) - (s.time || 0);
   const showUp = !!nx && s.loaded && s.duration > 300 && left > 0 && left <= 90;
-  if (showUp && ui.nextUp.hidden) ui.nextUp.innerHTML = `${ICON.next}<span>Tập tiếp · ${epShort(nx)}</span>`;
+  if (showUp && ui.nextUp.hidden) ui.nextUp.innerHTML = `${ICON.next}<span>${tr("pl.next")} · ${epShort(nx)}</span>`;
   ui.nextUp.hidden = !showUp;
   ui.root.classList.toggle("paused", !!s.paused);
   paintTime();
@@ -1841,7 +1853,7 @@ async function playEpisode(v, auto) {
   } else {
     closePlayer(false);
     openStreams(c.m, v.id, epName(v));
-    toast(auto ? "Chọn nguồn cho tập tiếp theo" : "Không có cùng nguồn cho tập này, hãy chọn nguồn khác");
+    toast(auto ? tr("ep.pickNext") : tr("ep.noSame"));
   }
   return true;
 }
@@ -1858,19 +1870,19 @@ function renderEpisodes(box) {
     const cur = v.id === c.vid;
     const date = v.released ? new Date(v.released) : null;
     const future = date && date > now;
-    const note = cur ? "Đang xem" : future ? `Ra ngày ${formatDate(date)}` : date && !isNaN(date) ? formatDate(date) : "";
+    const note = cur ? tr("ep.watching") : future ? tr("ep.airs", { date: formatDate(date) }) : date && !isNaN(date) ? formatDate(date) : "";
     const num = v.episode ?? v.number ?? "?";
     const thumb = v.thumbnail
       ? h("span", { class: "pl-ep-thumb" }, h("img", { src: v.thumbnail, alt: "", loading: "lazy", onerror: (e) => e.target.remove() }), h("span", { class: "pl-ep-badge" }, num))
       : h("span", { class: "pl-ep-n" }, num);
     return h("button", { class: `pl-ep ${v.thumbnail ? "thumb" : ""} ${cur ? "on" : ""}`, tabindex: "-1", disabled: future || null, onclick: () => { if (!cur) playEpisode(v, false); } },
       thumb,
-      h("div", {}, h("b", {}, v.title || v.name || `Tập ${v.episode ?? ""}`), note ? h("small", {}, note) : null));
+      h("div", {}, h("b", {}, v.title || v.name || tr("ep.n", { n: v.episode ?? "" })), note ? h("small", {}, note) : null));
   }));
   box.className = "pl-menu episodes";
   put(box, 
-    h("h4", {}, "Các tập"),
-    seasons.length > 1 ? h("div", { class: "pl-seasons" }, seasons.map((s) => h("button", { class: `pl-mini ${s === pl.epSeason ? "on" : ""}`, tabindex: "-1", onclick: () => { pl.epSeason = s; renderMenu(); } }, s === 0 ? "Đặc biệt" : `Mùa ${s}`))) : null,
+    h("h4", {}, tr("ep.list")),
+    seasons.length > 1 ? h("div", { class: "pl-seasons" }, seasons.map((s) => h("button", { class: `pl-mini ${s === pl.epSeason ? "on" : ""}`, tabindex: "-1", onclick: () => { pl.epSeason = s; renderMenu(); } }, s === 0 ? tr("ep.special") : tr("ep.season", { n: s })))) : null,
     list);
   requestAnimationFrame(() => list.querySelector(".pl-ep.on")?.scrollIntoView({ block: "center" }));
 }
@@ -1889,8 +1901,8 @@ function trackLabel(t) {
     if (t.codec) bits.push(String(t.codec).toUpperCase());
     if (t.channels) bits.push(`${t.channels}ch`);
   }
-  if (t.external) bits.push("ngoài");
-  return bits.join(" · ") || `${t.type === "audio" ? "Âm thanh" : "Phụ đề"} ${t.id}`;
+  if (t.external) bits.push(tr("trk.external"));
+  return bits.join(" · ") || `${t.type === "audio" ? tr("trk.audio") : tr("set.subs")} ${t.id}`;
 }
 
 function menuItem(label, on, onclick, extra) {
@@ -1925,7 +1937,7 @@ function paintSubCredit(url) {
   const text = subCredit(url);
   for (const el of $$(".pl-credit", pl.ui?.menu || document)) {
     if (el.dataset.url !== url) continue;
-    el.textContent = text ? `Dịch: ${text}` : "";
+    el.textContent = text ? tr("sub.credit", { name: text }) : "";
     el.hidden = !text;
   }
 }
@@ -1945,7 +1957,7 @@ function releaseSummary(s) {
   const source = s.releaseFormat || names.join(" ").match(/\b(WEB-?DL|WEBRip|BluRay|BDRip|BRRip|HDTV|DVDRip|HDRip|WEB)\b/i)?.[1] || "";
   const fps = Number(s.fpsMilli) > 0 ? `${(Number(s.fpsMilli) / 1000).toFixed(3).replace(/\.?0+$/, "")} fps` : "";
   const parts = [source, [...res].join("/"), fps].filter(Boolean);
-  if (groups.length) parts.push(names.length > 1 ? `khớp ${names.length} bản: ${groups.slice(0, 5).join(", ")}${groups.length > 5 ? "…" : ""}` : `nhóm ${groups[0]}`);
+  if (groups.length) parts.push(names.length > 1 ? tr("src.matches", { n: names.length, list: `${groups.slice(0, 5).join(", ")}${groups.length > 5 ? "…" : ""}` }) : tr("src.group", { name: groups[0] }));
   return parts.join(" · ");
 }
 
@@ -1978,7 +1990,7 @@ function renderMenu() {
   box.hidden = !pl.menu;
   if (!pl.menu) { put(box, ); return; }
   fillMenu(box);
-  box.prepend(h("button", { class: "pl-menu-x", tabindex: "-1", "aria-label": "Đóng", title: "Đóng", html: ICON.close, onclick: () => toggleMenu(null) }));
+  box.prepend(h("button", { class: "pl-menu-x", tabindex: "-1", "aria-label": tr("common.close"), title: tr("common.close"), html: ICON.close, onclick: () => toggleMenu(null) }));
 }
 
 function loadSources() {
@@ -2005,10 +2017,10 @@ function switchSource(stream, addon) {
 function renderSources(box) {
   const c = pl.ctx;
   box.className = "pl-menu episodes sources";
-  const head = h("h4", {}, "Nguồn phát");
+  const head = h("h4", {}, tr("src.title"));
   const data = pl.sources;
   if (!data || (data.pending && !data.groups?.length)) { put(box, head, h("div", { class: "spinner small" })); return; }
-  if (data.error || !data.groups.length) { put(box, head, h("p", { class: "pl-none" }, data.error || "Không addon nào trả về nguồn cho mục này")); return; }
+  if (data.error || !data.groups.length) { put(box, head, h("p", { class: "pl-none" }, data.error || tr("src.noneShort"))); return; }
   const list = h("div", { class: "pl-eps" });
   for (const g of data.groups) {
     list.append(h("div", { class: "pl-src-group" }, g.addon));
@@ -2018,12 +2030,12 @@ function renderSources(box) {
       const meta = [q.size, q.seeds ? `${q.seeds} seed` : "", s.infoHash ? "Torrent" : ""].filter(Boolean).join(" · ");
       list.append(h("button", { class: `pl-src ${on ? "on" : ""}`, tabindex: "-1", disabled: (s.externalUrl && !s.url && !s.infoHash) || null, onclick: () => switchSource(s, g.addon) },
         h("div", { class: "pl-src-name" }, q.tags.map(([t, solid]) => h("span", { class: `badge ${solid ? "solid" : ""}` }, t)), h("span", {}, (s.name || g.addon).replace(/\n/g, " "))),
-        h("small", {}, on ? `Đang phát${meta ? " · " + meta : ""}` : meta || (s.title || s.description || "").split("\n")[0])));
+        h("small", {}, on ? `${tr("src.playing")}${meta ? " · " + meta : ""}` : meta || (s.title || s.description || "").split("\n")[0])));
     }
   }
   if (data.pending) list.append(h("div", { class: "spinner small" }));
   const keep = box.querySelector(".pl-eps")?.scrollTop;
-  put(box, head, h("p", { class: "pl-note" }, "Đổi nguồn sẽ phát tiếp từ đúng chỗ đang xem."), list);
+  put(box, head, h("p", { class: "pl-note" }, tr("src.switchHint")), list);
   if (keep != null) list.scrollTop = keep;
   else requestAnimationFrame(() => list.querySelector(".pl-src.on")?.scrollIntoView({ block: "center" }));
 }
@@ -2033,18 +2045,18 @@ function fillMenu(box) {
   if (pl.menu === "sources") { if (isTvCtx() && tvState.list.length > 1) renderChannels(box); else renderSources(box); return; }
   if (pl.menu === "fullscreen") {
     box.className = "pl-menu narrow";
-    put(box, h("h4", {}, "Toàn màn hình"),
+    put(box, h("h4", {}, tr("pl.fsTitle")),
       h("p", { class: "pl-note" }, STANDALONE
-        ? "Bạn đang mở WiS TV từ Màn hình chính: chỉ cần xoay ngang điện thoại là phim kín màn hình, phụ đề vẫn theo kiểu bạn đã chỉnh."
-        : "Safari trên iPhone không cho trang web tự vào toàn màn hình. Muốn kín màn hình mà vẫn giữ kiểu phụ đề của bạn: bấm nút Chia sẻ của Safari → Thêm vào MH chính, mở WiS TV từ biểu tượng đó rồi xoay ngang điện thoại."),
-      menuItem("Dùng toàn màn hình của iPhone", false, nativeFullscreen, "phụ đề theo kiểu iPhone"));
+        ? tr("pl.iosStandalone")
+        : tr("pl.iosSafari")),
+      menuItem(tr("pl.iosNative"), false, nativeFullscreen, tr("pl.iosNativeNote")));
     return;
   }
   if (pl.menu === "speed") {
     const cur = pl.s.speed || 1;
     box.className = "pl-menu narrow";
-    put(box, h("h4", {}, "Tốc độ phát"),
-      ...[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map((v) => menuItem(v === 1 ? "Bình thường" : `${v}×`, Math.abs(cur - v) < 0.01, () => { pl.s.speed = v; setProp("speed", v); renderMenu(); paintState(); })));
+    put(box, h("h4", {}, tr("pl.speedTitle")),
+      ...[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map((v) => menuItem(v === 1 ? tr("pl.normal") : `${v}×`, Math.abs(cur - v) < 0.01, () => { pl.s.speed = v; setProp("speed", v); renderMenu(); paintState(); })));
     return;
   }
   box.className = "pl-menu";
@@ -2054,29 +2066,29 @@ function fillMenu(box) {
     const sub = on("sub");
     const audio = on("audio");
     box.className = "pl-menu narrow";
-    put(box, h("div", { class: "pl-col" }, h("h4", {}, "Phụ đề & âm thanh"),
-      h("p", { class: "pl-note" }, `Phụ đề, âm thanh và độ trễ đang theo ${roomHostName()}. Kiểu chữ bên dưới chỉ đổi trên máy bạn.`),
-      h("p", { class: "pl-note" }, `Phụ đề: ${sub ? sub.label || trackLabel(sub) : "Tắt"}${audio ? ` · Âm thanh: ${audio.label || trackLabel(audio)}` : ""}${room.tracks.delay ? ` · Độ trễ ${delayText(room.tracks.delay)}` : ""}`),
+    put(box, h("div", { class: "pl-col" }, h("h4", {}, tr("pl.subsAudio")),
+      h("p", { class: "pl-note" }, tr("room.tracksFollow", { name: roomHostName() })),
+      h("p", { class: "pl-note" }, tr("room.trackSub", { name: sub ? sub.label || trackLabel(sub) : tr("set.subsOff") }) + (audio ? " · " + tr("room.trackAudio", { name: audio.label || trackLabel(audio) }) : "") + (room.tracks.delay ? " · " + tr("room.trackDelay", { v: delayText(room.tracks.delay) }) : "")),
       subStylePanel()));
     return;
   }
   const audio = pl.tracks.filter((t) => t.type === "audio");
   const subs = pl.tracks.filter((t) => t.type === "sub");
   const sid = pl.s.sid;
-  const audioCol = h("div", { class: "pl-col" }, h("h4", {}, "Âm thanh"),
-    audio.length ? audio.map((t) => menuItem(trackLabel(t), t.selected, () => { setProp("aid", t.id); })) : h("p", { class: "pl-none" }, "Chưa có thông tin"));
+  const audioCol = h("div", { class: "pl-col" }, h("h4", {}, tr("trk.audio")),
+    audio.length ? audio.map((t) => menuItem(trackLabel(t), t.selected, () => { setProp("aid", t.id); })) : h("p", { class: "pl-none" }, tr("common.noInfo")));
   pl.ui.delayVal = h("b", {}, delayText(pl.s.subDelay));
-  const subCol = h("div", { class: "pl-col" }, h("h4", {}, "Phụ đề"),
-    menuItem("Tắt", !sid || sid === "no" || sid === "false", () => { rememberSub({ off: true }); pickSub("no"); }),
+  const subCol = h("div", { class: "pl-col" }, h("h4", {}, tr("set.subs")),
+    menuItem(tr("set.subsOff"), !sid || sid === "no" || sid === "false", () => { rememberSub({ off: true }); pickSub("no"); }),
     subs.map((t) => menuItem(trackLabel(t), t.selected, () => { rememberSub(t.external ? { lang: t.lang, url: t.file || undefined } : { lang: t.lang, title: t.title }); pickSub(t.id); })),
-    h("div", { class: "pl-delay" }, h("span", {}, "Độ trễ"),
+    h("div", { class: "pl-delay" }, h("span", {}, tr("sub.delay")),
       h("button", { class: "pl-mini", tabindex: "-1", onclick: () => nudgeDelay(-0.1) }, "−0.1s"),
       pl.ui.delayVal,
       h("button", { class: "pl-mini", tabindex: "-1", onclick: () => nudgeDelay(0.1) }, "+0.1s")),
     subStylePanel());
-  const addonCol = h("div", { class: "pl-col" }, h("h4", {}, "Phụ đề từ addon"));
+  const addonCol = h("div", { class: "pl-col" }, h("h4", {}, tr("sub.fromAddons")));
   if (pl.subs === "loading") addonCol.append(h("div", { class: "spinner small" }));
-  else if (!pl.subs || !pl.subs.length) addonCol.append(h("p", { class: "pl-none" }, "Không addon nào có phụ đề cho mục này"));
+  else if (!pl.subs || !pl.subs.length) addonCol.append(h("p", { class: "pl-none" }, tr("sub.none")));
   else {
     const seen = new Set();
     const list = pl.subs.filter((s) => !seen.has(s.url) && seen.add(s.url)).sort((a, b) => langRank(a.lang) - langRank(b.lang) || String(a.lang).localeCompare(String(b.lang))).slice(0, 60);
@@ -2084,9 +2096,9 @@ function fillMenu(box) {
     addonCol.append(...list.map((s) => {
       const done = pl.added.has(s.url);
       const credit = subCredit(s.url);
-      const creditEl = h("small", { class: "pl-credit", "data-url": s.url, hidden: !credit }, credit ? `Dịch: ${credit}` : "");
+      const creditEl = h("small", { class: "pl-credit", "data-url": s.url, hidden: !credit }, credit ? tr("sub.credit", { name: credit }) : "");
       const file = subFileName(s);
-      return menuItem(langName(s.lang) || "Không rõ", done, () => {
+      return menuItem(langName(s.lang) || tr("common.unknown"), done, () => {
         rememberSub({ lang: s.lang, url: s.url });
         const track = done && pl.tracks.find((t) => t.type === "sub" && t.file === s.url);
         if (track) { pickSub(track.id); return; }
@@ -2122,11 +2134,11 @@ function openPlayer(c) {
     btn.innerHTML = ICON[icon];
     if (TOUCH) btn.append(h("span", { class: "pl-label" }, label));
   };
-  setBtn(ui.src, tv ? "tv" : "source", tv ? "Kênh (S)" : "Nguồn phát (S)", tv ? "Kênh" : "Nguồn");
-  setBtn(ui.next, "next", tv ? "Kênh tiếp (N)" : "Tập tiếp (N)", tv ? "Kênh tiếp" : "Tập tiếp");
+  setBtn(ui.src, tv ? "tv" : "source", tv ? tr("pl.channels") : tr("pl.sources"), tv ? tr("pl.chShort") : tr("pl.src"));
+  setBtn(ui.next, "next", tv ? tr("pl.nextCh") : tr("pl.nextEp"), tv ? tr("pl.nextChShort") : tr("pl.next"));
   const isEp = c.m.type === "series" && c.label;
   ui.title.textContent = c.m.name || "";
-  ui.sub.textContent = isEp ? c.label : isTvCtx(c) ? c.m.group || "Truyền hình" : yearOf(c.m) || "";
+  ui.sub.textContent = isEp ? c.label : isTvCtx(c) ? c.m.group || tr("nav.tv") : yearOf(c.m) || "";
   const bg = bgOf(c.m);
   ui.bg.style.backgroundImage = bg ? `url("${bg}")` : "";
   ui.root.classList.add("loading");
@@ -2150,7 +2162,7 @@ function closePlayer(stop = true) {
         room.asking = false;
         if (!leave) return;
         roomStop(false);
-        toast("Đã rời phòng xem chung");
+        toast(tr("room.left"));
         closePlayer();
       });
     }
@@ -2172,7 +2184,7 @@ function closePlayer(stop = true) {
 }
 
 async function startPlayback(m, vid, label, stream, start, addon) {
-  const ctx = (session) => ({ id: m.id, kind: m.type, name: m.type === "series" && label ? `${m.name} · ${label}` : m.name, poster: m.poster || null, video: vid, start: Math.floor(start || 0), session });
+  const ctx = (session) => ({ id: m.id, kind: m.type, name: m.name, title: m.type === "series" && label ? `${m.name} · ${label}` : m.name, poster: m.poster || null, video: vid, start: Math.floor(start || 0), session });
   if ((stream.externalUrl || (!TAURI && stream.ytId)) && !stream.url && !stream.infoHash) {
     try { await call("play", { stream, ctx: ctx(0) }); closeSheet(); } catch (e) { toast(e, true); }
     return;
@@ -2215,7 +2227,7 @@ const roomGuest = () => inRoom() && !room.host;
 const serverNow = () => Date.now() + room.offset;
 const roomPos = (p) => (p.paused ? p.pos : p.pos + (Math.max(0, serverNow() - p.at) / 1000) * p.rate);
 const roomInvite = () => `${ROOM_SITE}?room=${room.code}`;
-const roomHostName = () => room.members.find((m) => m.host)?.name || "Chủ phòng";
+const roomHostName = () => room.members.find((m) => m.host)?.name || tr("room.host");
 const roomColor = (id) => PROFILE_COLORS[[...String(id)].reduce((a, c) => a + c.charCodeAt(0), 0) % PROFILE_COLORS.length];
 const sameMedia = (c, md) => !!c && !!md && c.m.id === md.id && c.vid === md.vid;
 const canHostRoom = () => !!app.user && pl.open && !!pl.ctx && !String(pl.ctx.vid).startsWith("local:");
@@ -2228,7 +2240,7 @@ function roomSend(msg) {
 
 function roomLocked() {
   if (!roomGuest()) return false;
-  toast(`${roomHostName()} đang điều khiển phát, dừng, tua và chọn tập`);
+  toast(tr("room.locked", { name: roomHostName() }));
   return true;
 }
 
@@ -2289,8 +2301,8 @@ function roomConnect() {
     room.online = false;
     clearInterval(room.pingTimer);
     if (room.leaving || !room.code) return;
-    if (e.code === 4001) { roomStop(false); toast("Phòng xem chung đã được mở ở cửa sổ khác"); return; }
-    if (e.code >= 4400 && e.code < 4500) { const why = room.lastError || "Phòng xem chung đã đóng"; roomStop(false); toast(why, true); return; }
+    if (e.code === 4001) { roomStop(false); toast(tr("room.otherWindow")); return; }
+    if (e.code >= 4400 && e.code < 4500) { const why = room.lastError || tr("room.closed"); roomStop(false); toast(why, true); return; }
     roomRetry();
     paintRoom();
   };
@@ -2298,7 +2310,7 @@ function roomConnect() {
 
 function roomRetry() {
   room.tries++;
-  if (room.tries > 12) { roomStop(false); toast("Mất kết nối phòng xem chung", true); return; }
+  if (room.tries > 12) { roomStop(false); toast(tr("room.lost"), true); return; }
   room.retryTimer = setTimeout(() => { if (room.code && !room.ws) roomConnect(); }, Math.min(15000, 1000 * 2 ** Math.min(room.tries - 1, 4)));
 }
 
@@ -2311,7 +2323,7 @@ function roomMessage(m) {
   }
   if (m.t === "error") { room.lastError = String(m.message || ""); return; }
   if (m.t === "closed") {
-    const why = String(m.message || "Phòng xem chung đã đóng");
+    const why = String(m.message || tr("room.closed"));
     const host = room.host;
     roomStop(false);
     if (!host) toast(why);
@@ -2415,7 +2427,7 @@ function guestTracks() {
       if (t - (room.subTried[w.url] || 0) < 10000) return false;
       room.subTried[w.url] = t;
       pl.added.add(w.url);
-      call("player_command", { args: ["sub-add", w.url, "select", w.title || langName(w.lang) || "Phụ đề", w.lang || ""] }).catch(() => {});
+      call("player_command", { args: ["sub-add", w.url, "select", w.title || langName(w.lang) || tr("set.subs"), w.lang || ""] }).catch(() => {});
       return true;
     }
     const hit = matchTrack(list, w);
@@ -2603,7 +2615,7 @@ async function roomFollowMedia() {
   const m = { id: md.id, type: md.type, name: md.name || "", poster: md.poster, background: md.background };
   if (!hit) {
     paintRoom();
-    toast(`Không tìm được đúng nguồn ${roomHostName()} đang xem, hãy chọn một nguồn`);
+    toast(tr("room.noSource", { name: roomHostName() }));
     openStreams(m, md.vid, md.label);
     return;
   }
@@ -2647,43 +2659,43 @@ function roomDialog({ join, code = "" }) {
   return new Promise((resolve) => {
     const done = (v) => { box.remove(); resolve(v); };
     const box = layer("edit room-dialog", () => done(null));
-    const nameIn = h("input", { class: "pf-input focusable", maxlength: "20", placeholder: "Tên hiện trong phòng", value: roomName(), autocomplete: "off", enterkeyhint: "go" });
-    const codeIn = join ? h("input", { class: "pf-input focusable room-code-in", maxlength: "6", placeholder: "Ví dụ K7P2QD", value: code, autocapitalize: "characters", autocomplete: "off", spellcheck: "false", enterkeyhint: "next" }) : null;
+    const nameIn = h("input", { class: "pf-input focusable", maxlength: "20", placeholder: tr("room.namePh"), value: roomName(), autocomplete: "off", enterkeyhint: "go" });
+    const codeIn = join ? h("input", { class: "pf-input focusable room-code-in", maxlength: "6", placeholder: tr("room.codePh"), value: code, autocapitalize: "characters", autocomplete: "off", spellcheck: "false", enterkeyhint: "next" }) : null;
     const msg = h("p", { class: "pin-msg" });
     const bad = (text, el) => { msg.textContent = text; msg.classList.add("bad"); el.focus(); };
     const submit = () => {
       const name = nameIn.value.trim();
       const c = join ? codeIn.value.trim().toUpperCase() : "";
-      if (join && !ROOM_CODE_RE.test(c)) { bad("Mã phòng gồm 6 chữ và số, ví dụ K7P2QD", codeIn); return; }
-      if (!name) { bad("Nhập tên để mọi người biết bạn là ai", nameIn); return; }
+      if (join && !ROOM_CODE_RE.test(c)) { bad(tr("room.codeBad"), codeIn); return; }
+      if (!name) { bad(tr("room.nameNeeded"), nameIn); return; }
       setPref("roomName", name);
       done({ name, code: c });
     };
     for (const el of [nameIn, codeIn].filter(Boolean)) el.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } });
     codeIn?.addEventListener("input", () => { codeIn.value = codeIn.value.toUpperCase(); });
     put(box, h("div", { class: "pf-card" },
-      h("h2", {}, join ? "Vào phòng xem chung" : "Tạo phòng xem chung"),
+      h("h2", {}, join ? tr("room.joinTitle") : tr("room.createTitle")),
       h("p", { class: "hint" }, join
-        ? "Nhập mã phòng bạn được gửi. Chủ phòng điều khiển phát, dừng, tua, chọn tập, nguồn phim và phụ đề; kiểu chữ phụ đề và âm lượng bạn tự chỉnh."
-        : "Bạn bè ở máy khác xem cùng lúc với bạn. Chỉ bạn điều khiển phát, dừng, tua và chọn tập; mọi người dùng đúng nguồn phim, phụ đề và âm thanh bạn đang chọn."),
-      join ? null : h("p", { class: "hint" }, "Lưu ý: link nguồn phim và phụ đề được gửi cho mọi người trong phòng. Link từ Real-Debrid hay dịch vụ tương tự có chứa khoá tài khoản của bạn, nên chỉ mời người bạn tin."),
-      join ? [h("label", { class: "pf-label" }, "Mã phòng"), codeIn] : null,
-      h("label", { class: "pf-label" }, "Tên của bạn"), nameIn, msg,
+        ? tr("room.joinHint")
+        : tr("room.createHint")),
+      join ? null : h("p", { class: "hint" }, tr("room.debridWarn")),
+      join ? [h("label", { class: "pf-label" }, tr("room.code")), codeIn] : null,
+      h("label", { class: "pf-label" }, tr("room.yourName")), nameIn, msg,
       h("div", { class: "pf-row end" },
-        h("button", { class: "btn focusable", onclick: () => done(null) }, "Huỷ"),
-        h("button", { class: "btn primary focusable", onclick: submit }, join ? "Vào phòng" : "Tạo phòng"))));
+        h("button", { class: "btn focusable", onclick: () => done(null) }, tr("common.cancel")),
+        h("button", { class: "btn primary focusable", onclick: submit }, join ? tr("room.join") : tr("room.create")))));
     const first = TOUCH ? $(".btn.primary", box) : join && !code ? codeIn : !nameIn.value ? nameIn : $(".btn.primary", box);
     first.focus({ preventScroll: true });
   });
 }
 
 async function createRoom() {
-  if (!canHostRoom()) { toast(app.user ? "Mở một phim rồi mới tạo phòng xem chung" : "Đăng nhập tài khoản Stremio để tạo phòng xem chung", true); return; }
+  if (!canHostRoom()) { toast(app.user ? tr("room.needVideo") : tr("room.needLogin"), true); return; }
   const r = await roomDialog({ join: false });
   if (!r) return;
   let made;
   try { made = await call("room_create"); } catch (e) { toast(e, true); return; }
-  if (!made?.code || !made?.hostKey) { toast("Máy chủ xem chung trả về dữ liệu lạ", true); return; }
+  if (!made?.code || !made?.hostKey) { toast(tr("room.badReply"), true); return; }
   if (inRoom()) roomStop(room.host);
   room.hostPos = curTime();
   roomStart({ code: made.code, key: made.hostKey, name: r.name });
@@ -2696,7 +2708,7 @@ async function joinRoom(code) {
   if (inRoom() && room.code === r.code) { roomPanel(); return; }
   if (inRoom()) roomStop(room.host);
   roomStart({ code: r.code, key: null, name: r.name });
-  toast(`Đang vào phòng ${r.code}…`);
+  toast(tr("room.joining", { code: r.code }));
 }
 
 function roomMenu() {
@@ -2705,12 +2717,12 @@ function roomMenu() {
   const box = layer("edit", done);
   const host = canHostRoom();
   put(box, h("div", { class: "pf-card" },
-    h("h2", {}, "Xem chung"),
-    h("p", { class: "hint" }, "Xem cùng lúc với bạn bè ở máy khác. Mỗi máy tự tải phim, chỉ chủ phòng điều khiển phát, dừng, tua và chọn tập."),
-    app.user ? null : h("p", { class: "hint" }, "Đăng nhập tài khoản Stremio để tạo phòng. Không cần tài khoản vẫn vào được phòng của người khác."),
+    h("h2", {}, tr("tg.title")),
+    h("p", { class: "hint" }, tr("room.menuHint")),
+    app.user ? null : h("p", { class: "hint" }, tr("room.menuLogin")),
     h("div", { class: "pf-row end" },
-      h("button", { class: "btn focusable", onclick: () => { done(); joinRoom(""); } }, "Vào phòng bằng mã"),
-      host ? h("button", { class: "btn primary focusable", onclick: () => { done(); createRoom(); } }, "Tạo phòng cho phim này") : null)));
+      h("button", { class: "btn focusable", onclick: () => { done(); joinRoom(""); } }, tr("tg.joinByCode")),
+      host ? h("button", { class: "btn primary focusable", onclick: () => { done(); createRoom(); } }, tr("room.createForThis")) : null)));
   ($(".btn.primary", box) || $(".btn", box))?.focus({ preventScroll: true });
 }
 
@@ -2719,29 +2731,29 @@ function roomLeavePrompt() {
     const done = (v) => { box.remove(); resolve(v); };
     const box = layer("edit", () => done(false));
     put(box, h("div", { class: "pf-card" },
-      h("h2", {}, "Rời phòng xem chung?"),
-      h("p", { class: "hint" }, `Bạn đang xem cùng ${roomHostName()}. Thoát trình phát là rời phòng, muốn quay lại thì nhập lại mã ${room.code}.`),
+      h("h2", {}, tr("room.leaveAsk")),
+      h("p", { class: "hint" }, tr("room.leaveHint", { name: roomHostName(), code: room.code })),
       h("div", { class: "pf-row end" },
-        h("button", { class: "btn danger focusable", onclick: () => done(true) }, "Rời phòng"),
-        h("button", { class: "btn primary focusable", onclick: () => done(false) }, "Ở lại"))));
+        h("button", { class: "btn danger focusable", onclick: () => done(true) }, tr("room.leave")),
+        h("button", { class: "btn primary focusable", onclick: () => done(false) }, tr("room.stay")))));
     $(".btn.primary", box).focus({ preventScroll: true });
   });
 }
 
 async function roomCopy() {
   const link = roomInvite();
-  try { await navigator.clipboard.writeText(link); toast("Đã sao chép link mời"); }
-  catch (e) { toast(`Link mời: ${link}`); }
+  try { await navigator.clipboard.writeText(link); toast(tr("room.copied")); }
+  catch (e) { toast(tr("room.inviteLink", { link })); }
 }
 
 function roomStatusText() {
-  if (!room.online) return room.tries ? "Mất kết nối, đang thử lại…" : "Đang kết nối…";
-  if (room.host) return room.hold ? `Đang chờ ${room.hold.names.join(", ")} tải phim…` : "Bạn là chủ phòng. Mọi người phát, dừng, tua và chuyển tập theo bạn.";
-  if (!room.hostOnline) return "Chủ phòng đang mất kết nối, chờ họ quay lại…";
-  if (!room.media) return `Đang chờ ${roomHostName()} chọn phim…`;
-  if (room.joining) return "Đang tìm nguồn giống chủ phòng…";
+  if (!room.online) return room.tries ? tr("room.retrying") : tr("room.connectingShort");
+  if (room.host) return room.hold ? tr("room.waitingFor", { names: room.hold.names.join(", ") }) : tr("room.youHost");
+  if (!room.hostOnline) return tr("room.hostLost");
+  if (!room.media) return tr("room.waitPick", { name: roomHostName() });
+  if (room.joining) return tr("room.finding");
   const what = [room.media.name, room.media.label].filter(Boolean).join(" · ");
-  return `${roomHostName()} đang điều khiển${what ? ` · ${what}` : ""}`;
+  return tr("room.controlling", { name: roomHostName() }) + (what ? ` · ${what}` : "");
 }
 
 function paintPart(el, sig, build) {
@@ -2755,25 +2767,25 @@ function paintRoomPanel() {
   if (!box || !inRoom()) return;
   const p = box._parts;
   paintPart(p.head, room.code, () => [
-    h("div", {}, h("small", {}, "Mã phòng"), h("b", { class: "room-code" }, room.code)),
+    h("div", {}, h("small", {}, tr("room.code")), h("b", { class: "room-code" }, room.code)),
     h("div", { class: "room-share" },
-      h("button", { class: "btn focusable room-copy", onclick: roomCopy }, "Sao chép link mời"),
-      navigator.share ? h("button", { class: "btn focusable", onclick: () => navigator.share({ title: "Xem chung trên WiS TV", text: `Vào xem cùng mình, mã phòng ${room.code}`, url: roomInvite() }).catch(() => {}) }, "Chia sẻ") : null),
+      h("button", { class: "btn focusable room-copy", onclick: roomCopy }, tr("room.copy")),
+      navigator.share ? h("button", { class: "btn focusable", onclick: () => navigator.share({ title: tr("room.shareTitle"), text: tr("room.shareText", { code: room.code }), url: roomInvite() }).catch(() => {}) }, tr("common.share")) : null),
   ]);
   const status = roomStatusText();
-  paintPart(p.status, `${status}|${!!room.hold}`, () => [h("span", {}, status), room.hold ? h("button", { class: "btn focusable", onclick: () => roomSkipHold(true) }, "Phát luôn, không chờ") : null]);
+  paintPart(p.status, `${status}|${!!room.hold}`, () => [h("span", {}, status), room.hold ? h("button", { class: "btn focusable", onclick: () => roomSkipHold(true) }, tr("room.skipWait")) : null]);
   paintPart(p.people, JSON.stringify(room.members), () => room.members.map((m) => h("span", { class: `room-person ${m.waiting ? "wait" : ""}` },
     h("i", { class: "pf-face", style: `background:${roomColor(m.id)}` }, firstLetter(m.name)), m.name,
-    m.host ? h("em", {}, "chủ phòng") : null, m.id === room.me ? h("em", {}, "bạn") : null, m.waiting ? h("em", { class: "busy" }, "đang tải") : null)));
+    m.host ? h("em", {}, tr("room.hostTag")) : null, m.id === room.me ? h("em", {}, tr("room.you")) : null, m.waiting ? h("em", { class: "busy" }, tr("src.loading")) : null)));
   const last = room.chat[room.chat.length - 1];
   paintPart(p.log, `${room.chat.length}|${last?.at || 0}`, () => room.chat.length
     ? room.chat.map((m) => h("p", { class: m.id === room.me ? "me" : "" }, h("b", {}, m.from), m.text))
-    : h("p", { class: "hint" }, "Chưa có tin nhắn. Gửi lời chào cả phòng nhé."));
+    : h("p", { class: "hint" }, tr("room.noChat")));
   p.log.scrollTop = p.log.scrollHeight;
   const rejoin = !room.host && !!room.media && !pl.open && !room.joining;
   paintPart(p.foot, `${room.host}|${rejoin}`, () => [
-    h("button", { class: "btn danger focusable", onclick: () => { const host = room.host; roomStop(host); toast(host ? "Đã đóng phòng xem chung" : "Đã rời phòng xem chung"); } }, room.host ? "Đóng phòng" : "Rời phòng"),
-    rejoin ? h("button", { class: "btn primary focusable", onclick: () => { box._close(); roomFollowMedia(); } }, "Xem cùng phòng") : null,
+    h("button", { class: "btn danger focusable", onclick: () => { const host = room.host; roomStop(host); toast(host ? tr("room.closedByYou") : tr("room.left")); } }, room.host ? tr("room.close") : tr("room.leave")),
+    rejoin ? h("button", { class: "btn primary focusable", onclick: () => { box._close(); roomFollowMedia(); } }, tr("room.watchWith")) : null,
   ]);
 }
 
@@ -2785,24 +2797,24 @@ function roomPanel() {
   box._close = close;
   room.panel = box;
   room.unread = 0;
-  const input = h("input", { class: "pf-input room-input focusable", maxlength: "300", placeholder: "Nhắn cho cả phòng…", enterkeyhint: "send", autocomplete: "off" });
+  const input = h("input", { class: "pf-input room-input focusable", maxlength: "300", placeholder: tr("room.chatPh"), enterkeyhint: "send", autocomplete: "off" });
   const send = () => {
     const text = input.value.trim();
     if (!text) return;
     if (roomSend({ t: "chat", text })) input.value = "";
-    else toast("Đang kết nối lại phòng…", true);
+    else toast(tr("room.reconnecting"), true);
   };
   input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); send(); } });
   box.addEventListener("click", (e) => { if (e.target === box) close(); });
   const parts = { head: h("div", { class: "room-head" }), status: h("div", { class: "room-status" }), people: h("div", { class: "room-people" }), log: h("div", { class: "room-log" }), foot: h("div", { class: "pf-row room-foot" }) };
   box._parts = parts;
   put(box, h("div", { class: "room-card" },
-    h("button", { class: "pl-menu-x focusable", "aria-label": "Đóng", html: ICON.close, onclick: close }),
-    h("div", { class: "room-col" }, h("h2", {}, "Xem chung"), parts.head, parts.status, parts.people),
+    h("button", { class: "pl-menu-x focusable", "aria-label": tr("common.close"), html: ICON.close, onclick: close }),
+    h("div", { class: "room-col" }, h("h2", {}, tr("tg.title")), parts.head, parts.status, parts.people),
     h("div", { class: "room-col talk" },
-      h("div", { class: "room-reacts" }, ROOM_REACTIONS.map((e) => h("button", { class: "room-react-btn focusable", "aria-label": `Thả ${e}`, onclick: () => roomSend({ t: "react", e }) }, e))),
+      h("div", { class: "room-reacts" }, ROOM_REACTIONS.map((e) => h("button", { class: "room-react-btn focusable", "aria-label": tr("room.react", { e }), onclick: () => roomSend({ t: "react", e }) }, e))),
       parts.log,
-      h("div", { class: "room-send" }, input, h("button", { class: "btn primary focusable", onclick: send }, "Gửi")),
+      h("div", { class: "room-send" }, input, h("button", { class: "btn primary focusable", onclick: send }, tr("common.send"))),
       parts.foot)));
   paintRoom();
   (TOUCH ? $(".room-copy", box) : input)?.focus({ preventScroll: true });
@@ -2817,11 +2829,11 @@ function paintRoom() {
   pill.hidden = !inRoom() || !!room.panel;
   if (inRoom()) {
     const n = room.members.length || 1;
-    const text = !room.online ? "Đang kết nối phòng…"
-      : room.host ? `Phòng ${room.code} · ${n} người`
-      : !room.media ? `Phòng ${room.code} · chờ chủ phòng chọn phim`
-      : room.joining ? "Đang mở phim của phòng…"
-      : `Phòng ${room.code} · bấm để xem cùng`;
+    const text = !room.online ? tr("tg.connecting")
+      : room.host ? tr("room.badgeHost", { code: room.code, n })
+      : !room.media ? tr("room.badgeWait", { code: room.code })
+      : room.joining ? tr("room.opening")
+      : tr("room.badgeJoin", { code: room.code });
     put(pill, h("span", { class: "room-dot", html: ICON.people }), h("span", {}, text), room.unread ? h("b", {}, String(room.unread)) : null);
   }
   paintRoomPanel();
@@ -2901,7 +2913,7 @@ async function renderLibrary(view) {
   const items = libItems()
     .sort((a, b) => String(b._mtime || "").localeCompare(String(a._mtime || "")))
     .map((i) => ({ id: i._id, type: i.type, name: i.name, poster: i.poster }));
-  renderGridPage(view, "Thư viện", items, app.user ? "Thư viện trống. Bấm “Thư viện” ở trang phim để thêm." : "Đăng nhập tài khoản Stremio để dùng Thư viện.");
+  renderGridPage(view, tr("nav.library"), items, app.user ? tr("lib.empty") : tr("lib.login"));
 }
 
 const WIDE = window.matchMedia("(min-width: 1100px)");
@@ -2954,7 +2966,7 @@ async function playChannel(m, { fromPlayer = false, tile = null } = {}) {
     document.body.classList.remove("see-through", "ext-video");
     pl.s = { ...pl.s, loaded: false };
     pl.ui.title.textContent = m.name;
-    pl.ui.sub.textContent = m.group || "Truyền hình";
+    pl.ui.sub.textContent = m.group || tr("nav.tv");
     paintState();
   }
   tile?.classList.add("busy");
@@ -2978,13 +2990,13 @@ function renderChannels(box) {
   const list = h("div", { class: "pl-eps" });
   let group = null;
   for (const m of tvState.list) {
-    const g = m.group || "Khác";
+    const g = m.group || tr("tv.other");
     if (g !== group) { group = g; list.append(h("div", { class: "pl-src-group" }, g)); }
     const on = m.id === c.m.id;
     const logo = h("span", { class: "pl-ch-logo" });
     logo.append(image(m.logo || m.poster, m.name, () => logo.append(h("b", {}, String(m.name || "?").slice(0, 2).toUpperCase()))));
     list.append(h("button", { class: `pl-src pl-ch ${on ? "on" : ""}`, tabindex: "-1", onclick: () => { if (on) toggleMenu(null); else playChannel(m, { fromPlayer: true }); } },
-      logo, h("div", {}, h("b", {}, m.name), h("small", {}, on ? "Đang xem" : g))));
+      logo, h("div", {}, h("b", {}, m.name), h("small", {}, on ? tr("ep.watching") : g))));
     const data = pl.sources;
     if (on && data?.vid === c.vid && data.groups) {
       const alts = data.groups.flatMap((gr) => gr.streams.map((st) => ({ st, addon: gr.addon })));
@@ -2997,7 +3009,7 @@ function renderChannels(box) {
     }
   }
   const keep = box.querySelector(".pl-eps")?.scrollTop;
-  put(box, h("h4", {}, "Kênh truyền hình"), list);
+  put(box, h("h4", {}, tr("tv.channels")), list);
   if (keep != null) list.scrollTop = keep;
   else requestAnimationFrame(() => list.querySelector(".pl-ch.on")?.scrollIntoView({ block: "center" }));
 }
@@ -3007,7 +3019,7 @@ function tvTile(m, list) {
   const initials = h("span", { class: "tv-initials" }, String(m.name || "?").replace(/[^\p{L}\p{N} ]/gu, "").trim().slice(0, 4).toUpperCase() || "TV");
   art.append(image(m.logo || m.poster, m.name, () => art.append(initials)));
   const el = h("button", { class: "tv-tile focusable", title: m.name },
-    art, h("span", { class: "tv-live" }, h("i"), "Trực tiếp"),
+    art, h("span", { class: "tv-live" }, h("i"), tr("tv.live")),
     h("span", { class: "tv-name" }, m.name),
     m.group ? h("span", { class: "tv-group" }, m.group) : null);
   el.addEventListener("click", () => { tvState.list = list || [m]; playChannel(m, { tile: el }); });
@@ -3020,20 +3032,20 @@ function renderTv(view, params = {}) {
   view.append(page);
   const sources = tvCatalogs();
   const head = h("div", { class: "tv-head" },
-    h("div", {}, h("h1", { class: "tv-title" }, "Truyền hình"), h("p", { class: "tv-sub" }, "Kênh từ danh sách IPTV bạn đã nhập trong addon")));
+    h("div", {}, h("h1", { class: "tv-title" }, tr("nav.tv")), h("p", { class: "tv-sub" }, tr("tv.sub"))));
   page.append(head);
   if (!sources.length) {
     page.append(h("div", { class: "tv-empty" },
       h("div", { class: "tv-empty-icon", html: ICON.tv }),
-      h("h2", {}, "Chưa có kênh nào"),
-      h("p", {}, "Mở Addon, bấm Cấu hình ở addon WiSFilm rồi dán link danh sách M3U vào ô \u201cLink danh sách IPTV\u201d. Cài lại addon xong, kênh sẽ hiện ở đây."),
-      h("button", { class: "btn primary focusable", onclick: () => go("addons") }, "Mở Addon")));
+      h("h2", {}, tr("tv.empty")),
+      h("p", {}, tr("tv.emptyHint")),
+      h("button", { class: "btn primary focusable", onclick: () => go("addons") }, tr("tv.openAddons"))));
     return;
   }
 
   const saved = pref("tv", {}) || {};
   const state = { group: params.group ?? saved.group ?? "", q: "" };
-  const search = h("input", { class: "tv-search focusable", type: "search", placeholder: "Tìm kênh", "aria-label": "Tìm kênh", autocomplete: "off", spellcheck: "false" });
+  const search = h("input", { class: "tv-search focusable", type: "search", placeholder: tr("tv.search"), "aria-label": tr("tv.search"), autocomplete: "off", spellcheck: "false" });
   head.append(search);
   const pills = h("div", { class: "tv-groups" });
   const body = h("div", { class: "tv-body" }, h("div", { class: "spinner", style: "margin:80px auto" }));
@@ -3041,23 +3053,23 @@ function renderTv(view, params = {}) {
 
   let channels = [];
   const fold = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/gi, "d").toLowerCase();
-  const groups = () => [...new Set(channels.map((m) => m.group || "Khác"))];
+  const groups = () => [...new Set(channels.map((m) => m.group || tr("tv.other")))];
   const draw = () => {
     const gs = groups();
     if (state.group && !gs.includes(state.group)) state.group = "";
     put(pills, ...["", ...gs].map((g) => h("button", {
       class: `pill focusable ${g === state.group ? "on" : ""}`,
       onclick: () => { state.group = g; setPref("tv", { group: g }); draw(); },
-    }, g || "Tất cả", h("small", {}, String(g ? channels.filter((m) => (m.group || "Khác") === g).length : channels.length)))));
+    }, g || tr("common.all"), h("small", {}, String(g ? channels.filter((m) => (m.group || tr("tv.other")) === g).length : channels.length)))));
     const q = fold(state.q.trim());
-    const list = channels.filter((m) => (!state.group || (m.group || "Khác") === state.group) && (!q || fold(m.name).includes(q)));
-    if (!list.length) { put(body, h("div", { class: "empty" }, q ? "Không có kênh nào khớp." : "Danh sách này chưa có kênh.")); return; }
+    const list = channels.filter((m) => (!state.group || (m.group || tr("tv.other")) === state.group) && (!q || fold(m.name).includes(q)));
+    if (!list.length) { put(body, h("div", { class: "empty" }, q ? tr("tv.noMatch") : tr("tv.noneInList"))); return; }
     if (state.group || q) { put(body, h("div", { class: "tv-grid" }, ...list.map((m) => tvTile(m, list)))); return; }
-    const order = gs.flatMap((g) => list.filter((m) => (m.group || "Khác") === g));
+    const order = gs.flatMap((g) => list.filter((m) => (m.group || tr("tv.other")) === g));
     put(body, ...gs.map((g) => {
-      const inG = order.filter((m) => (m.group || "Khác") === g);
+      const inG = order.filter((m) => (m.group || tr("tv.other")) === g);
       return inG.length ? h("section", { class: "tv-section" },
-        h("div", { class: "tv-section-head" }, h("h2", {}, g), h("span", {}, `${inG.length} kênh`)),
+        h("div", { class: "tv-section-head" }, h("h2", {}, g), h("span", {}, tr("tv.count", { n: inG.length }))),
         h("div", { class: "tv-grid" }, ...inG.map((m) => tvTile(m, order)))) : null;
     }).filter(Boolean));
   };
@@ -3068,7 +3080,7 @@ function renderTv(view, params = {}) {
     if (!view.contains(page)) return;
     const seen = new Set();
     channels = lists.flat().filter((m) => (seen.has(m.id) ? false : seen.add(m.id)));
-    if (!channels.length) { put(body, h("div", { class: "empty" }, "Không tải được danh sách kênh. Kiểm tra lại link M3U trong cấu hình addon.")); put(pills, ); return; }
+    if (!channels.length) { put(body, h("div", { class: "empty" }, tr("tv.loadFail"))); put(pills, ); return; }
     draw();
   })();
 }
@@ -3095,7 +3107,7 @@ function renderDiscover(view, params = {}) {
   const page = h("div", { class: "page plain discover" });
   view.append(page);
   const all = discoverCatalogs();
-  if (!all.length) { page.append(h("div", { class: "empty" }, "Chưa có addon nào có danh mục để khám phá.")); return; }
+  if (!all.length) { page.append(h("div", { class: "empty" }, tr("dm.empty"))); return; }
 
   let saved = {};
   saved = pref("discover", {}) || {};
@@ -3110,9 +3122,9 @@ function renderDiscover(view, params = {}) {
   };
 
   const select = (label) => h("select", { class: "dc-select focusable", "aria-label": label });
-  const selType = select("Loại");
-  const selCat = select("Danh mục");
-  const selGenre = select("Thể loại");
+  const selType = select(tr("dm.type"));
+  const selCat = select(tr("dm.catalog"));
+  const selGenre = select(tr("dm.genre"));
   const grid = h("div", { class: "grid dc-grid" });
   const more = h("div", { class: "dc-more" });
   const panel = h("aside", { class: "dc-panel" });
@@ -3129,7 +3141,7 @@ function renderDiscover(view, params = {}) {
     put(selCat, ...cats.map((c) => option(c.key, `${c.cat.name || c.cat.id} · ${c.addon.manifest.name}`, c.key === state.key)));
     cur = cats.find((c) => c.key === state.key);
     if (!cur.genres.includes(state.genre)) state.genre = cur.genreRequired ? cur.genres[0] : "";
-    put(selGenre, ...(cur.genreRequired ? [] : [option("", "Mọi thể loại", !state.genre)]), ...cur.genres.map((g) => option(g, g, g === state.genre)));
+    put(selGenre, ...(cur.genreRequired ? [] : [option("", tr("dm.allGenres"), !state.genre)]), ...cur.genres.map((g) => option(g, g, g === state.genre)));
     selGenre.hidden = !cur.genres.length;
     setPref("discover", { ...state });
   };
@@ -3160,7 +3172,7 @@ function renderDiscover(view, params = {}) {
       if (!items.length) put(grid, );
       items.push(...fresh);
       grid.append(...fresh.map(discoverCard));
-      if (!items.length) put(grid, h("div", { class: "empty" }, "Danh mục này chưa có gì."));
+      if (!items.length) put(grid, h("div", { class: "empty" }, tr("disc.emptyCat")));
       else if (!picked && WIDE.matches) pick(items[0], grid.firstElementChild, false);
     } catch (e) {
       if (my !== token) return;
@@ -3218,11 +3230,11 @@ function renderDiscover(view, params = {}) {
   }
 
   function paintPanel(m) {
-    const libBtn = h("button", { class: "btn focusable dc-icon", title: "Thư viện" });
+    const libBtn = h("button", { class: "btn focusable dc-icon", title: tr("nav.library") });
     const sync = () => {
       const on = inLibrary(m.id);
       libBtn.innerHTML = on ? ICON.check : ICON.plus;
-      libBtn.title = on ? "Bỏ khỏi Thư viện" : "Thêm vào Thư viện";
+      libBtn.title = on ? tr("disc.unlib") : tr("disc.lib");
     };
     sync();
     libBtn.addEventListener("click", async () => {
@@ -3230,7 +3242,7 @@ function renderDiscover(view, params = {}) {
         const now = await call("library_toggle", { meta: { id: m.id, name: m.name, type: m.type, poster: m.poster } });
         await refreshLibrary();
         sync();
-        toast(now ? "Đã thêm vào Thư viện" : "Đã xóa khỏi Thư viện");
+        toast(now ? tr("det.added") : tr("det.removed"));
       } catch (e) { toast(e, true); }
     });
     const facts = [m.runtime, yearOf(m), m.imdbRating ? `IMDb ${m.imdbRating}` : ""].filter(Boolean);
@@ -3238,14 +3250,14 @@ function renderDiscover(view, params = {}) {
       titleBlock(m, "dc-title"),
       facts.length ? h("div", { class: "dc-facts" }, facts.map((f) => h("span", { class: f.startsWith("IMDb") ? "imdb" : "" }, f))) : null,
       m.description ? h("p", { class: "dc-desc" }, m.description) : null,
-      chips("Thể loại", m.genres || m.genre),
-      chips("Diễn viên", m.cast),
-      chips("Đạo diễn", m.director),
-      chips("Biên kịch", m.writer),
+      chips(tr("dm.genre"), m.genres || m.genre),
+      chips(tr("det.cast"), m.cast),
+      chips(tr("det.director"), m.director),
+      chips(tr("det.writer"), m.writer),
       h("div", { class: "dc-actions" },
         libBtn,
-        h("button", { class: "btn focusable", html: `${ICON.info}<span>Chi tiết</span>`, onclick: () => go("detail", { kind: m.type, id: m.id }) }),
-        h("button", { class: "btn primary focusable", html: `${ICON.play}<span>Xem</span>`, onclick: () => go("detail", { kind: m.type, id: m.id, autoplay: true }) })));
+        h("button", { class: "btn focusable", html: `${ICON.info}<span>${tr("det.details")}</span>`, onclick: () => go("detail", { kind: m.type, id: m.id }) }),
+        h("button", { class: "btn primary focusable", html: `${ICON.play}<span>${tr("det.play")}</span>`, onclick: () => go("detail", { kind: m.type, id: m.id, autoplay: true }) })));
     showArt(m);
   }
 
@@ -3280,7 +3292,7 @@ function rememberSearch(term) {
 
 function renderSearch(view, { q = "" } = {}) {
   document.body.classList.add("dim");
-  const input = h("input", { placeholder: "Phim, phim bộ, diễn viên…", value: q, spellcheck: "false" });
+  const input = h("input", { placeholder: tr("search.ph"), value: q, spellcheck: "false" });
   const results = h("div");
   view.append(h("div", { class: "page plain" }, h("div", { class: "search-box", html: ICON.search }, input), results));
   input.focus();
@@ -3291,7 +3303,7 @@ function renderSearch(view, { q = "" } = {}) {
     if (app.stack.length) app.stack[app.stack.length - 1].params = { q: term };
     if (term.length < 2) { showHistory(); return; }
     const cats = catalogsOf(null, { search: true });
-    if (!cats.length) { put(results, h("div", { class: "empty" }, "Không addon nào hỗ trợ tìm kiếm.")); return; }
+    if (!cats.length) { put(results, h("div", { class: "empty" }, tr("search.noAddon"))); return; }
     put(results, ...cats.map(({ addon, cat }) =>
       shelf(`${typeLabel(cat.type) || cat.type}`, `${cat.name || cat.id} · ${addon.manifest.name}`, "poster",
         async () => (mine === token ? call("catalog", { url: addon.transportUrl, kind: cat.type, id: cat.id, extra: [["search", term]] }) : []),
@@ -3299,14 +3311,14 @@ function renderSearch(view, { q = "" } = {}) {
   };
   const showHistory = () => {
     const list = searchHistory();
-    if (!list.length) { put(results, h("div", { class: "empty" }, "Nhập ít nhất 2 ký tự để tìm.")); return; }
+    if (!list.length) { put(results, h("div", { class: "empty" }, tr("search.min"))); return; }
     const pick = (t) => { input.value = t; clearTimeout(timer); rememberSearch(t); run(); };
     const drop = (t) => { saveSearches(searchHistory().filter((x) => x !== t)); showHistory(); };
     put(results, h("div", { class: "search-history" },
-      h("div", { class: "sh-head" }, h("h3", {}, "Tìm kiếm gần đây"), h("button", { class: "link focusable", onclick: () => { saveSearches([]); showHistory(); } }, "Xoá hết")),
+      h("div", { class: "sh-head" }, h("h3", {}, tr("search.recent")), h("button", { class: "link focusable", onclick: () => { saveSearches([]); showHistory(); } }, tr("search.clear"))),
       ...list.map((t) => h("div", { class: "sh-row" },
         h("button", { class: "sh-term focusable", onclick: () => pick(t) }, h("span", { html: ICON.search }), h("span", {}, t)),
-        h("button", { class: "sh-x focusable", title: "Xoá", "aria-label": `Xoá ${t}`, html: ICON.close, onclick: () => drop(t) })))));
+        h("button", { class: "sh-x focusable", title: tr("common.delete"), "aria-label": tr("search.remove", { q: t }), html: ICON.close, onclick: () => drop(t) })))));
   };
   input.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(run, 450); });
   input.addEventListener("keydown", (e) => { if (e.key === "Enter") { clearTimeout(timer); rememberSearch(input.value); run(); } });
@@ -3575,6 +3587,11 @@ function calEpisode(x, cls = "cal-ep") {
   return el;
 }
 
+function monthTitle(year, month) {
+  const s = formatDate(new Date(year, month, 1), { month: "long", year: "numeric" });
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
 async function renderCalendar(view, params) {
   document.body.classList.add("dim");
   const now = new Date();
@@ -3582,22 +3599,22 @@ async function renderCalendar(view, params) {
   const month = params.mo ?? now.getMonth();
   const shift = (d) => { const t = new Date(year, month + d, 1); go("calendar", { y: t.getFullYear(), mo: t.getMonth() }); };
   const head = h("div", { class: "cal-head" },
-    h("h1", {}, `Tháng ${month + 1}, ${year}`),
+    h("h1", {}, monthTitle(year, month)),
     h("div", { class: "cal-nav" },
-      h("button", { class: "pill focusable", html: ICON.left, "aria-label": "Tháng trước", onclick: () => shift(-1) }),
-      h("button", { class: "pill focusable", onclick: () => go("calendar", {}) }, "Hôm nay"),
-      h("button", { class: "pill focusable", html: ICON.right, "aria-label": "Tháng sau", onclick: () => shift(1) })));
+      h("button", { class: "pill focusable", html: ICON.left, "aria-label": tr("cal.prev"), onclick: () => shift(-1) }),
+      h("button", { class: "pill focusable", onclick: () => go("calendar", {}) }, tr("cal.today")),
+      h("button", { class: "pill focusable", html: ICON.right, "aria-label": tr("cal.next"), onclick: () => shift(1) })));
   const body = h("div", {}, h("div", { class: "spinner" }));
   const page = h("div", { class: "page plain cal" }, head, body);
   view.append(page);
   $(".cal-nav .pill:nth-child(2)", page)?.focus({ preventScroll: true });
-  if (!app.user) { put(body, h("div", { class: "empty" }, "Đăng nhập tài khoản Stremio để xem lịch các phim bộ trong Thư viện.")); return; }
+  if (!app.user) { put(body, h("div", { class: "empty" }, tr("cal.login"))); return; }
   await refreshLibrary();
   const status = h("p", { class: "hint", style: "text-align:center" });
   put(body, h("div", { class: "spinner" }), status);
-  const metas = await seriesMetas((d, n) => { status.textContent = `Đang đọc lịch phát ${d}/${n} phim bộ…`; });
+  const metas = await seriesMetas((d, n) => { status.textContent = tr("cal.reading", { d, n }); });
   if (!view.contains(page)) return;
-  if (!metas.length) { put(body, h("div", { class: "empty" }, "Thư viện chưa có phim bộ nào. Thêm phim bộ vào Thư viện để theo dõi lịch phát.")); return; }
+  if (!metas.length) { put(body, h("div", { class: "empty" }, tr("cal.empty"))); return; }
   const eps = metas.flatMap((m) => (m.videos || [])
     .filter((v) => v.released && (v.season ?? 0) > 0)
     .map((v) => ({ m, v, d: new Date(v.released) })))
@@ -3621,7 +3638,7 @@ async function renderCalendar(view, params) {
     cells.push(h("div", { class: `cal-cell ${today ? "today" : ""} ${list.length ? "has" : ""}` },
       h("div", { class: "cal-day" }, d),
       list.slice(0, 3).map((x) => calEpisode(x)),
-      list.length > 3 ? h("div", { class: "cal-more" }, `+${list.length - 3} tập`) : null));
+      list.length > 3 ? h("div", { class: "cal-more" }, tr("cal.more", { n: list.length - 3 })) : null));
   }
   while (cells.length % 7) cells.push(h("div", { class: "cal-cell blank" }));
   const grid = h("div", { class: "cal-grid" }, WEEKDAYS.map((w) => h("div", { class: "cal-wd" }, w)), cells);
@@ -3630,17 +3647,17 @@ async function renderCalendar(view, params) {
   const recent = eps.filter((x) => x.d < start && start - x.d <= 14 * 86400000).reverse().slice(0, 24);
   const listOf = (title, items) => items.length ? h("section", { class: "cal-list" }, h("h2", { class: "shelf-title" }, title),
     items.map((x) => h("div", { class: "cal-row" }, h("span", { class: "cal-date" }, formatDate(x.d, { weekday: "short", day: "2-digit", month: "2-digit" })), calEpisode(x, "cal-ep wide")))) : null;
-  put(body, grid, h("div", { class: "cal-lists" }, listOf("Sắp chiếu", upcoming), listOf("Mới ra trong 2 tuần", recent)));
+  put(body, grid, h("div", { class: "cal-lists" }, listOf(tr("cal.upcoming"), upcoming), listOf(tr("cal.recent"), recent)));
 }
 
 const addonBase = (url) => String(url || "").replace(/\/manifest\.json$/, "").replace(/\/+$/, "");
-const TYPE_FILTERS = [["", "Tất cả"], ["movie", "Phim"], ["series", "Phim bộ"], ["anime", "Anime"], ["tv", "Truyền hình"], ["channel", "Kênh"], ["other", "Khác"]];
+const TYPE_FILTERS = [["", "common.all"], ["movie", "nav.movie"], ["series", "nav.series"], ["anime", "type.anime"], ["tv", "nav.tv"], ["channel", "type.channel"], ["other", "tv.other"]];
 
 function addonRow(a, actions) {
   const mf = a.manifest || {};
   const types = (mf.types || []).map((k) => typeLabel(k) || k).join(" · ");
   const res = (mf.resources || []).map((r) => (typeof r === "string" ? r : r.name)).filter(Boolean);
-  const caps = [res.includes("stream") ? "Nguồn phát" : "", res.includes("catalog") || (mf.catalogs || []).length ? "Danh mục" : "", res.includes("subtitles") ? "Phụ đề" : ""].filter(Boolean).join(" · ");
+  const caps = [res.includes("stream") ? tr("src.title") : "", res.includes("catalog") || (mf.catalogs || []).length ? tr("dm.catalog") : "", res.includes("subtitles") ? tr("set.subs") : ""].filter(Boolean).join(" · ");
   const ph = h("div", { class: "ph" });
   const letter = () => { ph.textContent = (mf.name || "?")[0]; };
   if (mf.logo) ph.append(image(mf.logo, "", letter)); else letter();
@@ -3663,50 +3680,50 @@ async function renderAddons(view) {
   const configure = (url) => call("open_url", { url: `${addonBase(url)}/configure` }).catch((e) => toast(e, true));
   const installedPanel = h("div", { class: "panel wide-panel" });
   const discoverList = h("div", { class: "addon-list" }, h("div", { class: "spinner" }));
-  const input = h("input", { class: "field", placeholder: "Dán link addon: https://…/manifest.json hoặc stremio://…", spellcheck: "false" });
-  const installBtn = h("button", { class: "btn primary focusable" }, "Cài addon");
+  const input = h("input", { class: "field", placeholder: tr("addon.ph"), spellcheck: "false" });
+  const installBtn = h("button", { class: "btn primary focusable" }, tr("addon.install"));
   const install = (url, btn) => busy(btn, async () => {
     app.addons = await call("addon_install", { url });
     const added = app.addons.find((a) => a.transportUrl === url.trim().replace(/^stremio:\/\//, "https://"));
-    toast(`Đã cài ${added?.manifest?.name || "addon"}`);
+    toast(tr("addon.installed", { name: added?.manifest?.name || "addon" }));
     input.value = "";
     drawInstalled();
     drawDiscover();
   });
   installBtn.addEventListener("click", () => input.value.trim() && install(input.value, installBtn));
   input.addEventListener("keydown", (e) => { if (e.key === "Enter" && input.value.trim()) install(input.value, installBtn); });
-  const installPanel = h("div", { class: "panel wide-panel" }, h("h3", {}, "Cài từ đường link"),
+  const installPanel = h("div", { class: "panel wide-panel" }, h("h3", {}, tr("addon.fromLink")),
     h("div", { class: "install-row" }, input, installBtn),
-    h("p", { class: "hint" }, "Lấy link từ trang cấu hình của addon (ví dụ Torrentio: bấm Cấu hình, chọn xong thì sao chép link manifest) hoặc cài thẳng từ mục Khám phá bên dưới. Danh sách addon đồng bộ với tài khoản Stremio, nên Stremio trên các máy khác cũng thấy."));
+    h("p", { class: "hint" }, tr("addon.linkHint")));
 
   const drawInstalled = () => {
     const n = app.addons.length;
-    put(installedPanel, h("h3", {}, `Đã cài (${n})`),
-      h("p", { class: "hint", style: "margin:-4px 0 6px" }, "Addon ở trên được hỏi nguồn phát trước. Dùng nút mũi tên để đổi thứ tự."),
+    put(installedPanel, h("h3", {}, tr("addon.installedCount", { n })),
+      h("p", { class: "hint", style: "margin:-4px 0 6px" }, tr("addon.orderHint")),
       ...app.addons.map((a, i) => {
         const prot = a.flags?.protected === true;
         const mf = a.manifest || {};
         const acts = [];
-        const up = h("button", { class: "pl-mini focusable", html: ICON.up, title: "Lên trên", disabled: i === 0 || null });
-        const down = h("button", { class: "pl-mini focusable", html: ICON.down, title: "Xuống dưới", disabled: i === n - 1 || null });
+        const up = h("button", { class: "pl-mini focusable", html: ICON.up, title: tr("addon.up"), disabled: i === 0 || null });
+        const down = h("button", { class: "pl-mini focusable", html: ICON.down, title: tr("addon.down"), disabled: i === n - 1 || null });
         up.addEventListener("click", () => busy(up, async () => { app.addons = await call("addon_move", { url: a.transportUrl, delta: -1 }); drawInstalled(); }));
         down.addEventListener("click", () => busy(down, async () => { app.addons = await call("addon_move", { url: a.transportUrl, delta: 1 }); drawInstalled(); }));
         acts.push(up, down);
-        if (mf.behaviorHints?.configurable) acts.push(h("button", { class: "pl-mini focusable", html: ICON.cog, title: "Cấu hình", onclick: () => configure(a.transportUrl) }));
-        if (prot) acts.push(h("span", { class: "tag" }, "Mặc định"));
+        if (mf.behaviorHints?.configurable) acts.push(h("button", { class: "pl-mini focusable", html: ICON.cog, title: tr("addon.configure"), onclick: () => configure(a.transportUrl) }));
+        if (prot) acts.push(h("span", { class: "tag" }, tr("common.default")));
         else {
-          const rm = h("button", { class: "pill focusable danger" }, "Gỡ");
+          const rm = h("button", { class: "pill focusable danger" }, tr("addon.remove"));
           let armed = null;
           rm.addEventListener("click", () => {
             if (!armed) {
-              rm.textContent = "Bấm lần nữa để gỡ";
-              armed = setTimeout(() => { armed = null; if (rm.isConnected) rm.textContent = "Gỡ"; }, 3500);
+              rm.textContent = tr("addon.confirmRemove");
+              armed = setTimeout(() => { armed = null; if (rm.isConnected) rm.textContent = tr("addon.remove"); }, 3500);
               return;
             }
             clearTimeout(armed);
             busy(rm, async () => {
               app.addons = await call("addon_remove", { url: a.transportUrl });
-              toast(`Đã gỡ ${mf.name || "addon"}`);
+              toast(tr("addon.removed", { name: mf.name || "addon" }));
               drawInstalled();
               drawDiscover();
             });
@@ -3716,16 +3733,16 @@ async function renderAddons(view) {
         return addonRow(a, acts);
       }),
       h("div", { style: "margin-top:14px" },
-        h("button", { class: "btn focusable", onclick: (e) => busy(e.currentTarget, async () => { app.addons = await call("addons", { refresh: true }); drawInstalled(); drawDiscover(); toast("Đã đồng bộ với Stremio"); }) }, "Đồng bộ lại")));
+        h("button", { class: "btn focusable", onclick: (e) => busy(e.currentTarget, async () => { app.addons = await call("addons", { refresh: true }); drawInstalled(); drawDiscover(); toast(tr("set.synced")); }) }, tr("addon.resync"))));
   };
 
   let filter = "", term = "";
   const pills = h("div", { class: "seasons" });
-  const search = h("input", { class: "field", placeholder: "Tìm addon…", spellcheck: "false", style: "max-width:320px;margin:0" });
+  const search = h("input", { class: "field", placeholder: tr("addon.search"), spellcheck: "false", style: "max-width:320px;margin:0" });
   search.addEventListener("input", () => { term = search.value.trim().toLowerCase(); drawDiscover(); });
-  const drawPills = () => put(pills, ...TYPE_FILTERS.map(([k, label]) => h("button", { class: `pill focusable ${filter === k ? "on" : ""}`, onclick: () => { filter = k; drawPills(); drawDiscover(); } }, label)));
+  const drawPills = () => put(pills, ...TYPE_FILTERS.map(([k, label]) => h("button", { class: `pill focusable ${filter === k ? "on" : ""}`, onclick: () => { filter = k; drawPills(); drawDiscover(); } }, tr(label))));
   drawPills();
-  const discoverPanel = h("div", { class: "panel wide-panel" }, h("h3", {}, "Khám phá"),
+  const discoverPanel = h("div", { class: "panel wide-panel" }, h("h3", {}, tr("nav.discover")),
     h("div", { class: "discover-tools" }, pills, search), discoverList);
 
   const drawDiscover = () => {
@@ -3745,24 +3762,24 @@ async function renderAddons(view) {
       const acts = [];
       const installed = have.has(a.transportUrl) || haveIds.has(mf.id);
       const needsConfig = mf.behaviorHints?.configurationRequired;
-      if (mf.behaviorHints?.configurable || needsConfig) acts.push(h("button", { class: "pill focusable", onclick: () => configure(a.transportUrl) }, "Cấu hình"));
-      if (installed) acts.push(h("span", { class: "tag on" }, "Đã cài"));
+      if (mf.behaviorHints?.configurable || needsConfig) acts.push(h("button", { class: "pill focusable", onclick: () => configure(a.transportUrl) }, tr("addon.configure")));
+      if (installed) acts.push(h("span", { class: "tag on" }, tr("addon.isInstalled")));
       else if (!needsConfig) {
-        const b = h("button", { class: "pill focusable on" }, "Cài");
+        const b = h("button", { class: "pill focusable on" }, tr("addon.add"));
         b.addEventListener("click", () => install(a.transportUrl, b));
         acts.push(b);
       }
       return addonRow(a, acts);
     }));
-    if (!items.length) put(discoverList, h("div", { class: "empty" }, "Không có addon nào khớp."));
+    if (!items.length) put(discoverList, h("div", { class: "empty" }, tr("addon.noMatch")));
   };
 
-  view.append(h("div", { class: "page plain" }, h("h1", {}, "Addon"), installPanel, installedPanel, discoverPanel));
+  view.append(h("div", { class: "page plain" }, h("h1", {}, tr("nav.addons")), installPanel, installedPanel, discoverPanel));
   drawInstalled();
   input.focus({ preventScroll: true });
   if (!app.discover) {
     try { app.discover = await call("addon_discover"); }
-    catch (e) { put(discoverList, h("div", { class: "empty" }, `Không tải được danh sách addon: ${e}`)); return; }
+    catch (e) { put(discoverList, h("div", { class: "empty" }, tr("addon.listFail", { e }))); return; }
   }
   drawDiscover();
 }
@@ -3857,7 +3874,7 @@ if (TAURI && TOUCH && !ANDROID) document.addEventListener("visibilitychange", ()
   else if (pl.bgVideo) { pl.bgVideo = false; call("player_background", { hidden: false }).catch(() => {}); }
 });
 
-if (TAURI) listen("update-state", (e) => { if (e.payload?.version) toast(`Đang cập nhật WiS TV lên bản ${e.payload.version}…`); });
+if (TAURI) listen("update-state", (e) => { if (e.payload?.version) toast(tr("app.updating", { v: e.payload.version })); });
 
 function visible(el) {
   if (el.disabled || el.offsetParent === null) return false;
@@ -4001,12 +4018,12 @@ document.addEventListener("mouseup", (e) => { if (e.button === 3) back(); });
   });
   listen("player-ended", ({ payload }) => {
     if (!pl.open || payload.session !== pl.session) return;
-    if (payload.error) toast(`Trình phát: ${payload.error}`, true);
+    if (payload.error) toast(tr("pl.error", { e: payload.error }), true);
     if (payload.ended && nextEpisode() && !roomGuest()) { playNext(true); return; }
     closePlayer(false);
   });
   listen("library-changed", async ({ payload }) => {
-    if (payload && payload.error) toast(`Không lưu được tiến độ: ${payload.error}`, true);
+    if (payload && payload.error) toast(tr("pl.progressFail", { e: payload.error }), true);
     if (payload && payload.quiet) return;
     await refreshLibrary();
     const cur = app.stack[app.stack.length - 1];
@@ -4022,7 +4039,7 @@ async function startupOpen() {
   let url = null;
   try { url = await call("startup_open"); } catch (e) { url = null; }
   if (!url) return;
-  startPlayback({ id: "local:open", type: "movie", name: "Kiểm tra trình phát" }, "local:open", "", { url }, 0);
+  startPlayback({ id: "local:open", type: "movie", name: tr("pl.test") }, "local:open", "", { url }, 0);
 }
 
 const homeSig = () => JSON.stringify([
@@ -4035,7 +4052,7 @@ async function boot() {
   const fresh = Promise.allSettled([call("addons"), call("library")]);
   const apply = ([addons, library]) => {
     if (addons.status === "fulfilled") { app.addons = addons.value; addonsAt = Date.now(); }
-    else { app.addons = app.addons || []; toast(`Không tải được addon: ${addons.reason}`, true); }
+    else { app.addons = app.addons || []; toast(tr("addon.loadFail", { e: addons.reason }), true); }
     if (library.status === "fulfilled") app.library = library.value;
     else app.library = app.library || [];
     if (addons.status === "fulfilled") saveBoot();
