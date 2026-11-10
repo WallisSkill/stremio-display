@@ -57,6 +57,7 @@ pub fn run() {
             commands::device_battery,
             commands::player_stop,
             commands::player_fullscreen,
+            commands::screen_brightness,
             commands::startup_open,
             commands::open_url,
             commands::subtitles,

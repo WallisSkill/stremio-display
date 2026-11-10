@@ -67,6 +67,11 @@ impl<R: Runtime> Video<R> {
             .map_err(|e| e.to_string())
     }
 
+    pub fn brightness(&self, level: f64) -> Result<f64, String> {
+        let v: Value = self.0.run_mobile_plugin("brightness", json!({ "level": level })).map_err(|e| e.to_string())?;
+        v["level"].as_f64().ok_or_else(|| "Không đọc được độ sáng".to_string())
+    }
+
     pub fn battery(&self) -> Result<Value, String> {
         self.0.run_mobile_plugin::<Value>("battery", json!({})).map_err(|e| e.to_string())
     }

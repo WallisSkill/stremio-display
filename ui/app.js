@@ -3,6 +3,7 @@ import { web, onWebEvent } from "./web.js";
 const TAURI = window.__TAURI__;
 const EXT_VIDEO = !!TAURI && /Linux/.test(navigator.userAgent) && !/Android/.test(navigator.userAgent);
 const TOUCH = window.matchMedia("(hover: none) and (pointer: coarse)").matches;
+const PHONE_APP = !!TAURI && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 const ANDROID = /Android/i.test(navigator.userAgent);
 const listen = (name, fn) => (TAURI ? TAURI.event.listen(name, fn) : onWebEvent(name, fn));
 
@@ -66,6 +67,7 @@ const ICON = {
   fwd10: '<svg viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M20 3.5v4.2h-4.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><text x="12" y="15.6" text-anchor="middle" font-size="7.6" font-weight="700" fill="currentColor" font-family="Segoe UI, sans-serif">10</text></svg>',
   next: '<svg viewBox="0 0 24 24"><path d="M5 5.2v13.6a.9.9 0 0 0 1.4.75l9.6-6.8a.9.9 0 0 0 0-1.5L6.4 4.45A.9.9 0 0 0 5 5.2Z" fill="currentColor"/><rect x="16.6" y="4.5" width="2.6" height="15" rx="1.1" fill="currentColor"/></svg>',
   vol: '<svg viewBox="0 0 24 24"><path d="M4 9.5v5h3.6l4.9 4V5.5L7.6 9.5H4Z" fill="currentColor"/><path d="M15.5 9a4.2 4.2 0 0 1 0 6M18 6.5a7.8 7.8 0 0 1 0 11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  sun: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.2" fill="currentColor"/><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.4 5.4l1.6 1.6M17 17l1.6 1.6M5.4 18.6 7 17M17 7l1.6-1.6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   mute: '<svg viewBox="0 0 24 24"><path d="M4 9.5v5h3.6l4.9 4V5.5L7.6 9.5H4Z" fill="currentColor"/><path d="m15.5 9.5 5 5m0-5-5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   cc: '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M10.4 10.2a2.3 2.3 0 1 0 0 3.6M17 10.2a2.3 2.3 0 1 0 0 3.6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>',
   speed: '<svg viewBox="0 0 24 24"><path d="M4.6 17.5a8.5 8.5 0 1 1 14.8 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="m12 13.5 4-5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="13.5" r="1.6" fill="currentColor"/></svg>',
@@ -1122,7 +1124,12 @@ function buildPlayer() {
     el.addEventListener("click", (e) => e.stopPropagation());
     el.addEventListener("dblclick", (e) => e.stopPropagation());
   }
-  ui.root = h("div", { id: "player", class: TOUCH ? "touch" : "", hidden: true }, ui.bg, ui.hit, h("div", { class: "pl-shade" }), ui.spin, ui.flash, top, ...(center ? [center] : []), bottom, ui.nextUp, ui.menu, ...(ui.unlock ? [ui.unlock] : []));
+  ui.dim = h("div", { class: "pl-dim" });
+  ui.levelIcon = h("span", { class: "pl-level-icon" });
+  ui.levelFill = h("i");
+  ui.levelText = h("b");
+  ui.level = h("div", { class: "pl-level", hidden: true }, ui.levelIcon, h("div", { class: "pl-level-bar" }, ui.levelFill), ui.levelText);
+  ui.root = h("div", { id: "player", class: TOUCH ? "touch" : "", hidden: true }, ui.bg, ui.dim, ui.hit, ui.level, h("div", { class: "pl-shade" }), ui.spin, ui.flash, top, ...(center ? [center] : []), bottom, ui.nextUp, ui.menu, ...(ui.unlock ? [ui.unlock] : []));
   let lastTap = 0;
   let tapTimer = null;
   let swipe = null;
@@ -1146,15 +1153,37 @@ function buildPlayer() {
     else if (r < 0.87 && fillMode) setFill(false, true);
   });
   ui.hit.addEventListener("pointerdown", (e) => {
-    if (e.pointerType === "mouse" || pinch || pl.locked || pl.menu || !pl.s.loaded || !(pl.s.duration > 0)) return;
-    swipe = { id: e.pointerId, x: e.clientX, y: e.clientY, from: curTime() / pl.s.duration, on: false };
+    if (e.pointerType === "mouse" || pinch || pl.locked || pl.menu) return;
+    const seekable = !!pl.s.loaded && pl.s.duration > 0;
+    const edge = e.clientX < 24 || e.clientX > window.innerWidth - 24 || e.clientY < 48 || e.clientY > window.innerHeight - 48;
+    const side = e.clientX < window.innerWidth / 2 ? "light" : "vol";
+    const vertical = TOUCH && !edge && !(side === "vol" && !TAURI && /iPhone|iPad|iPod/i.test(navigator.userAgent));
+    if (!seekable && !vertical) return;
+    swipe = { id: e.pointerId, x: e.clientX, y: e.clientY, from: seekable ? curTime() / pl.s.duration : 0, on: false, seekable, vertical, side };
   });
   ui.hit.addEventListener("pointermove", (e) => {
     if (!swipe || e.pointerId !== swipe.id) return;
     const dx = e.clientX - swipe.x;
+    if (swipe.level) {
+      const span = Math.max(200, ui.root.clientHeight * 0.7);
+      const delta = (swipe.y - e.clientY) / span;
+      if (swipe.side === "vol") setVolume(Math.round(swipe.base + delta * 100));
+      else setBrightness(Math.min(1, Math.max(0, swipe.base + delta)));
+      showLevel(swipe.side);
+      return;
+    }
     if (!swipe.on) {
       const dy = e.clientY - swipe.y;
-      if (Math.abs(dy) > 16 && Math.abs(dy) > Math.abs(dx)) { swipe = null; return; }
+      if (Math.abs(dy) > 16 && Math.abs(dy) > Math.abs(dx)) {
+        if (!swipe.vertical) { swipe = null; return; }
+        swipe.level = true;
+        swipe.y = e.clientY;
+        swipe.base = swipe.side === "vol" ? (pl.s.mute ? 0 : pl.s.volume ?? 100) : bright.level ?? 1;
+        try { ui.hit.setPointerCapture(e.pointerId); } catch (err) {}
+        showLevel(swipe.side);
+        return;
+      }
+      if (!swipe.seekable) return;
       if (Math.abs(dx) < 14 || Math.abs(dx) < Math.abs(dy) * 1.3) return;
       swipe.on = true;
       swipe.x = e.clientX;
@@ -1171,6 +1200,7 @@ function buildPlayer() {
   });
   const endSwipe = (e) => {
     if (!swipe || e.pointerId !== swipe.id) return;
+    if (swipe.level) { swipe = null; swipedAt = Date.now(); hideLevel(); return; }
     const done = swipe.on;
     swipe = null;
     if (!done) return;
@@ -1590,6 +1620,50 @@ function seekBy(dt) {
   flash(dt < 0 ? "back10" : "fwd10");
   seekTo(curTime() + dt);
   wake();
+}
+
+const bright = { level: null, touched: false, want: null, timer: null };
+
+function readBrightness() {
+  bright.level = PHONE_APP ? null : 1;
+  if (PHONE_APP) call("screen_brightness", {}).then((v) => { if (!bright.touched) bright.level = v; }).catch(() => {});
+}
+
+function setBrightness(v) {
+  bright.level = v;
+  bright.touched = true;
+  if (!PHONE_APP) { pl.ui.dim.style.opacity = String(((1 - v) * 0.85).toFixed(3)); return; }
+  bright.want = Math.max(0.01, v);
+  if (bright.timer) return;
+  bright.timer = setTimeout(() => { bright.timer = null; call("screen_brightness", { level: bright.want }).catch(() => {}); }, 40);
+}
+
+function restoreBrightness() {
+  clearTimeout(bright.timer);
+  bright.timer = null;
+  if (bright.touched && PHONE_APP) call("screen_brightness", { level: -1 }).catch(() => {});
+  if (pl.ui) pl.ui.dim.style.opacity = "0";
+  bright.touched = false;
+  bright.level = null;
+}
+
+function showLevel(side) {
+  const ui = pl.ui;
+  const vol = side === "vol";
+  const value = vol ? (pl.s.mute ? 0 : pl.s.volume ?? 100) : bright.level ?? 1;
+  const pct = vol ? Math.round(value) : Math.round(value * 100);
+  ui.level.className = `pl-level ${vol ? "right" : "left"}`;
+  ui.levelIcon.innerHTML = vol ? (pct === 0 ? ICON.mute : ICON.vol) : ICON.sun;
+  ui.levelFill.style.height = `${Math.min(100, vol ? value / 1.5 : value * 100)}%`;
+  ui.levelText.textContent = `${pct}%`;
+  clearTimeout(ui.levelTimer);
+  ui.level.hidden = false;
+}
+
+function hideLevel() {
+  const ui = pl.ui;
+  clearTimeout(ui.levelTimer);
+  ui.levelTimer = setTimeout(() => { ui.level.hidden = true; }, 700);
 }
 
 function setVolume(v) {
@@ -2015,7 +2089,7 @@ function fillMenu(box) {
 
 function openPlayer(c) {
   if (!pl.ui) buildPlayer();
-  if (!pl.open) pl.returnFocus = document.activeElement;
+  if (!pl.open) { pl.returnFocus = document.activeElement; readBrightness(); }
   pl.open = true;
   navSync();
   pl.ctx = c;
@@ -2075,6 +2149,7 @@ function closePlayer(stop = true) {
   navSync();
   pl.session++;
   clearTimeout(pl.hideTimer);
+  restoreBrightness();
   if (stop) call("player_stop").catch(() => {});
   if (pl.fs) { call("player_fullscreen", { on: false }).catch(() => {}); pl.fs = false; pl.ui.fs.innerHTML = ICON.full; }
   pl.menu = null;

@@ -10,6 +10,7 @@ import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.graphics.Color
 import android.net.Uri
+import android.provider.Settings
 import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
@@ -36,6 +37,11 @@ class Native {
 @InvokeArg
 class FlagArgs {
     var on: Boolean = false
+}
+
+@InvokeArg
+class LevelArgs {
+    var level: Double = -2.0
 }
 
 @InvokeArg
@@ -129,6 +135,30 @@ class VideoPlugin(private val activity: Activity) : Plugin(activity), SurfaceHol
             }
         }
         invoke.resolve()
+    }
+
+    @Command
+    fun brightness(invoke: Invoke) {
+        val args = invoke.parseArgs(LevelArgs::class.java)
+        activity.runOnUiThread {
+            val window = activity.window
+            if (args.level > -1.5) {
+                val lp = window.attributes
+                lp.screenBrightness = if (args.level >= 0) args.level.coerceIn(0.01, 1.0).toFloat() else WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+                window.attributes = lp
+            }
+            var cur = window.attributes.screenBrightness.toDouble()
+            if (cur < 0) {
+                cur = try {
+                    Settings.System.getInt(activity.contentResolver, Settings.System.SCREEN_BRIGHTNESS) / 255.0
+                } catch (e: Exception) {
+                    0.5
+                }
+            }
+            val out = JSObject()
+            out.put("level", cur.coerceIn(0.0, 1.0))
+            invoke.resolve(out)
+        }
     }
 
     @Command

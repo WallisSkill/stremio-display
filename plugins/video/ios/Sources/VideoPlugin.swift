@@ -104,6 +104,10 @@ struct AwakeArgs: Decodable {
     let on: Bool
 }
 
+struct LevelArgs: Decodable {
+    let level: Double
+}
+
 struct OpenArgs: Decodable {
     let url: String
 }
@@ -111,6 +115,7 @@ struct OpenArgs: Decodable {
 final class VideoPlugin: Plugin {
     private let video = VideoView(frame: .zero)
     private var pointer = 0
+    private var savedBrightness: CGFloat?
 
     override func load(webview: WKWebView) {
         webview.isOpaque = false
@@ -127,6 +132,9 @@ final class VideoPlugin: Plugin {
         pointer = Int(bitPattern: Unmanaged.passUnretained(video.layer).toOpaque())
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
         try? AVAudioSession.sharedInstance().setActive(true)
+        NotificationCenter.default.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.restoreBrightness()
+        }
         place(webview, tries: 0)
     }
 
@@ -165,6 +173,25 @@ final class VideoPlugin: Plugin {
             self.video.contentMode = args.on ? .scaleToFill : .scaleAspectFit
             self.video.layer.contentsGravity = args.on ? .resize : .resizeAspect
             invoke.resolve()
+        }
+    }
+
+    private func restoreBrightness() {
+        guard let saved = savedBrightness else { return }
+        UIScreen.main.brightness = saved
+        savedBrightness = nil
+    }
+
+    @objc public func brightness(_ invoke: Invoke) throws {
+        let args = try invoke.parseArgs(LevelArgs.self)
+        DispatchQueue.main.async {
+            if args.level >= 0 {
+                if self.savedBrightness == nil { self.savedBrightness = UIScreen.main.brightness }
+                UIScreen.main.brightness = CGFloat(min(1, max(0.01, args.level)))
+            } else if args.level > -1.5 {
+                self.restoreBrightness()
+            }
+            invoke.resolve(["level": Double(UIScreen.main.brightness)])
         }
     }
 

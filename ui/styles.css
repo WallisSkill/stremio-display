@@ -1077,3 +1077,18 @@ body:not(.playing) .layer.room-layer { background: rgba(6,6,9,0.82); }
 }
 .tv-tile.busy .tv-logo { position: relative; }
 .tv-tile.busy .tv-logo img { opacity: 0.35; }
+
+.pl-dim { position: absolute; inset: 0; background: #000; opacity: 0; pointer-events: none; }
+.pl-level {
+  position: absolute; top: 50%; transform: translateY(-50%); z-index: 3; display: flex; flex-direction: column; align-items: center; gap: 10px;
+  width: 54px; padding: 14px 0 12px; border-radius: 27px; background: rgba(12,12,16,0.62); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255,255,255,0.1); pointer-events: none;
+}
+.pl-level[hidden] { display: none; }
+.pl-level.left { left: max(12%, calc(env(safe-area-inset-left) + 28px)); }
+.pl-level.right { right: max(12%, calc(env(safe-area-inset-right) + 28px)); }
+.pl-level-icon svg { width: 22px; height: 22px; display: block; }
+.pl-level-bar { position: relative; width: 6px; height: 120px; border-radius: 3px; background: rgba(255,255,255,0.18); overflow: hidden; }
+.pl-level-bar i { position: absolute; left: 0; right: 0; bottom: 0; border-radius: 3px; background: #fff; transition: height 60ms linear; }
+.pl-level b { font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+@media (max-height: 420px) { .pl-level-bar { height: 84px; } }
