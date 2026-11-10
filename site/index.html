@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#050507">
-  <title>Tải WiS TV</title>
+  <title data-i18n="title">Tải WiS TV</title>
   <link rel="icon" href="icon.png">
   <link rel="apple-touch-icon" href="icon.png">
   <style>
@@ -62,70 +62,210 @@
     .older h4 { margin: 0 0 6px; font-size: 13.5px; font-weight: 650; color: var(--text); }
     .older h4 span { font-weight: 400; color: var(--faint); margin-left: 6px; }
     footer { margin-top: 36px; text-align: center; font-size: 13px; color: var(--faint); }
+    .langs { position: absolute; top: calc(14px + env(safe-area-inset-top)); right: max(16px, env(safe-area-inset-right)); display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: var(--card); border: 1px solid var(--line); }
+    .langs button { border: 0; background: none; color: var(--muted); font: inherit; font-size: 13px; font-weight: 600; padding: 5px 11px; border-radius: 999px; cursor: pointer; }
+    .langs button[aria-pressed="true"] { background: rgba(255,255,255,0.14); color: var(--text); }
+    @media (max-width: 640px) { .langs { position: static; width: fit-content; margin: -28px auto 22px; } }
+    .notes-lang { font-size: 12.5px; color: var(--faint); margin: 8px 0 0; }
+    :lang(zh) body, :lang(zh) .langs button { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", "Segoe UI", sans-serif; }
+    :root:lang(zh) .langs button:is([lang="vi"], [lang="en"]) { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
   </style>
 </head>
 <body>
+  <div class="langs" role="group" data-i18n-aria="lang">
+    <button type="button" lang="vi" data-lang="vi">Tiếng Việt</button>
+    <button type="button" lang="en" data-lang="en">English</button>
+    <button type="button" lang="zh-Hans" data-lang="zh">中文</button>
+  </div>
   <main>
     <header>
       <img src="icon.png" alt="">
       <h1><b>WiS</b><span>TV</span></h1>
-      <p>Xem phim từ tài khoản Stremio của bạn. Phát được mọi định dạng, tự chạy torrent ngay trên máy, giữ kiểu phụ đề bạn chỉnh.</p>
+      <p data-i18n="tagline">Xem phim từ tài khoản Stremio của bạn. Phát được mọi định dạng, tự chạy torrent ngay trên máy, giữ kiểu phụ đề bạn chỉnh.</p>
     </header>
 
     <section class="grid">
       <article class="card" data-tag="ios" data-ext=".ipa">
         <h2><svg viewBox="0 0 24 24"><rect x="6" y="2.5" width="12" height="19" rx="2.6" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M10.5 18.5h3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>iPhone</h2>
-        <p>Cài từ máy tính bằng Sideloadly với Apple ID miễn phí. Ký lại mỗi 7 ngày, app và dữ liệu vẫn giữ nguyên.</p>
-        <div class="meta">Đang kiểm tra…</div>
-        <a class="btn" aria-disabled="true">Tải tệp .ipa</a>
+        <p data-i18n="ios.desc">Cài từ máy tính bằng Sideloadly với Apple ID miễn phí. Ký lại mỗi 7 ngày, app và dữ liệu vẫn giữ nguyên.</p>
+        <div class="meta" data-i18n="checking">Đang kiểm tra…</div>
+        <a class="btn" aria-disabled="true" data-i18n="ios.btn">Tải tệp .ipa</a>
         <details>
-          <summary>Cách cài</summary>
+          <summary data-i18n="ios.how">Cách cài</summary>
           <ol>
-            <li>Trên máy tính, tải tệp .ipa ở trên và cài <a class="inline" href="https://sideloadly.io/" target="_blank" rel="noopener">Sideloadly</a>.</li>
-            <li>Cắm iPhone vào máy tính, mở Sideloadly, kéo tệp .ipa vào, nhập Apple ID rồi bấm Start.</li>
-            <li>Trên iPhone: Cài đặt → Cài đặt chung → Quản lý VPN &amp; thiết bị → chọn Apple ID của bạn → Tin cậy.</li>
-            <li>iOS 16 trở lên: Cài đặt → Quyền riêng tư &amp; bảo mật → Chế độ nhà phát triển → Bật, rồi khởi động lại máy.</li>
-            <li>Mỗi 7 ngày mở Sideloadly ký lại, hoặc bật tự làm mới để nó tự ký khi iPhone và máy tính chung Wi‑Fi.</li>
+            <li data-i18n="ios.s1">Trên máy tính, tải tệp .ipa ở trên và cài <a class="inline" href="https://sideloadly.io/" target="_blank" rel="noopener">Sideloadly</a>.</li>
+            <li data-i18n="ios.s2">Cắm iPhone vào máy tính, mở Sideloadly, kéo tệp .ipa vào, nhập Apple ID rồi bấm Start.</li>
+            <li data-i18n="ios.s3">Trên iPhone: Cài đặt → Cài đặt chung → Quản lý VPN &amp; thiết bị → chọn Apple ID của bạn → Tin cậy.</li>
+            <li data-i18n="ios.s4">iOS 16 trở lên: Cài đặt → Quyền riêng tư &amp; bảo mật → Chế độ nhà phát triển → Bật, rồi khởi động lại máy.</li>
+            <li data-i18n="ios.s5">Mỗi 7 ngày mở Sideloadly ký lại, hoặc bật tự làm mới để nó tự ký khi iPhone và máy tính chung Wi‑Fi.</li>
           </ol>
         </details>
       </article>
 
       <article class="card" data-tag="windows" data-ext=".exe">
-        <h2><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12.5" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8.5 20h7M12 16.5V20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>Máy tính Windows</h2>
-        <p>Bộ cài cho Windows 10 và 11. App tự cập nhật khi có bản mới.</p>
-        <div class="meta">Đang kiểm tra…</div>
-        <a class="btn" aria-disabled="true">Tải bộ cài .exe</a>
+        <h2><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12.5" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8.5 20h7M12 16.5V20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span data-i18n="win.title">Máy tính Windows</span></h2>
+        <p data-i18n="win.desc">Bộ cài cho Windows 10 và 11. App tự cập nhật khi có bản mới.</p>
+        <div class="meta" data-i18n="checking">Đang kiểm tra…</div>
+        <a class="btn" aria-disabled="true" data-i18n="win.btn">Tải bộ cài .exe</a>
       </article>
 
       <article class="card" data-tag="android" data-ext=".apk">
         <h2><svg viewBox="0 0 24 24"><path d="M5 10.5a7 7 0 0 1 14 0V18a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 18Z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M7.5 4.5 9 7M16.5 4.5 15 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="9.5" cy="11" r="1" fill="currentColor"/><circle cx="14.5" cy="11" r="1" fill="currentColor"/></svg>Android</h2>
-        <p>Cài thẳng tệp .apk trên điện thoại Android 8 trở lên (64-bit), không cần máy tính và không phải ký lại. Lần đầu cài, cho phép trình duyệt cài ứng dụng không rõ nguồn.</p>
-        <div class="meta">Đang kiểm tra…</div>
-        <a class="btn" aria-disabled="true">Tải tệp .apk</a>
+        <p data-i18n="android.desc">Cài thẳng tệp .apk trên điện thoại Android 8 trở lên (64-bit), không cần máy tính và không phải ký lại. Lần đầu cài, cho phép trình duyệt cài ứng dụng không rõ nguồn.</p>
+        <div class="meta" data-i18n="checking">Đang kiểm tra…</div>
+        <a class="btn" aria-disabled="true" data-i18n="android.btn">Tải tệp .apk</a>
       </article>
 
       <article class="card" data-tag="linux" data-ext=".deb">
-        <h2><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="m7 9 3 2.5L7 14M12 14h5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Máy tính Linux</h2>
-        <p>Gói .deb cho Ubuntu 22.04 trở lên và Debian 12, tự cài kèm libmpv. Video phát trong một cửa sổ mpv riêng. Trang bản phát hành có thêm bản AppImage tự cập nhật.</p>
-        <div class="meta">Đang kiểm tra…</div>
-        <a class="btn" aria-disabled="true">Tải gói .deb</a>
+        <h2><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="m7 9 3 2.5L7 14M12 14h5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span data-i18n="linux.title">Máy tính Linux</span></h2>
+        <p data-i18n="linux.desc">Gói .deb cho Ubuntu 22.04 trở lên và Debian 12, tự cài kèm libmpv. Video phát trong một cửa sổ mpv riêng. Trang bản phát hành có thêm bản AppImage tự cập nhật.</p>
+        <div class="meta" data-i18n="checking">Đang kiểm tra…</div>
+        <a class="btn" aria-disabled="true" data-i18n="linux.btn">Tải gói .deb</a>
       </article>
     </section>
 
-    <footer>WiS TV dùng tài khoản và addon Stremio của bạn. Đăng nhập và xem phim trong app.</footer>
+    <footer data-i18n="footer">WiS TV dùng tài khoản và addon Stremio của bạn. Đăng nhập và xem phim trong app.</footer>
   </main>
 
   <script>
+    const DICT = {
+      vi: {
+        title: "Tải WiS TV",
+        lang: "Ngôn ngữ",
+        tagline: "Xem phim từ tài khoản Stremio của bạn. Phát được mọi định dạng, tự chạy torrent ngay trên máy, giữ kiểu phụ đề bạn chỉnh.",
+        "ios.desc": "Cài từ máy tính bằng Sideloadly với Apple ID miễn phí. Ký lại mỗi 7 ngày, app và dữ liệu vẫn giữ nguyên.",
+        "ios.btn": "Tải tệp .ipa",
+        "ios.how": "Cách cài",
+        "ios.s1": "Trên máy tính, tải tệp .ipa ở trên và cài {sideloadly}.",
+        "ios.s2": "Cắm iPhone vào máy tính, mở Sideloadly, kéo tệp .ipa vào, nhập Apple ID rồi bấm Start.",
+        "ios.s3": "Trên iPhone: Cài đặt → Cài đặt chung → Quản lý VPN & thiết bị → chọn Apple ID của bạn → Tin cậy.",
+        "ios.s4": "iOS 16 trở lên: Cài đặt → Quyền riêng tư & bảo mật → Chế độ nhà phát triển → Bật, rồi khởi động lại máy.",
+        "ios.s5": "Mỗi 7 ngày mở Sideloadly ký lại, hoặc bật tự làm mới để nó tự ký khi iPhone và máy tính chung Wi‑Fi.",
+        "win.title": "Máy tính Windows",
+        "win.desc": "Bộ cài cho Windows 10 và 11. App tự cập nhật khi có bản mới.",
+        "win.btn": "Tải bộ cài .exe",
+        "android.desc": "Cài thẳng tệp .apk trên điện thoại Android 8 trở lên (64-bit), không cần máy tính và không phải ký lại. Lần đầu cài, cho phép trình duyệt cài ứng dụng không rõ nguồn.",
+        "android.btn": "Tải tệp .apk",
+        "linux.title": "Máy tính Linux",
+        "linux.desc": "Gói .deb cho Ubuntu 22.04 trở lên và Debian 12, tự cài kèm libmpv. Video phát trong một cửa sổ mpv riêng. Trang bản phát hành có thêm bản AppImage tự cập nhật.",
+        "linux.btn": "Tải gói .deb",
+        footer: "WiS TV dùng tài khoản và addon Stremio của bạn. Đăng nhập và xem phim trong app.",
+        checking: "Đang kiểm tra…",
+        soon: "Sắp có",
+        failed: "Không kiểm tra được, thử tải lại trang",
+        updated: "{size} · cập nhật {date}",
+        version: "Phiên bản {v}",
+        news: "Có gì mới",
+        older: "Các bản trước",
+        minor: "Cập nhật nhỏ, sửa lỗi vặt",
+        notesLang: "",
+        "kind.new": "Mới",
+        "kind.fix": "Sửa",
+        "kind.fast": "Nhanh hơn",
+      },
+      en: {
+        title: "Download WiS TV",
+        lang: "Language",
+        tagline: "Watch from your Stremio account. Plays every format, runs torrents right on the device, and keeps the subtitle style you set.",
+        "ios.desc": "Install from a computer with Sideloadly and a free Apple ID. Re-sign every 7 days; the app and its data stay.",
+        "ios.btn": "Download the .ipa",
+        "ios.how": "How to install",
+        "ios.s1": "On a computer, download the .ipa above and install {sideloadly}.",
+        "ios.s2": "Plug the iPhone into the computer, open Sideloadly, drag the .ipa in, enter your Apple ID and press Start.",
+        "ios.s3": "On the iPhone: Settings → General → VPN & Device Management → choose your Apple ID → Trust.",
+        "ios.s4": "iOS 16 or later: Settings → Privacy & Security → Developer Mode → On, then restart the phone.",
+        "ios.s5": "Every 7 days, re-sign in Sideloadly, or turn on auto-refresh so it signs again whenever the iPhone and the computer share Wi‑Fi.",
+        "win.title": "Windows PC",
+        "win.desc": "Installer for Windows 10 and 11. The app updates itself when a new version is out.",
+        "win.btn": "Download the .exe installer",
+        "android.desc": "Install the .apk straight on an Android 8 or later phone (64-bit), with no computer and no re-signing. The first time, allow the browser to install unknown apps.",
+        "android.btn": "Download the .apk",
+        "linux.title": "Linux PC",
+        "linux.desc": "A .deb package for Ubuntu 22.04 or later and Debian 12 that installs libmpv with it. Video plays in a separate mpv window. The releases page also has a self-updating AppImage.",
+        "linux.btn": "Download the .deb package",
+        footer: "WiS TV uses your Stremio account and add-ons. Sign in and watch inside the app.",
+        checking: "Checking…",
+        soon: "Coming soon",
+        failed: "Couldn't check. Try reloading the page.",
+        updated: "{size} · updated {date}",
+        version: "Version {v}",
+        news: "What's new",
+        older: "Earlier versions",
+        minor: "Small updates and fixes",
+        notesLang: "Release notes are written in Vietnamese.",
+        "kind.new": "New",
+        "kind.fix": "Fixed",
+        "kind.fast": "Faster",
+      },
+      zh: {
+        title: "下载 WiS TV",
+        lang: "语言",
+        tagline: "用你的 Stremio 账号看片。支持所有格式，在设备上直接运行种子，并保留你设置的字幕样式。",
+        "ios.desc": "在电脑上用 Sideloadly 和免费 Apple ID 安装。每 7 天重新签名一次，应用和数据都会保留。",
+        "ios.btn": "下载 .ipa 文件",
+        "ios.how": "安装方法",
+        "ios.s1": "在电脑上下载上面的 .ipa 文件，并安装 {sideloadly}。",
+        "ios.s2": "把 iPhone 连接到电脑，打开 Sideloadly，把 .ipa 拖进去，输入 Apple ID 后点 Start。",
+        "ios.s3": "在 iPhone 上：设置 → 通用 → VPN与设备管理 → 选择你的 Apple ID → 信任。",
+        "ios.s4": "iOS 16 及以上：设置 → 隐私与安全性 → 开发者模式 → 打开，然后重启手机。",
+        "ios.s5": "每 7 天在 Sideloadly 中重新签名，或开启自动刷新，iPhone 和电脑连接同一 Wi‑Fi 时会自动签名。",
+        "win.title": "Windows 电脑",
+        "win.desc": "适用于 Windows 10 和 11 的安装程序。有新版本时应用会自动更新。",
+        "win.btn": "下载 .exe 安装程序",
+        "android.desc": "在 Android 8 及以上（64 位）手机上直接安装 .apk，无需电脑，也不用重新签名。首次安装时，请允许浏览器安装未知来源的应用。",
+        "android.btn": "下载 .apk 文件",
+        "linux.title": "Linux 电脑",
+        "linux.desc": "适用于 Ubuntu 22.04 及以上和 Debian 12 的 .deb 安装包，会一并安装 libmpv。视频在单独的 mpv 窗口中播放。发布页面还提供可自动更新的 AppImage。",
+        "linux.btn": "下载 .deb 安装包",
+        footer: "WiS TV 使用你的 Stremio 账号和插件。请在应用内登录并观看。",
+        checking: "正在检查…",
+        soon: "即将推出",
+        failed: "无法检查，请刷新页面重试",
+        updated: "{size} · 更新于 {date}",
+        version: "版本 {v}",
+        news: "新功能",
+        older: "早期版本",
+        minor: "小更新和问题修复",
+        notesLang: "更新说明为越南语。",
+        "kind.new": "新增",
+        "kind.fix": "修复",
+        "kind.fast": "更快",
+      },
+    };
+    const LOCALE = { vi: "vi-VN", en: "en-US", zh: "zh-CN" };
+    const HTML_LANG = { vi: "vi", en: "en", zh: "zh-Hans" };
+    const STORE = "wistv.lang";
     const REPO = "WallisSkill/stremio-display";
-    const size = (n) => n >= 1e9 ? (n / 1e9).toFixed(1) + " GB" : (n / 1e6).toFixed(0) + " MB";
-    const date = (s) => new Date(s).toLocaleDateString("vi-VN");
     const KIND = { "Mới": "new", "Sửa": "fix", "Nhanh hơn": "fast" };
+    const SIDELOADLY = document.querySelector('[data-i18n="ios.s1"] a').cloneNode(true);
+
+    function firstLang() {
+      const asked = new URLSearchParams(location.search).get("lang");
+      if (DICT[asked]) return asked;
+      try {
+        const saved = localStorage.getItem(STORE);
+        if (DICT[saved]) return saved;
+      } catch (e) {}
+      for (const l of navigator.languages || [navigator.language || ""]) {
+        const code = String(l).toLowerCase().split("-")[0];
+        if (DICT[code]) return code;
+      }
+      return "vi";
+    }
+    let lang = firstLang();
+    const t = (key, params) => String(DICT[lang][key] ?? DICT.vi[key] ?? key).replace(/\{(\w+)\}/g, (m, k) => (params && params[k] != null ? String(params[k]) : m));
+    const size = (n) => n >= 1e9 ? (n / 1e9).toFixed(1) + " GB" : (n / 1e6).toFixed(0) + " MB";
+    const date = (s) => new Date(s).toLocaleDateString(LOCALE[lang]);
     const el = (tag, cls, ...kids) => {
       const n = document.createElement(tag);
       if (cls) n.className = cls;
       n.append(...kids);
       return n;
     };
+    function fill(node, text) {
+      const parts = text.split("{sideloadly}");
+      node.replaceChildren(...parts.flatMap((part, i) => (i ? [SIDELOADLY.cloneNode(true), part] : [part])));
+    }
     function parseNotes(body) {
       const m = /<!-- wistv-notes ([\s\S]*?) -->/.exec(body || "");
       if (!m) return [];
@@ -136,18 +276,59 @@
         return [];
       }
     }
+    const kindLabel = (kind) => (KIND[kind] ? t(`kind.${KIND[kind]}`) : String(kind || ""));
     const changeList = (changes) => {
-      const items = (Array.isArray(changes) ? changes : []).map((c) => el("li", "", el("span", `tag ${KIND[c.kind] || ""}`, String(c.kind || "")), el("span", "", String(c.text || ""))));
-      return el("ul", "", ...(items.length ? items : [el("li", "", el("span", "", "Cập nhật nhỏ, sửa lỗi vặt"))]));
+      const said = (text) => { const n = el("span", "", String(text || "")); n.lang = "vi"; return n; };
+      const items = (Array.isArray(changes) ? changes : []).map((c) => el("li", "", el("span", `tag ${KIND[c.kind] || ""}`, kindLabel(c.kind)), said(c.text)));
+      return el("ul", "", ...(items.length ? items : [el("li", "", el("span", "", t("minor")))]));
     };
     function news(notes) {
-      const box = el("div", "news", el("h3", "", "Có gì mới"), changeList(notes[0].changes));
+      const box = el("div", "news", el("h3", "", t("news")), changeList(notes[0].changes));
+      if (t("notesLang")) {
+        const hint = el("p", "notes-lang", t("notesLang"));
+        hint.lang = HTML_LANG[lang];
+        box.append(hint);
+      }
       if (notes.length > 1) {
-        const older = el("div", "older", ...notes.slice(1).map((v) => el("div", "", el("h4", "", `Phiên bản ${v.version}`, el("span", "", v.date ? date(v.date) : "")), changeList(v.changes))));
-        box.append(el("details", "", el("summary", "", "Các bản trước"), older));
+        const older = el("div", "older", ...notes.slice(1).map((v) => el("div", "", el("h4", "", t("version", { v: v.version }), el("span", "", v.date ? date(v.date) : "")), changeList(v.changes))));
+        box.append(el("details", "", el("summary", "", t("older")), older));
       }
       return box;
     }
+    const state = new Map();
+    function paint(card) {
+      const meta = card.querySelector(".meta");
+      const st = state.get(card) || { status: "checking" };
+      card.querySelector(".news")?.remove();
+      if (st.status !== "ok") { meta.textContent = t(st.status); return; }
+      const notes = parseNotes(st.rel.body);
+      const last = notes[0];
+      if (last && last.version) {
+        meta.replaceChildren(el("div", "ver", el("b", "", t("version", { v: last.version })), el("span", "", `${size(st.asset.size)} · ${date(last.date || st.asset.updated_at)}`)));
+        card.querySelector(".btn").after(news(notes));
+      } else {
+        meta.textContent = t("updated", { size: size(st.asset.size), date: date(st.asset.updated_at) });
+      }
+    }
+    function apply(next) {
+      lang = DICT[next] ? next : "vi";
+      document.documentElement.lang = HTML_LANG[lang];
+      for (const n of document.querySelectorAll("[data-i18n]")) {
+        if (n.classList.contains("meta")) continue;
+        fill(n, t(n.dataset.i18n));
+      }
+      for (const n of document.querySelectorAll("[data-i18n-aria]")) n.setAttribute("aria-label", t(n.dataset.i18nAria));
+      for (const b of document.querySelectorAll(".langs button")) b.setAttribute("aria-pressed", String(b.dataset.lang === lang));
+      document.querySelectorAll(".card[data-tag]").forEach(paint);
+    }
+    document.querySelector(".langs").addEventListener("click", (e) => {
+      const b = e.target.closest("button[data-lang]");
+      if (!b) return;
+      try { localStorage.setItem(STORE, b.dataset.lang); } catch (x) {}
+      apply(b.dataset.lang);
+    });
+    apply(lang);
+
     const snapshot = fetch(`releases.json?t=${Math.floor(Date.now() / 60000)}`, { cache: "no-store" })
       .then((res) => (res.ok ? res.json() : null))
       .catch(() => null);
@@ -160,26 +341,18 @@
       return res.json();
     }
     document.querySelectorAll(".card[data-tag]").forEach(async (card) => {
-      const meta = card.querySelector(".meta");
       const btn = card.querySelector(".btn");
       try {
         const rel = await release(card.dataset.tag);
-        if (!rel) { meta.textContent = "Sắp có"; return; }
-        const asset = (rel.assets || []).find((a) => a.name.toLowerCase().endsWith(card.dataset.ext));
-        if (!asset) { meta.textContent = "Sắp có"; return; }
+        const asset = rel && (rel.assets || []).find((a) => a.name.toLowerCase().endsWith(card.dataset.ext));
+        if (!asset) { state.set(card, { status: "soon" }); paint(card); return; }
         btn.href = asset.browser_download_url;
         btn.removeAttribute("aria-disabled");
-        const notes = parseNotes(rel.body);
-        const last = notes[0];
-        if (last && last.version) {
-          meta.replaceChildren(el("div", "ver", el("b", "", `Phiên bản ${last.version}`), el("span", "", `${size(asset.size)} · ${date(last.date || asset.updated_at)}`)));
-          btn.after(news(notes));
-        } else {
-          meta.textContent = `${size(asset.size)} · cập nhật ${date(asset.updated_at)}`;
-        }
+        state.set(card, { status: "ok", rel, asset });
       } catch (e) {
-        meta.textContent = "Không kiểm tra được, thử tải lại trang";
+        state.set(card, { status: "failed" });
       }
+      paint(card);
     });
   </script>
 </body>
