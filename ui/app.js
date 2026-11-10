@@ -1,4 +1,7 @@
 import { web, onWebEvent } from "./web.js";
+import { t as tr, setLang, savedLang, getLang, formatDate, LANGS } from "./i18n.js";
+
+setLang(savedLang());
 
 const TAURI = window.__TAURI__;
 const EXT_VIDEO = !!TAURI && /Linux/.test(navigator.userAgent) && !/Android/.test(navigator.userAgent);
@@ -22,7 +25,7 @@ function tidy(m) {
 }
 
 const call = (cmd, args = {}) => {
-  if (!TAURI && typeof web[cmd] !== "function") return Promise.reject(new Error(`Bản web chưa hỗ trợ ${cmd}`));
+  if (!TAURI && typeof web[cmd] !== "function") return Promise.reject(new Error(tr("web.unsupported", { cmd })));
   const p = TAURI ? TAURI.core.invoke(cmd, args) : web[cmd](args);
   if (cmd === "catalog") return p.then((list) => list.map(tidy));
   if (cmd === "meta") return p.then(tidy);
@@ -87,7 +90,8 @@ const ICON = {
   cog: '<svg viewBox="0 0 24 24"><path d="M9.72 4.64 9.97 2.4h4.06l.25 2.24 1.31.55 1.76-1.41 2.87 2.87-1.41 1.76.55 1.31 2.24.25v4.06l-2.24.25-.55 1.31 1.41 1.76-2.87 2.87-1.76-1.41-1.31.55-.25 2.24H9.97l-.25-2.24-1.31-.55-1.76 1.41-2.87-2.87 1.41-1.76-.55-1.31-2.24-.25V9.97l2.24-.25.55-1.31-1.41-1.76 2.87-2.87 1.76 1.41Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="12" r="3.6" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>',
 };
 
-const TYPE_LABEL = { movie: "Phim", series: "Phim bộ", channel: "Kênh", tv: "Truyền hình", anime: "Anime" };
+const TYPES = new Set(["movie", "series", "channel", "tv", "anime"]);
+const typeLabel = (k) => (TYPES.has(k) ? tr(`type.${k}`) : undefined);
 
 const app = {
   user: null,
@@ -177,7 +181,7 @@ function metaLine(m) {
   const y = yearOf(m);
   if (y) parts.push(h("span", {}, y));
   if (m.runtime) parts.push(h("span", {}, m.runtime));
-  if (m.type) parts.push(h("span", {}, TYPE_LABEL[m.type] || m.type));
+  if (m.type) parts.push(h("span", {}, typeLabel(m.type) || m.type));
   const genres = (m.genres || m.genre || []).slice(0, 3);
   if (genres.length) parts.push(h("span", {}, genres.join(" · ")));
   const out = h("div", { class: "meta-line" });
@@ -316,7 +320,7 @@ function paintAvatar() {
   const p = currentProfile();
   a.textContent = on ? firstLetter(profileName(p)) : initial();
   a.style.background = on ? PROFILE_COLORS[p.color] || "" : "";
-  a.setAttribute("aria-label", on ? `Hồ sơ: ${profileName(p)}` : "Tài khoản");
+  a.setAttribute("aria-label", on ? tr("nav.profile", { name: profileName(p) }) : tr("nav.account"));
 }
 
 async function loadProfiles() {
@@ -682,7 +686,7 @@ function setHero(m, info, dots, idx) {
   setTimeout(() => {
     const focusedIdx = $$(".btn", info).indexOf(document.activeElement);
     put(info, 
-      h("div", { class: "kicker" }, TYPE_LABEL[m.type] || "Nổi bật"),
+      h("div", { class: "kicker" }, typeLabel(m.type) || tr("type.featured")),
       titleBlock(m),
       metaLine(m),
       m.description ? h("p", { class: "desc" }, m.description) : null,
@@ -796,7 +800,7 @@ function renderBrowse(view, filterType) {
   cats.forEach(({ addon, cat }, i) => {
     const shape = i === 0 ? "wide" : "poster";
     const title = cat.name || cat.id;
-    const sub = `${TYPE_LABEL[cat.type] || cat.type} · ${addon.manifest.name}`;
+    const sub = `${typeLabel(cat.type) || cat.type} · ${addon.manifest.name}`;
     shelves.append(shelf(title, sub, shape, () => cachedCatalog(addon, cat), {
       eager: i < 2,
       onFocus: preview,
@@ -908,7 +912,7 @@ function episodeCard(m, v, entry) {
   const future = released && released > new Date();
   const el = h("button", { class: "card ep focusable", "data-vid": v.id },
     art,
-    h("div", { class: "ep-num" }, `Tập ${v.episode ?? v.number ?? "?"}${future ? " · " + released.toLocaleDateString("vi-VN") : ""}`),
+    h("div", { class: "ep-num" }, `Tập ${v.episode ?? v.number ?? "?"}${future ? " · " + formatDate(released) : ""}`),
     h("div", { class: "ep-title" }, v.title || v.name || ""),
     v.overview || v.description ? h("div", { class: "ep-over" }, v.overview || v.description) : null);
   el.addEventListener("click", () => openStreams(m, v.id, epName(v)));
@@ -1451,9 +1455,16 @@ function applyPrefs() {
   Object.assign(subPrefs, SUB_DEFAULT, sub);
   fillMode = !!pref("fill", TOUCH);
   subLang = String(pref("sublang", "vi"));
+  const lang = pref("lang", null);
+  if (lang && setLang(lang) && app.stack.length) render();
 }
 
-const SUB_LANGS = [["", "Tắt"], ["vi", "Tiếng Việt"], ["en", "English"], ["zh", "中文"], ["ko", "한국어"], ["ja", "日本語"]];
+function chooseLang(code) {
+  setPref("lang", code);
+  if (setLang(code)) { paintAvatar(); render(); }
+}
+
+const SUB_LANGS = [["", null], ["vi", "Tiếng Việt"], ["en", "English"], ["zh", "中文"], ["ko", "한국어"], ["ja", "日本語"]];
 const sameLang = (a, b) => !!a && !!b && langName(a) === langName(b);
 let subLang = "vi";
 const setSubLang = (v) => { subLang = v; setPref("sublang", v); };
@@ -1677,10 +1688,10 @@ function setVolume(v) {
 
 const RELEASES = "https://github.com/WallisSkill/stremio-display/releases/download";
 const APPS = [
-  ["iPhone", `${RELEASES}/ios/WiSTV.ipa`, ".ipa", "Cài từ máy tính bằng Sideloadly với Apple ID của bạn, ký lại mỗi 7 ngày."],
-  ["Android", `${RELEASES}/android/WiSTV.apk`, ".apk", "Cài thẳng trên điện thoại Android 8 trở lên (64-bit)."],
-  ["Windows", `${RELEASES}/windows/WiSTV-setup.exe`, ".exe", "Windows 10 và 11, tự cập nhật khi có bản mới."],
-  ["Linux", `${RELEASES}/linux/WiSTV-linux-amd64.deb`, ".deb", "Ubuntu 22.04 trở lên và Debian 12, video phát trong cửa sổ mpv riêng."],
+  ["iPhone", `${RELEASES}/ios/WiSTV.ipa`, ".ipa", "set.appIos"],
+  ["Android", `${RELEASES}/android/WiSTV.apk`, ".apk", "set.appAndroid"],
+  ["Windows", `${RELEASES}/windows/WiSTV-setup.exe`, ".exe", "set.appWindows"],
+  ["Linux", `${RELEASES}/linux/WiSTV-linux-amd64.deb`, ".deb", "set.appLinux"],
 ];
 const IPHONE_FS =!TAURI && !document.documentElement.requestFullscreen && !document.documentElement.webkitRequestFullscreen;
 const STANDALONE = !TAURI && (navigator.standalone === true || window.matchMedia("(display-mode: standalone)").matches);
@@ -1847,7 +1858,7 @@ function renderEpisodes(box) {
     const cur = v.id === c.vid;
     const date = v.released ? new Date(v.released) : null;
     const future = date && date > now;
-    const note = cur ? "Đang xem" : future ? `Ra ngày ${date.toLocaleDateString("vi-VN")}` : date && !isNaN(date) ? date.toLocaleDateString("vi-VN") : "";
+    const note = cur ? "Đang xem" : future ? `Ra ngày ${formatDate(date)}` : date && !isNaN(date) ? formatDate(date) : "";
     const num = v.episode ?? v.number ?? "?";
     const thumb = v.thumbnail
       ? h("span", { class: "pl-ep-thumb" }, h("img", { src: v.thumbnail, alt: "", loading: "lazy", onerror: (e) => e.target.remove() }), h("span", { class: "pl-ep-badge" }, num))
@@ -3112,7 +3123,7 @@ function renderDiscover(view, params = {}) {
   const option = (value, label, on) => { const o = h("option", { value }, label); o.selected = on; return o; };
   let cur = null;
   const fill = () => {
-    put(selType, ...types.map((t) => option(t, TYPE_LABEL[t] || t, t === state.type)));
+    put(selType, ...types.map((t) => option(t, typeLabel(t) || t, t === state.type)));
     const cats = all.filter((c) => c.cat.type === state.type);
     if (!cats.some((c) => c.key === state.key)) state.key = cats[0].key;
     put(selCat, ...cats.map((c) => option(c.key, `${c.cat.name || c.cat.id} · ${c.addon.manifest.name}`, c.key === state.key)));
@@ -3282,7 +3293,7 @@ function renderSearch(view, { q = "" } = {}) {
     const cats = catalogsOf(null, { search: true });
     if (!cats.length) { put(results, h("div", { class: "empty" }, "Không addon nào hỗ trợ tìm kiếm.")); return; }
     put(results, ...cats.map(({ addon, cat }) =>
-      shelf(`${TYPE_LABEL[cat.type] || cat.type}`, `${cat.name || cat.id} · ${addon.manifest.name}`, "poster",
+      shelf(`${typeLabel(cat.type) || cat.type}`, `${cat.name || cat.id} · ${addon.manifest.name}`, "poster",
         async () => (mine === token ? call("catalog", { url: addon.transportUrl, kind: cat.type, id: cat.id, extra: [["search", term]] }) : []),
         { eager: true })));
   };
@@ -3305,38 +3316,38 @@ function renderSearch(view, { q = "" } = {}) {
 }
 
 function togetherPanel() {
-  return h("div", { class: "panel" }, h("h3", {}, "Xem chung"),
+  return h("div", { class: "panel" }, h("h3", {}, tr("tg.title")),
     h("p", { class: "hint" }, inRoom()
-      ? `Bạn đang ở phòng ${room.code}${room.host ? " với vai trò chủ phòng" : ""}.`
-      : "Xem cùng lúc với bạn bè ở máy khác, chỉ chủ phòng điều khiển. Muốn tạo phòng: mở phim rồi bấm nút Xem chung trong trình phát."),
+      ? tr(room.host ? "tg.inRoomHost" : "tg.inRoom", { code: room.code })
+      : tr("tg.intro")),
     h("div", { style: "display:flex;gap:12px;flex-wrap:wrap;margin-top:12px" },
       inRoom()
-        ? h("button", { class: "btn primary focusable", onclick: () => roomPanel() }, "Mở phòng")
-        : h("button", { class: "btn primary focusable", onclick: () => joinRoom("") }, "Vào phòng bằng mã")));
+        ? h("button", { class: "btn primary focusable", onclick: () => roomPanel() }, tr("tg.open"))
+        : h("button", { class: "btn primary focusable", onclick: () => joinRoom("") }, tr("tg.joinByCode"))));
 }
 
 function togetherBody() {
   const step = (n, title, text) => h("div", { class: "tg-step" }, h("b", {}, String(n)), h("div", {}, h("strong", {}, title), h("span", {}, text)));
   const status = inRoom()
     ? h("div", { class: "panel tg-live" },
-        h("div", { class: "tg-code" }, h("span", {}, "Phòng"), h("b", {}, room.code)),
-        h("p", { class: "hint" }, !room.online ? "Đang kết nối phòng…"
-          : `${room.members.length || 1} người trong phòng${room.host ? " · bạn là chủ phòng" : ` · chủ phòng ${roomHostName()}`}`),
-        h("div", { class: "tg-actions" }, h("button", { class: "btn primary focusable", onclick: () => roomPanel() }, "Mở phòng")))
+        h("div", { class: "tg-code" }, h("span", {}, tr("tg.room")), h("b", {}, room.code)),
+        h("p", { class: "hint" }, !room.online ? tr("tg.connecting")
+          : tr("tg.members", { n: room.members.length || 1 }) + (room.host ? tr("tg.youHost") : tr("tg.hostIs", { name: roomHostName() }))),
+        h("div", { class: "tg-actions" }, h("button", { class: "btn primary focusable", onclick: () => roomPanel() }, tr("tg.open"))))
     : h("div", { class: "panel tg-join" },
-        h("h3", {}, "Vào phòng của bạn bè"),
-        h("p", { class: "hint" }, "Nhập mã 6 ký tự bạn bè gửi, hoặc mở liên kết mời."),
-        h("div", { class: "tg-actions" }, h("button", { class: "btn primary focusable", onclick: () => joinRoom("") }, "Nhập mã phòng")));
-  const how = h("div", { class: "panel" }, h("h3", {}, "Tạo phòng mới"),
-    step(1, "Mở một phim", "Chọn phim hoặc tập muốn xem và bấm Phát."),
-    step(2, "Bấm Xem chung", "Nút có hình hai người trong trình phát."),
-    step(3, "Gửi mã cho bạn bè", "Mọi người xem cùng lúc, chỉ chủ phòng điều khiển."));
+        h("h3", {}, tr("tg.joinTitle")),
+        h("p", { class: "hint" }, tr("tg.joinHint")),
+        h("div", { class: "tg-actions" }, h("button", { class: "btn primary focusable", onclick: () => joinRoom("") }, tr("tg.enterCode"))));
+  const how = h("div", { class: "panel" }, h("h3", {}, tr("tg.newRoom")),
+    step(1, tr("tg.step1"), tr("tg.step1Text")),
+    step(2, tr("tg.step2"), tr("tg.step2Text")),
+    step(3, tr("tg.step3"), tr("tg.step3Text")));
   return [status, how];
 }
 
 function renderTogether(view) {
   document.body.classList.add("dim");
-  view.append(h("div", { class: "page plain together" }, h("h1", {}, "Xem chung"), h("div", { id: "together-body" }, ...togetherBody())));
+  view.append(h("div", { class: "page plain together" }, h("h1", {}, tr("tg.title")), h("div", { id: "together-body" }, ...togetherBody())));
 }
 
 function paintNav() {
@@ -3354,23 +3365,23 @@ function discoverMenu(chip) {
   const cur = app.stack[app.stack.length - 1];
   const from = cur?.route === "discover" ? { ...saved, ...cur.params } : saved;
   const sel = { type: types.includes(from.type) ? from.type : types[0], key: from.key, genre: from.genre || "" };
-  const menu = h("div", { class: "chip-menu dc-menu", role: "dialog", "aria-label": "Khám phá" });
+  const menu = h("div", { class: "chip-menu dc-menu", role: "dialog", "aria-label": tr("nav.discover") });
   const pill = (label, on, onclick) => h("button", { class: `dm-pill focusable${on ? " on" : ""}`, onclick }, label);
   const draw = () => {
-    if (!types.length) { put(menu, h("div", { class: "chip-menu-h" }, "Chưa có addon nào có danh mục để khám phá.")); return; }
+    if (!types.length) { put(menu, h("div", { class: "chip-menu-h" }, tr("dm.empty"))); return; }
     const cats = all.filter((c) => c.cat.type === sel.type);
     if (!cats.some((c) => c.key === sel.key)) { sel.key = cats[0].key; sel.genre = ""; }
     const cat = cats.find((c) => c.key === sel.key);
     if (sel.genre && !cat.genres.includes(sel.genre)) sel.genre = "";
     const genres = [...(cat.genreRequired ? [] : [""]), ...cat.genres];
     put(menu,
-      h("div", { class: "dm-sec" }, h("div", { class: "chip-menu-h" }, "Loại"),
-        h("div", { class: "dm-row" }, ...types.map((t) => pill(TYPE_LABEL[t] || t, t === sel.type, () => { sel.type = t; draw(); })))),
-      h("div", { class: "dm-sec" }, h("div", { class: "chip-menu-h" }, "Danh mục"),
+      h("div", { class: "dm-sec" }, h("div", { class: "chip-menu-h" }, tr("dm.type")),
+        h("div", { class: "dm-row" }, ...types.map((t) => pill(typeLabel(t) || t, t === sel.type, () => { sel.type = t; draw(); })))),
+      h("div", { class: "dm-sec" }, h("div", { class: "chip-menu-h" }, tr("dm.catalog")),
         h("div", { class: "dm-row wrap" }, ...cats.map((c) => pill(`${c.cat.name || c.cat.id} · ${c.addon.manifest.name}`, c.key === sel.key, () => { sel.key = c.key; draw(); })))),
-      genres.length > 1 || cat.genreRequired ? h("div", { class: "dm-sec" }, h("div", { class: "chip-menu-h" }, "Thể loại"),
-        h("div", { class: "dm-genres" }, ...genres.map((g) => h("button", { class: `chip-item focusable${g === sel.genre ? " on" : ""}`, onclick: () => pick(g) }, g || "Mọi thể loại")))) : null,
-      h("div", { class: "dm-foot" }, h("button", { class: "btn primary focusable", onclick: () => pick(cat.genreRequired ? sel.genre || cat.genres[0] : sel.genre) }, "Xem danh mục")));
+      genres.length > 1 || cat.genreRequired ? h("div", { class: "dm-sec" }, h("div", { class: "chip-menu-h" }, tr("dm.genre")),
+        h("div", { class: "dm-genres" }, ...genres.map((g) => h("button", { class: `chip-item focusable${g === sel.genre ? " on" : ""}`, onclick: () => pick(g) }, g || tr("dm.allGenres"))))) : null,
+      h("div", { class: "dm-foot" }, h("button", { class: "btn primary focusable", onclick: () => pick(cat.genreRequired ? sel.genre || cat.genres[0] : sel.genre) }, tr("dm.open"))));
   };
   const pick = (genre) => { close(); go("discover", { type: sel.type, key: sel.key, genre }); };
   draw();
@@ -3399,32 +3410,32 @@ function discoverMenu(chip) {
 
 async function renderSettings(view) {
   document.body.classList.add("dim");
-  const name = app.user?.fullname || app.user?.email || "Khách";
+  const name = app.user?.fullname || app.user?.email || tr("set.guest");
   const account = h("div", { class: "panel" },
-    h("h3", {}, "Tài khoản"),
+    h("h3", {}, tr("set.account")),
     h("div", { class: "account" },
       h("div", { class: "avatar" }, initial()),
-      h("div", { class: "who" }, h("b", {}, name), h("span", {}, app.user ? "Đã đồng bộ với Stremio" : "Chế độ khách · chỉ có Cinemeta")),
+      h("div", { class: "who" }, h("b", {}, name), h("span", {}, app.user ? tr("set.synced") : tr("set.guestMode"))),
       app.user
-        ? h("button", { class: "btn focusable", onclick: () => logout() }, "Đăng xuất")
-        : h("button", { class: "btn primary focusable", onclick: () => go("login", {}, true) }, "Đăng nhập")));
+        ? h("button", { class: "btn focusable", onclick: () => logout() }, tr("set.logout"))
+        : h("button", { class: "btn primary focusable", onclick: () => go("login", {}, true) }, tr("set.login"))));
   const me = currentProfile();
-  const people = app.user ? h("div", { class: "panel" }, h("h3", {}, "Hồ sơ người xem"),
+  const people = app.user ? h("div", { class: "panel" }, h("h3", {}, tr("set.profiles")),
     h("div", { class: "account" },
       profileFace(me, "pf-face mid"),
       h("div", { class: "who" }, h("b", {}, profileName(me)),
-        h("span", {}, app.profiles.list.length > 1 ? `${app.profiles.list.length} hồ sơ · dùng chung addon, Thư viện và lịch sử riêng` : "Thêm hồ sơ để mỗi người có Thư viện và lịch sử xem riêng")),
-      h("button", { class: "btn focusable", onclick: () => openProfiles({ manage: true }).then(() => { paintAvatar(); const cur = app.stack[app.stack.length - 1]; if (cur?.route === "settings") render(); }) }, "Quản lý hồ sơ"))) : null;
+        h("span", {}, app.profiles.list.length > 1 ? tr("set.profilesCount", { n: app.profiles.list.length }) : tr("set.profilesAdd"))),
+      h("button", { class: "btn focusable", onclick: () => openProfiles({ manage: true }).then(() => { paintAvatar(); const cur = app.stack[app.stack.length - 1]; if (cur?.route === "settings") render(); }) }, tr("set.profilesManage")))) : null;
   const together = togetherPanel();
-  const list = h("div", { class: "panel" }, h("h3", {}, `Addon (${app.addons.length})`),
+  const list = h("div", { class: "panel" }, h("h3", {}, tr("set.addons", { n: app.addons.length })),
     h("div", { style: "display:flex;gap:12px;align-items:center;flex-wrap:wrap" },
-      h("button", { class: "btn primary focusable", onclick: () => go("addons") }, "Quản lý addon"),
-      h("span", { class: "hint" }, "Cài, gỡ, sắp xếp addon ngay trong WiS TV. Danh sách đồng bộ với tài khoản Stremio.")));
-  const help = h("div", { class: "panel" }, h("h3", {}, "Điều khiển"),
+      h("button", { class: "btn primary focusable", onclick: () => go("addons") }, tr("set.addonsManage")),
+      h("span", { class: "hint" }, tr("set.addonsHint"))));
+  const help = h("div", { class: "panel" }, h("h3", {}, tr("set.controls")),
     h("div", { class: "hint" },
-      "Mũi tên để di chuyển, Enter để chọn, Esc hoặc Backspace để quay lại. Giữ chuột trái và kéo để cuộn các hàng phim.", h("br"),
-      "Trong trình phát: Space hoặc bấm vào hình để dừng/tiếp, ← → tua 10 giây (Shift: 1 phút), ↑ ↓ hoặc lăn chuột chỉnh âm lượng, M tắt tiếng, F hoặc bấm đúp để toàn màn hình, C chọn âm thanh và phụ đề, N tập tiếp, Esc quay lại."));
-  const pc = TAURI ? null : h("div", { class: "panel" }, h("h3", {}, "Máy tính phát phim"));
+      tr("set.keysNav"), h("br"),
+      tr("set.keysPlayer")));
+  const pc = TAURI ? null : h("div", { class: "panel" }, h("h3", {}, tr("set.pc")));
   if (pc) {
     const status = h("div", { class: "pc-status" }, h("div", { class: "spinner small" }));
     const check = async (force) => {
@@ -3433,34 +3444,38 @@ async function renderSettings(view) {
       try { s = await call("server_status", { force }); } catch (e) {}
       const dot = h("i", { class: `pc-dot ${s.online ? "on" : ""}` });
       const msg = s.online
-        ? "Đã kết nối. Xem được torrent và mọi định dạng phim qua máy tính."
+        ? tr("set.pcOn")
         : s.linked
-          ? "Máy tính đã đăng ký nhưng không trả lời. Kiểm tra máy còn bật và WiS TV Relay đang chạy."
+          ? tr("set.pcSilent")
           : app.user
-            ? "Chưa thấy máy tính. Bật máy, đăng nhập app WiS TV trên máy tính và chạy WiS TV Relay."
-            : "Đăng nhập tài khoản Stremio để kết nối với máy tính.";
+            ? tr("set.pcNone")
+            : tr("set.pcLogin");
       put(status, dot, h("span", {}, msg));
     };
-    pc.append(status, h("div", { style: "margin-top:14px" }, h("button", { class: "btn focusable", onclick: () => check(true) }, "Kiểm tra lại")),
-      h("p", { class: "hint" }, "Không có máy tính thì vẫn xem được các nguồn có link trực tiếp mà trình duyệt phát được (MP4, HLS)."));
+    pc.append(status, h("div", { style: "margin-top:14px" }, h("button", { class: "btn focusable", onclick: () => check(true) }, tr("set.pcRetry"))),
+      h("p", { class: "hint" }, tr("set.pcHint")));
     check(false);
   }
-  const ios = TAURI ? null : h("div", { class: "panel" }, h("h3", {}, "Tải ứng dụng"),
-    h("p", { class: "hint" }, "Bản app phát được mọi định dạng (MKV, HEVC, phụ đề trong file) và tự phát torrent ngay trên máy, không cần máy tính khác."),
+  const ios = TAURI ? null : h("div", { class: "panel" }, h("h3", {}, tr("set.apps")),
+    h("p", { class: "hint" }, tr("set.appsHint")),
     h("div", { class: "dl-list" }, ...APPS.map(([name, url, ext, note]) => h("div", { class: "dl-item" },
-      h("div", {}, h("b", {}, name), h("span", {}, note)),
-      h("a", { class: "btn focusable", href: url, rel: "noopener" }, `Tải ${ext}`)))));
-  const touchHelp = h("div", { class: "hint" }, "Trên điện thoại: chạm vào hình để hiện/ẩn điều khiển, chạm đúp bên trái/phải để tua 10 giây, chạm đúp giữa để dừng/tiếp.");
-  const subs = h("div", { class: "panel" }, h("h3", {}, "Phụ đề"));
-  const own = app.user && hasProfiles() ? h("p", { class: "hint", style: "margin:-6px 0 18px" }, `Phụ đề, kiểu chữ phụ đề, chế độ dãn hình, bộ lọc Khám phá và lịch sử tìm kiếm bên dưới là của hồ sơ ${profileName(currentProfile())}, đồng bộ trên mọi máy.`) : null;
-  const paintSubs = () => put(subs, h("h3", {}, "Phụ đề"),
-    h("p", { class: "hint" }, "Ngôn ngữ phụ đề mặc định. Phim có sẵn phụ đề ngôn ngữ này thì dùng luôn, không có thì tự lấy từ addon. Phụ đề bạn chọn trong lúc xem được nhớ riêng cho từng phim."),
+      h("div", {}, h("b", {}, name), h("span", {}, tr(note))),
+      h("a", { class: "btn focusable", href: url, rel: "noopener" }, tr("set.appDownload", { ext }))))));
+  const touchHelp = h("div", { class: "hint" }, tr("set.touch"));
+  const subs = h("div", { class: "panel" }, h("h3", {}, tr("set.subs")));
+  const own = app.user && hasProfiles() ? h("p", { class: "hint", style: "margin:-6px 0 18px" }, tr("set.subsOwn", { name: profileName(currentProfile()) })) : null;
+  const paintSubs = () => put(subs, h("h3", {}, tr("set.subs")),
+    h("p", { class: "hint" }, tr("set.subsHint")),
     h("div", { class: "pl-pick", style: "display:flex;gap:8px;flex-wrap:wrap;margin-top:12px" },
-      SUB_LANGS.map(([code, label]) => h("button", { class: `btn focusable ${subLang === code ? "primary" : ""}`, onclick: () => { setSubLang(code); paintSubs(); } }, label))));
+      SUB_LANGS.map(([code, label]) => h("button", { class: `btn focusable ${subLang === code ? "primary" : ""}`, onclick: () => { setSubLang(code); paintSubs(); } }, label ?? tr("set.subsOff")))));
   paintSubs();
+  const language = h("div", { class: "panel" }, h("h3", {}, tr("set.lang")),
+    h("p", { class: "hint" }, tr("set.langHint")),
+    h("div", { class: "pl-pick", style: "display:flex;gap:8px;flex-wrap:wrap;margin-top:12px" },
+      LANGS.map(([code, label]) => h("button", { class: `btn focusable ${getLang() === code ? "primary" : ""}`, lang: code, onclick: () => chooseLang(code) }, label))));
   const version = h("p", { class: "hint", style: "margin-top:18px" });
-  if (TAURI?.app?.getVersion) TAURI.app.getVersion().then((v) => { version.textContent = `WiS TV phiên bản ${v}`; }).catch(() => {});
-  view.append(h("div", { class: "page plain" }, h("h1", {}, "Cài đặt"), account, people, together, own, subs, ios, pc, list, TOUCH ? h("div", { class: "panel" }, h("h3", {}, "Điều khiển"), touchHelp) : help, version));
+  if (TAURI?.app?.getVersion) TAURI.app.getVersion().then((v) => { version.textContent = tr("set.version", { v }); }).catch(() => {});
+  view.append(h("div", { class: "page plain" }, h("h1", {}, tr("set.title")), account, people, language, together, own, subs, ios, pc, list, TOUCH ? h("div", { class: "panel" }, h("h3", {}, tr("set.controls")), touchHelp) : help, version));
   $(".panel .btn")?.focus({ preventScroll: true });
 }
 
@@ -3468,16 +3483,16 @@ async function renderLogin(view) {
   $("#topbar").hidden = true;
   document.body.classList.remove("dim");
   const wall = h("div", { class: "wall" });
-  const email = h("input", { class: "field", type: "email", placeholder: "Email Stremio", autocomplete: "username" });
-  const pass = h("input", { class: "field", type: "password", placeholder: "Mật khẩu", autocomplete: "current-password" });
+  const email = h("input", { class: "field", type: "email", placeholder: tr("login.email"), autocomplete: "username" });
+  const pass = h("input", { class: "field", type: "password", placeholder: tr("login.password"), autocomplete: "current-password" });
   const err = h("p", { class: "err" });
-  const submit = h("button", { class: "btn primary focusable", type: "submit" }, "Đăng nhập");
+  const submit = h("button", { class: "btn primary focusable", type: "submit" }, tr("set.login"));
   const form = h("form", {}, email, pass, err, submit);
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     err.textContent = "";
     submit.disabled = true;
-    submit.textContent = "Đang đăng nhập…";
+    submit.textContent = tr("login.busy");
     try {
       app.user = await call("login", { email: email.value, password: pass.value });
       app.guest = false;
@@ -3485,16 +3500,17 @@ async function renderLogin(view) {
     } catch (x) {
       err.textContent = String(x);
       submit.disabled = false;
-      submit.textContent = "Đăng nhập";
+      submit.textContent = tr("set.login");
     }
   });
-  const guest = h("button", { class: "link focusable", onclick: async () => { app.guest = true; loadPrefs(); await boot(); } }, "Dùng thử không cần tài khoản");
-  const together = h("button", { class: "link focusable", onclick: async () => { app.guest = true; loadPrefs(); await boot(); joinRoom(""); } }, "Vào phòng xem chung bằng mã");
+  const guest = h("button", { class: "link focusable", onclick: async () => { app.guest = true; loadPrefs(); await boot(); } }, tr("login.guest"));
+  const together = h("button", { class: "link focusable", onclick: async () => { app.guest = true; loadPrefs(); await boot(); joinRoom(""); } }, tr("login.room"));
   view.append(h("div", { class: "login page" }, wall,
     h("div", { class: "login-card" },
       h("div", { class: "brand" }, h("span", { class: "brand-w" }, "WiS"), h("span", { class: "brand-tv" }, "TV")),
-      h("p", {}, "Đăng nhập bằng tài khoản Stremio để dùng addon và thư viện của bạn."),
-      form, guest, together)));
+      h("p", {}, tr("login.intro")),
+      form, guest, together,
+      h("div", { class: "login-langs" }, ...LANGS.map(([code, label]) => h("button", { class: `link focusable${getLang() === code ? " on" : ""}`, lang: code, onclick: () => chooseLang(code) }, label))))));
   email.focus({ preventScroll: true });
   try {
     const addons = await web.addons();
@@ -3613,7 +3629,7 @@ async function renderCalendar(view, params) {
   const upcoming = eps.filter((x) => x.d >= start).slice(0, 24);
   const recent = eps.filter((x) => x.d < start && start - x.d <= 14 * 86400000).reverse().slice(0, 24);
   const listOf = (title, items) => items.length ? h("section", { class: "cal-list" }, h("h2", { class: "shelf-title" }, title),
-    items.map((x) => h("div", { class: "cal-row" }, h("span", { class: "cal-date" }, x.d.toLocaleDateString("vi-VN", { weekday: "short", day: "2-digit", month: "2-digit" })), calEpisode(x, "cal-ep wide")))) : null;
+    items.map((x) => h("div", { class: "cal-row" }, h("span", { class: "cal-date" }, formatDate(x.d, { weekday: "short", day: "2-digit", month: "2-digit" })), calEpisode(x, "cal-ep wide")))) : null;
   put(body, grid, h("div", { class: "cal-lists" }, listOf("Sắp chiếu", upcoming), listOf("Mới ra trong 2 tuần", recent)));
 }
 
@@ -3622,7 +3638,7 @@ const TYPE_FILTERS = [["", "Tất cả"], ["movie", "Phim"], ["series", "Phim b�
 
 function addonRow(a, actions) {
   const mf = a.manifest || {};
-  const types = (mf.types || []).map((t) => TYPE_LABEL[t] || t).join(" · ");
+  const types = (mf.types || []).map((k) => typeLabel(k) || k).join(" · ");
   const res = (mf.resources || []).map((r) => (typeof r === "string" ? r : r.name)).filter(Boolean);
   const caps = [res.includes("stream") ? "Nguồn phát" : "", res.includes("catalog") || (mf.catalogs || []).length ? "Danh mục" : "", res.includes("subtitles") ? "Phụ đề" : ""].filter(Boolean).join(" · ");
   const ph = h("div", { class: "ph" });

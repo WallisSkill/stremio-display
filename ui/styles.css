@@ -27,6 +27,8 @@ html, body {
   overflow: hidden;
   user-select: none;
 }
+:lang(zh) { font-family: "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", "Noto Sans CJK SC", system-ui, sans-serif; }
+:root:lang(zh) :is([lang="vi"], [lang="en"]) { font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; }
 
 html, button, input, a, .pl-menu { touch-action: manipulation; }
 button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }
@@ -350,6 +352,9 @@ a.btn { text-decoration: none; }
 .login-card .btn { width: 100%; justify-content: center; margin-top: 8px; }
 .login-card .link { margin-top: 18px; font-size: 14px; color: var(--muted); text-decoration: underline; text-underline-offset: 3px; outline: none; border-radius: 6px; padding: 4px 8px; }
 .login-card .link:focus-visible { background: #fff; color: #000; text-decoration: none; }
+.login-langs { display: flex; justify-content: center; flex-wrap: wrap; gap: 2px; margin-top: 20px; }
+.login-card .login-langs .link { margin-top: 0; text-decoration: none; }
+.login-card .login-langs .link.on { color: var(--text); font-weight: 600; }
 .err { color: #ff8a80; font-size: 14px; min-height: 20px; margin: 4px 0 0; }
 
 .toast {
