@@ -319,11 +319,19 @@ fn open_external(app: &AppHandle, url: &str) -> R<()> {
     #[cfg(desktop)]
     {
         let _ = app;
-        std::process::Command::new("rundll32")
-            .args(["url.dll,FileProtocolHandler", url])
-            .spawn()
-            .map(|_| ())
-            .map_err(|e| e.to_string())
+        #[cfg(windows)]
+        let mut cmd = std::process::Command::new("rundll32");
+        #[cfg(windows)]
+        cmd.args(["url.dll,FileProtocolHandler", url]);
+        #[cfg(target_os = "macos")]
+        let mut cmd = std::process::Command::new("open");
+        #[cfg(target_os = "macos")]
+        cmd.arg(url);
+        #[cfg(not(any(windows, target_os = "macos")))]
+        let mut cmd = std::process::Command::new("xdg-open");
+        #[cfg(not(any(windows, target_os = "macos")))]
+        cmd.arg(url);
+        cmd.spawn().map(|_| ()).map_err(|e| e.to_string())
     }
 }
 
@@ -371,6 +379,11 @@ fn mpv_config_dir(st: &AppState) -> R<String> {
         std::fs::copy(src, &font).map_err(|e| e.to_string())?;
     }
     Ok(dir.to_string_lossy().into_owned())
+}
+
+#[cfg(target_os = "linux")]
+async fn video_target(_app: &AppHandle, _st: &AppState) -> R<Target> {
+    Ok((0, Vec::new()))
 }
 
 #[cfg(target_os = "android")]

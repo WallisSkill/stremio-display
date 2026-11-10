@@ -21,7 +21,7 @@ futures = "0.3"
 urlencoding = "2"
 librqbit = { version = "9.1", default-features = false, features = ["rust-tls"] }
 
-[target.'cfg(any(windows, target_os = "android"))'.dependencies]
+[target.'cfg(any(windows, target_os = "android", target_os = "linux"))'.dependencies]
 libloading = "0.8"
 
 [target.'cfg(any(target_os = "ios", target_os = "android"))'.dependencies]

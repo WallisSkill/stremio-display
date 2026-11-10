@@ -1,6 +1,6 @@
 #[cfg(windows)]
 use libloading::os::windows::{Library, LOAD_WITH_ALTERED_SEARCH_PATH};
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "linux"))]
 use libloading::Library;
 use serde_json::{json, Value};
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
@@ -58,7 +58,7 @@ const FORMAT_BYTE_ARRAY: c_int = 9;
 type Handle = *mut c_void;
 
 struct Mpv {
-    #[cfg(any(windows, target_os = "android"))]
+    #[cfg(any(windows, target_os = "android", target_os = "linux"))]
     _lib: Library,
     create: unsafe extern "C" fn() -> Handle,
     initialize: unsafe extern "C" fn(Handle) -> c_int,
@@ -115,7 +115,21 @@ fn open_lib() -> Result<Library, String> {
     }
 }
 
-#[cfg(not(any(windows, target_os = "android")))]
+#[cfg(target_os = "linux")]
+fn open_lib() -> Result<Library, String> {
+    let mut names: Vec<String> = std::env::var("WISTV_LIBMPV").into_iter().collect();
+    names.extend(["libmpv.so.2", "libmpv.so.1", "libmpv.so"].map(String::from));
+    let mut last = String::new();
+    for name in &names {
+        match unsafe { Library::new(name) } {
+            Ok(lib) => return Ok(lib),
+            Err(e) => last = e.to_string(),
+        }
+    }
+    Err(format!("Không tìm thấy libmpv, hãy cài gói libmpv2 (hoặc libmpv1) rồi mở lại WiS TV: {last}"))
+}
+
+#[cfg(not(any(windows, target_os = "android", target_os = "linux")))]
 mod linked {
     use super::{Handle, MpvEvent, MpvNode};
     use std::ffi::{c_char, c_int, c_void};
@@ -137,7 +151,7 @@ mod linked {
 }
 
 impl Mpv {
-    #[cfg(not(any(windows, target_os = "android")))]
+    #[cfg(not(any(windows, target_os = "android", target_os = "linux")))]
     fn load() -> Result<Self, String> {
         Ok(Self {
             create: linked::mpv_create,
@@ -155,7 +169,7 @@ impl Mpv {
         })
     }
 
-    #[cfg(any(windows, target_os = "android"))]
+    #[cfg(any(windows, target_os = "android", target_os = "linux"))]
     fn load() -> Result<Self, String> {
         let lib = open_lib()?;
         unsafe {
@@ -360,7 +374,19 @@ const PLATFORM_OPTIONS: &[(&str, &str)] = &[
     ("config", "yes"),
 ];
 
-#[cfg(not(any(windows, target_os = "android")))]
+#[cfg(target_os = "linux")]
+const PLATFORM_OPTIONS: &[(&str, &str)] = &[
+    ("hwdec", "auto-safe"),
+    ("osc", "yes"),
+    ("osd-level", "1"),
+    ("input-default-bindings", "yes"),
+    ("input-vo-keyboard", "yes"),
+    ("input-cursor", "yes"),
+    ("cursor-autohide", "1000"),
+    ("sub-font", "Noto Sans"),
+];
+
+#[cfg(not(any(windows, target_os = "android", target_os = "linux")))]
 const PLATFORM_OPTIONS: &[(&str, &str)] = &[
     ("vo", "gpu-next"),
     ("gpu-api", "vulkan"),
@@ -491,8 +517,10 @@ impl Player {
         }
         let wid = req.wid.to_string();
         unsafe {
+            if req.wid != 0 {
+                lib.set_option(ctx, "wid", &wid);
+            }
             for (k, v) in [
-                ("wid", wid.as_str()),
                 ("force-window", "yes"),
                 ("keepaspect", "yes"),
                 ("osc", "no"),

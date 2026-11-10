@@ -1,0 +1,17 @@
+{
+  "bundle": {
+    "active": true,
+    "targets": [
+      "deb",
+      "appimage"
+    ],
+    "createUpdaterArtifacts": true,
+    "linux": {
+      "deb": {
+        "depends": [
+          "libmpv2 | libmpv1"
+        ]
+      }
+    }
+  }
+}

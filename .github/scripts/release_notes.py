@@ -9,17 +9,19 @@ TAG, VERSION = sys.argv[1], sys.argv[2]
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 MARK = re.compile(r"<!-- wistv-notes (.*?) -->", re.S)
 KINDS = {"feat": "Mới", "fix": "Sửa", "perf": "Nhanh hơn"}
-SCOPES = {"ios": {"ios"}, "android": {"android"}, "windows": {"windows"}, "desktop": {"windows"}, "mobile": {"ios", "android"}}
+SCOPES = {"ios": {"ios"}, "android": {"android"}, "windows": {"windows"}, "linux": {"linux"}, "desktop": {"windows", "linux"}, "mobile": {"ios", "android"}}
 OTHER = {
     "ios": ["plugins/video/android", "src-tauri/src/android.rs"],
     "android": ["plugins/video/ios"],
     "windows": ["plugins/video/android", "plugins/video/ios", "src-tauri/src/android.rs"],
+    "linux": ["plugins/video/android", "plugins/video/ios", "src-tauri/src/android.rs"],
 }
-TITLES = {"ios": "WiS TV cho iPhone", "windows": "WiS TV cho Windows", "android": "WiS TV cho Android"}
+TITLES = {"ios": "WiS TV cho iPhone", "windows": "WiS TV cho Windows", "android": "WiS TV cho Android", "linux": "WiS TV cho Linux"}
 INTRO = {
     "ios": "Cài bằng Sideloadly, ký lại mỗi 7 ngày.",
     "windows": "Bản cài đặt cho Windows. Ứng dụng tự cập nhật khi mở.",
     "android": "Bản cài đặt cho Android (arm64).",
+    "linux": "Gói .deb cho Ubuntu/Debian (tự cài libmpv) và bản AppImage tự cập nhật (cần libmpv2 có sẵn trên máy).",
 }
 KEEP = 15
 FIRST = 12

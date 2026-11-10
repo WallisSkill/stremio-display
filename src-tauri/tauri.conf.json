@@ -41,7 +41,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDA1M0Q0MDdBRTQ4ODlFMzkKUldRNW5vamtla0E5QmVrVjUwaUx0cXFtRDJpbWp1UFpJRjR3bDlLSnFldGJBZFdyL0NxQWVjSUoK",
       "endpoints": [
-        "https://github.com/WallisSkill/stremio-display/releases/download/windows/latest.json"
+        "https://github.com/WallisSkill/stremio-display/releases/download/{{target}}/latest.json"
       ],
       "windows": {
         "installMode": "passive"
