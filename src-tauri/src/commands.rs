@@ -832,7 +832,7 @@ async fn save_progress(st: &AppState, ctx: &PlayCtx, p: &Progress) -> R<()> {
     let Some(key) = st.auth_key() else {
         return Ok(());
     };
-    if ctx.id.starts_with("local:") || p.duration_ms == 0 {
+    if ctx.id.starts_with("local:") || ctx.kind == "tv" || p.duration_ms == 0 {
         return Ok(());
     }
     let now = now_iso();

@@ -80,6 +80,7 @@ const ICON = {
   source: '<svg viewBox="0 0 24 24"><rect x="3.5" y="4" width="17" height="6" rx="1.8" fill="none" stroke="currentColor" stroke-width="2"/><rect x="3.5" y="14" width="17" height="6" rx="1.8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M7 7h.01M7 17h.01" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>',
   list: '<svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="12" height="8.5" rx="1.8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M18.5 7v9.5a2 2 0 0 1-2 2H6.5M3.5 17h0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   close: '<svg viewBox="0 0 24 24"><path d="m6.5 6.5 11 11m0-11-11 11" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>',
+  tv: '<svg viewBox="0 0 24 24"><rect x="2.8" y="6.2" width="18.4" height="12.6" rx="2.6" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="m8.4 2.6 3.6 3.4 3.6-3.4M8 21.4h8" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   people: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8.5" r="3.3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M3 19.5c.6-3.3 3-5.2 6-5.2s5.4 1.9 6 5.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M15.5 5.6a3.1 3.1 0 0 1 0 5.9M17.6 14.6c1.8.6 3 2.2 3.4 4.9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   cog: '<svg viewBox="0 0 24 24"><path d="M9.72 4.64 9.97 2.4h4.06l.25 2.24 1.31.55 1.76-1.41 2.87 2.87-1.41 1.76.55 1.31 2.24.25v4.06l-2.24.25-.55 1.31 1.41 1.76-2.87 2.87-1.76-1.41-1.31.55-.25 2.24H9.97l-.25-2.24-1.31-.55-1.76 1.41-2.87-2.87 1.41-1.76-.55-1.31-2.24-.25V9.97l2.24-.25.55-1.31-1.41-1.76 2.87-2.87 1.76 1.41Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="12" r="3.6" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>',
 };
@@ -786,7 +787,7 @@ function renderBrowse(view, filterType) {
     }
   }
 
-  const cats = catalogsOf(filterType).slice(0, 16);
+  const cats = catalogsOf(filterType).filter((c) => filterType || c.cat.type !== "tv").slice(0, 16);
   if (!cats.length) {
     info.append(h("h1", { class: "title-text" }, "Chưa có danh mục"), h("p", { class: "desc" }, "Mở mục Addon để cài thêm addon có danh mục phim."));
   }
@@ -2808,6 +2809,101 @@ async function renderLibrary(view) {
 
 const WIDE = window.matchMedia("(min-width: 1100px)");
 
+const TV_FRESH_MS = 15 * 60 * 1000;
+const TV_MAX = 2000;
+
+function tvCatalogs() {
+  return discoverCatalogs().filter((c) => c.cat.type === "tv" && !c.genreRequired);
+}
+
+async function tvChannels(c, refresh = false) {
+  const key = `tv:${c.key}`;
+  const hit = cacheGet(key);
+  if (!refresh && hit && Array.isArray(hit.v) && Date.now() - hit.at < TV_FRESH_MS) return hit.v;
+  const out = [];
+  const seen = new Set();
+  while (out.length < TV_MAX) {
+    const extra = out.length ? [["skip", String(out.length)]] : [];
+    const list = await call("catalog", { url: c.addon.transportUrl, kind: "tv", id: c.cat.id, extra });
+    const fresh = (list || []).filter((m) => m?.id && !seen.has(m.id));
+    fresh.forEach((m) => seen.add(m.id));
+    out.push(...fresh.map((m) => ({ ...light(m), group: (m.genres || m.genre || [])[0] || "" })));
+    if (!fresh.length || !c.pages) break;
+  }
+  cacheSet(key, out);
+  return out;
+}
+
+function tvTile(m) {
+  const art = h("div", { class: "tv-logo" });
+  const initials = h("span", { class: "tv-initials" }, String(m.name || "?").replace(/[^\p{L}\p{N} ]/gu, "").trim().slice(0, 4).toUpperCase() || "TV");
+  art.append(image(m.logo || m.poster, m.name, () => art.append(initials)));
+  const el = h("button", { class: "tv-tile focusable", title: m.name },
+    art, h("span", { class: "tv-live" }, h("i"), "Trực tiếp"),
+    h("span", { class: "tv-name" }, m.name),
+    m.group ? h("span", { class: "tv-group" }, m.group) : null);
+  el.addEventListener("click", () => openStreams({ ...m, type: "tv" }, m.id, m.name));
+  return el;
+}
+
+function renderTv(view, params = {}) {
+  document.body.classList.add("dim");
+  const page = h("div", { class: "page plain tv-page" });
+  view.append(page);
+  const sources = tvCatalogs();
+  const head = h("div", { class: "tv-head" },
+    h("div", {}, h("h1", { class: "tv-title" }, "Truyền hình"), h("p", { class: "tv-sub" }, "Kênh từ danh sách IPTV bạn đã nhập trong addon")));
+  page.append(head);
+  if (!sources.length) {
+    page.append(h("div", { class: "tv-empty" },
+      h("div", { class: "tv-empty-icon", html: ICON.tv }),
+      h("h2", {}, "Chưa có kênh nào"),
+      h("p", {}, "Mở Addon, bấm Cấu hình ở addon WiSFilm rồi dán link danh sách M3U vào ô \u201cLink danh sách IPTV\u201d. Cài lại addon xong, kênh sẽ hiện ở đây."),
+      h("button", { class: "btn primary focusable", onclick: () => go("addons") }, "Mở Addon")));
+    return;
+  }
+
+  const saved = pref("tv", {}) || {};
+  const state = { group: params.group ?? saved.group ?? "", q: "" };
+  const search = h("input", { class: "tv-search focusable", type: "search", placeholder: "Tìm kênh", "aria-label": "Tìm kênh", autocomplete: "off", spellcheck: "false" });
+  head.append(search);
+  const pills = h("div", { class: "tv-groups" });
+  const body = h("div", { class: "tv-body" }, h("div", { class: "spinner", style: "margin:80px auto" }));
+  page.append(pills, body);
+
+  let channels = [];
+  const fold = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/gi, "d").toLowerCase();
+  const groups = () => [...new Set(channels.map((m) => m.group || "Khác"))];
+  const draw = () => {
+    const gs = groups();
+    if (state.group && !gs.includes(state.group)) state.group = "";
+    put(pills, ...["", ...gs].map((g) => h("button", {
+      class: `pill focusable ${g === state.group ? "on" : ""}`,
+      onclick: () => { state.group = g; setPref("tv", { group: g }); draw(); },
+    }, g || "Tất cả", h("small", {}, String(g ? channels.filter((m) => (m.group || "Khác") === g).length : channels.length)))));
+    const q = fold(state.q.trim());
+    const list = channels.filter((m) => (!state.group || (m.group || "Khác") === state.group) && (!q || fold(m.name).includes(q)));
+    if (!list.length) { put(body, h("div", { class: "empty" }, q ? "Không có kênh nào khớp." : "Danh sách này chưa có kênh.")); return; }
+    if (state.group || q) { put(body, h("div", { class: "tv-grid" }, ...list.map((m) => tvTile(m)))); return; }
+    put(body, ...gs.map((g) => {
+      const inG = list.filter((m) => (m.group || "Khác") === g);
+      return inG.length ? h("section", { class: "tv-section" },
+        h("div", { class: "tv-section-head" }, h("h2", {}, g), h("span", {}, `${inG.length} kênh`)),
+        h("div", { class: "tv-grid" }, ...inG.map((m) => tvTile(m)))) : null;
+    }).filter(Boolean));
+  };
+  search.addEventListener("input", () => { state.q = search.value; draw(); });
+
+  (async () => {
+    const lists = await Promise.all(sources.map((c) => tvChannels(c).catch(() => [])));
+    if (!view.contains(page)) return;
+    const seen = new Set();
+    channels = lists.flat().filter((m) => (seen.has(m.id) ? false : seen.add(m.id)));
+    if (!channels.length) { put(body, h("div", { class: "empty" }, "Không tải được danh sách kênh. Kiểm tra lại link M3U trong cấu hình addon.")); put(pills, ); return; }
+    draw();
+  })();
+}
+
 function discoverCatalogs() {
   const out = [];
   for (const addon of app.addons) {
@@ -3268,9 +3364,10 @@ const ROUTES = {
   calendar: renderCalendar,
   addons: renderAddons,
   together: renderTogether,
+  tv: renderTv,
 };
 
-const TOP_ROUTES = ["home", "discover", "movie", "series", "calendar", "library", "addons", "search", "settings", "together"];
+const TOP_ROUTES = ["home", "discover", "movie", "series", "tv", "calendar", "library", "addons", "search", "settings", "together"];
 
 async function seriesMetas(onProgress) {
   const ids = libItems().filter((i) => i.type === "series").map((i) => i._id);

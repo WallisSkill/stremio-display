@@ -561,7 +561,7 @@ function queueSave(ctx, p, quiet) {
 
 async function saveProgress(ctx, p) {
   const key = authKey();
-  if (!key || String(ctx.id).startsWith("local:") || !p.duration) return;
+  if (!key || String(ctx.id).startsWith("local:") || ctx.kind === "tv" || !p.duration) return;
   const now = nowIso();
   const profile = ctx.profile || { id: MAIN_PROFILE, token: "" };
   const found = await datastore(profile, "datastoreGet", { authKey: key, collection: "libraryItem", ids: [ctx.id], all: false });
