@@ -1651,7 +1651,7 @@ function paintState() {
   ui.speedVal.textContent = `${s.speed && s.speed !== 1 ? +s.speed.toFixed(2) : 1}×`;
   const guest = roomGuest();
   const nx = guest ? null : nextEpisode();
-  ui.next.hidden = !nx;
+  ui.next.hidden = !nx && (guest || !tvNeighbour(1));
   ui.eps.hidden = guest || !((pl.ctx?.m?.videos || []).length > 1);
   ui.speed.hidden = guest;
   const left = (s.duration || 0) - (s.time || 0);
@@ -1761,7 +1761,7 @@ async function playEpisode(v, auto) {
   return true;
 }
 
-const playNext = (auto) => playEpisode(nextEpisode(), auto);
+const playNext = (auto) => (isTvCtx() ? !auto && zapChannel(1) : playEpisode(nextEpisode(), auto));
 
 function renderEpisodes(box) {
   const c = pl.ctx;
@@ -1945,7 +1945,7 @@ function renderSources(box) {
 
 function fillMenu(box) {
   if (pl.menu === "episodes") { renderEpisodes(box); return; }
-  if (pl.menu === "sources") { renderSources(box); return; }
+  if (pl.menu === "sources") { if (isTvCtx() && tvState.list.length > 1) renderChannels(box); else renderSources(box); return; }
   if (pl.menu === "fullscreen") {
     box.className = "pl-menu narrow";
     put(box, h("h4", {}, "Toàn màn hình"),
@@ -2030,9 +2030,18 @@ function openPlayer(c) {
   pl.drag = null;
   pl.seekUntil = 0;
   const ui = pl.ui;
+  const tv = isTvCtx(c) && tvState.list.length > 1;
+  const setBtn = (btn, icon, title, label) => {
+    btn.title = title;
+    btn.setAttribute("aria-label", title);
+    btn.innerHTML = ICON[icon];
+    if (TOUCH) btn.append(h("span", { class: "pl-label" }, label));
+  };
+  setBtn(ui.src, tv ? "tv" : "source", tv ? "Kênh (S)" : "Nguồn phát (S)", tv ? "Kênh" : "Nguồn");
+  setBtn(ui.next, "next", tv ? "Kênh tiếp (N)" : "Tập tiếp (N)", tv ? "Kênh tiếp" : "Tập tiếp");
   const isEp = c.m.type === "series" && c.label;
   ui.title.textContent = c.m.name || "";
-  ui.sub.textContent = isEp ? c.label : yearOf(c.m) || "";
+  ui.sub.textContent = isEp ? c.label : isTvCtx(c) ? c.m.group || "Truyền hình" : yearOf(c.m) || "";
   const bg = bgOf(c.m);
   ui.bg.style.backgroundImage = bg ? `url("${bg}")` : "";
   ui.root.classList.add("loading");
@@ -2777,6 +2786,8 @@ function playerKey(e) {
   if (k === "z" || k === "Z") { setFill(!fillMode, true); return handled(); }
   if (k === "m" || k === "M") { cmd("cycle", "mute"); return handled(); }
   if (k === "n" || k === "N" || k === "MediaTrackNext") { playNext(false); return handled(); }
+  if (isTvCtx() && (k === "ChannelUp" || k === "PageDown")) { zapChannel(1); return handled(); }
+  if (isTvCtx() && (k === "ChannelDown" || k === "PageUp" || k === "MediaTrackPrevious")) { zapChannel(-1); return handled(); }
   if (k === "c" || k === "C") { toggleMenu("tracks"); return handled(); }
   if ((k === "e" || k === "E") && !pl.ui.eps.hidden) { toggleMenu("episodes"); return handled(); }
   if (k === "s" || k === "S") { toggleMenu("sources"); return handled(); }
@@ -2834,7 +2845,78 @@ async function tvChannels(c, refresh = false) {
   return out;
 }
 
-function tvTile(m) {
+const tvState = { list: [] };
+const isTvCtx = (c = pl.ctx) => c?.m?.type === "tv";
+
+function tvNeighbour(dir) {
+  const list = tvState.list;
+  if (!isTvCtx() || list.length < 2) return null;
+  const i = list.findIndex((x) => x.id === pl.ctx.m.id);
+  return i < 0 ? null : list[(i + dir + list.length) % list.length];
+}
+
+async function playChannel(m, { fromPlayer = false, tile = null } = {}) {
+  if (fromPlayer && roomLocked()) return;
+  const meta = { ...m, type: "tv" };
+  let session = null;
+  if (fromPlayer) {
+    session = ++pl.session;
+    call("player_stop").catch(() => {});
+    pl.menu = null;
+    renderMenu();
+    pl.ui.root.classList.add("loading");
+    document.body.classList.remove("see-through", "ext-video");
+    pl.s = { ...pl.s, loaded: false };
+    pl.ui.title.textContent = m.name;
+    pl.ui.sub.textContent = m.group || "Truyền hình";
+    paintState();
+  }
+  tile?.classList.add("busy");
+  const e = await watchStreams("tv", m.id, () => {});
+  tile?.classList.remove("busy");
+  if (fromPlayer && pl.session !== session) return;
+  const playable = loadedGroups(e).flatMap((g) => g.streams.filter((x) => x.url || x.infoHash).map((stream) => ({ stream, addon: g.addon })));
+  if (playable.length === 1 || (fromPlayer && playable.length)) {
+    startPlayback(meta, m.id, m.name, playable[0].stream, 0, playable[0].addon);
+    return;
+  }
+  if (fromPlayer) closePlayer(false);
+  openStreams(meta, m.id, m.name);
+}
+
+const zapChannel = (dir) => { const m = tvNeighbour(dir); if (m) playChannel(m, { fromPlayer: true }); };
+
+function renderChannels(box) {
+  const c = pl.ctx;
+  box.className = "pl-menu episodes sources channels";
+  const list = h("div", { class: "pl-eps" });
+  let group = null;
+  for (const m of tvState.list) {
+    const g = m.group || "Khác";
+    if (g !== group) { group = g; list.append(h("div", { class: "pl-src-group" }, g)); }
+    const on = m.id === c.m.id;
+    const logo = h("span", { class: "pl-ch-logo" });
+    logo.append(image(m.logo || m.poster, m.name, () => logo.append(h("b", {}, String(m.name || "?").slice(0, 2).toUpperCase()))));
+    list.append(h("button", { class: `pl-src pl-ch ${on ? "on" : ""}`, tabindex: "-1", onclick: () => { if (on) toggleMenu(null); else playChannel(m, { fromPlayer: true }); } },
+      logo, h("div", {}, h("b", {}, m.name), h("small", {}, on ? "Đang xem" : g))));
+    const data = pl.sources;
+    if (on && data?.vid === c.vid && data.groups) {
+      const alts = data.groups.flatMap((gr) => gr.streams.map((st) => ({ st, addon: gr.addon })));
+      if (alts.length > 1) {
+        list.append(h("div", { class: "pl-ch-alts" }, alts.map(({ st, addon }) => {
+          const cur = sameStream(st, c.stream);
+          return h("button", { class: `pl-mini ${cur ? "on" : ""}`, tabindex: "-1", title: (st.title || "").split("\n")[0], onclick: () => { if (!cur) startPlayback(c.m, c.vid, c.label, st, 0, addon); } }, (st.name || addon).split("\n")[0]);
+        })));
+      }
+    }
+  }
+  const keep = box.querySelector(".pl-eps")?.scrollTop;
+  put(box, h("h4", {}, "Kênh truyền hình"), list);
+  if (keep != null) list.scrollTop = keep;
+  else requestAnimationFrame(() => list.querySelector(".pl-ch.on")?.scrollIntoView({ block: "center" }));
+}
+
+function tvTile(m, list) {
   const art = h("div", { class: "tv-logo" });
   const initials = h("span", { class: "tv-initials" }, String(m.name || "?").replace(/[^\p{L}\p{N} ]/gu, "").trim().slice(0, 4).toUpperCase() || "TV");
   art.append(image(m.logo || m.poster, m.name, () => art.append(initials)));
@@ -2842,7 +2924,7 @@ function tvTile(m) {
     art, h("span", { class: "tv-live" }, h("i"), "Trực tiếp"),
     h("span", { class: "tv-name" }, m.name),
     m.group ? h("span", { class: "tv-group" }, m.group) : null);
-  el.addEventListener("click", () => openStreams({ ...m, type: "tv" }, m.id, m.name));
+  el.addEventListener("click", () => { tvState.list = list || [m]; playChannel(m, { tile: el }); });
   return el;
 }
 
@@ -2884,12 +2966,13 @@ function renderTv(view, params = {}) {
     const q = fold(state.q.trim());
     const list = channels.filter((m) => (!state.group || (m.group || "Khác") === state.group) && (!q || fold(m.name).includes(q)));
     if (!list.length) { put(body, h("div", { class: "empty" }, q ? "Không có kênh nào khớp." : "Danh sách này chưa có kênh.")); return; }
-    if (state.group || q) { put(body, h("div", { class: "tv-grid" }, ...list.map((m) => tvTile(m)))); return; }
+    if (state.group || q) { put(body, h("div", { class: "tv-grid" }, ...list.map((m) => tvTile(m, list)))); return; }
+    const order = gs.flatMap((g) => list.filter((m) => (m.group || "Khác") === g));
     put(body, ...gs.map((g) => {
-      const inG = list.filter((m) => (m.group || "Khác") === g);
+      const inG = order.filter((m) => (m.group || "Khác") === g);
       return inG.length ? h("section", { class: "tv-section" },
         h("div", { class: "tv-section-head" }, h("h2", {}, g), h("span", {}, `${inG.length} kênh`)),
-        h("div", { class: "tv-grid" }, ...inG.map((m) => tvTile(m)))) : null;
+        h("div", { class: "tv-grid" }, ...inG.map((m) => tvTile(m, order)))) : null;
     }).filter(Boolean));
   };
   search.addEventListener("input", () => { state.q = search.value; draw(); });
