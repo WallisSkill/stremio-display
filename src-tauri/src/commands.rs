@@ -293,6 +293,28 @@ pub async fn library_toggle(st: State<'_, AppState>, meta: Value) -> R<bool> {
     Ok(!in_library)
 }
 
+#[tauri::command]
+pub async fn library_rewind(st: State<'_, AppState>, id: String) -> R<()> {
+    let key = st
+        .auth_key()
+        .ok_or("Đăng nhập tài khoản Stremio để dùng Thư viện")?;
+    let profile = st.profile();
+    let mut item = match cached_item(&st, &id) {
+        Some(item) => item,
+        None => api::library_get_one(&st.http, &key, &profile, &id)
+            .await?
+            .ok_or("Không tìm thấy phim trong lịch sử xem")?,
+    };
+    if !item["state"].is_object() {
+        item["state"] = json!({});
+    }
+    item["state"]["timeOffset"] = json!(0);
+    item["_mtime"] = json!(now_iso());
+    api::library_put(&st.http, &key, &profile, &item).await?;
+    st.cache_library_item(&item);
+    Ok(())
+}
+
 #[derive(Deserialize, Clone)]
 pub struct PlayCtx {
     pub id: String,

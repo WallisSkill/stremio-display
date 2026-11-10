@@ -199,10 +199,73 @@ function catalogsOf(filterType, { search = false } = {}) {
 }
 
 const libItems = () => app.library.filter((i) => !i.removed && !i.temp);
-const continueItems = () =>
+const continueItems = (fresh = new Map()) =>
   app.library
-    .filter((i) => (!i.removed || i.temp) && i.state && i.state.timeOffset > 0)
-    .sort((a, b) => String(b.state.lastWatched || "").localeCompare(String(a.state.lastWatched || "")));
+    .filter((i) => (!i.removed || i.temp) && i.state && (i.state.timeOffset > 0 || fresh.has(i._id)))
+    .map((i) => ({ i, at: fresh.get(i._id)?.latest || String(i.state.lastWatched || "") }))
+    .sort((a, b) => b.at.localeCompare(a.at))
+    .map((x) => x.i);
+
+const NOTIF_FRESH_MS = 6 * 60 * 60 * 1000;
+const notifSeen = () => pref("notifSeen", {}) || {};
+
+function seenNotif(id) {
+  const map = { ...notifSeen(), [id]: new Date().toISOString() };
+  const keep = Object.entries(map).sort((a, b) => b[1].localeCompare(a[1])).slice(0, 300);
+  setPref("notifSeen", Object.fromEntries(keep));
+}
+
+async function episodeList(id) {
+  const key = `eps:${id}`;
+  const hit = cacheGet(key);
+  if (hit && Array.isArray(hit.v) && Date.now() - hit.at < NOTIF_FRESH_MS) return hit.v;
+  try {
+    const m = await call("meta", { kind: "series", id });
+    const eps = (m?.videos || []).filter((v) => v.id && v.released && (v.season ?? 0) > 0)
+      .map((v) => ({ id: v.id, season: v.season, episode: v.episode ?? v.number, released: v.released }));
+    cacheSet(key, eps);
+    return eps;
+  } catch (e) {
+    return hit && Array.isArray(hit.v) ? hit.v : null;
+  }
+}
+
+async function freshEpisodes() {
+  const seen = notifSeen();
+  const now = Date.now();
+  const items = app.library
+    .filter((i) => i.type === "series" && (!i.removed || i.temp) && i.state?.lastWatched && !i.state.noNotif)
+    .sort((a, b) => String(b.state.lastWatched).localeCompare(String(a.state.lastWatched)))
+    .slice(0, 40);
+  const out = new Map();
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const it = items[next++];
+      const eps = await episodeList(it._id);
+      if (!eps) continue;
+      const ref = Math.max(Date.parse(it.state.lastWatched) || 0, Date.parse(seen[it._id] || "") || 0);
+      const list = eps.filter((v) => { const t = Date.parse(v.released); return t > ref && t <= now; }).sort(epSort);
+      if (!list.length) continue;
+      const latest = list.map((v) => new Date(v.released).toISOString()).sort().pop();
+      out.set(it._id, { count: list.length, first: list[0], latest });
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(6, items.length) }, worker));
+  return out;
+}
+
+async function dismissContinue(li) {
+  seenNotif(li._id);
+  if (!(li.state?.timeOffset > 0)) return;
+  try {
+    await call("library_rewind", { id: li._id });
+    li.state = { ...li.state, timeOffset: 0 };
+    saveBoot();
+  } catch (e) {
+    toast(e, true);
+  }
+}
 const libEntry = (id) => app.library.find((i) => i._id === id);
 const inLibrary = (id) => { const e = libEntry(id); return !!e && !e.removed && !e.temp; };
 
@@ -526,6 +589,7 @@ function card(m, shape = "poster", opts = {}) {
   const fallback = h("div", { class: "fallback" }, m.name);
   const src = shape === "wide" ? thumbOf(m) : m.poster;
   art.append(image(src, m.name, () => art.append(fallback)));
+  if (opts.badge) art.append(h("span", { class: "card-badge" }, opts.badge));
   if (shape === "wide") {
     const label = h("div", { class: "label" }, opts.label || m.name);
     if (opts.progress != null) {
@@ -536,6 +600,14 @@ function card(m, shape = "poster", opts = {}) {
   const cap = shape === "wide" ? null : h("div", { class: "cap" }, m.name, yearOf(m) ? h("small", {}, yearOf(m)) : null);
   const el = h("button", { class: `card ${shape} focusable`, title: m.name }, art, cap);
   el.addEventListener("click", opts.onClick || (() => go("detail", { kind: m.type, id: m.id, video: opts.video })));
+  if (opts.onDismiss) {
+    const x = h("span", { class: "card-x", role: "button", "aria-label": "Xoá khỏi lịch sử xem", title: "Xoá khỏi lịch sử xem", html: ICON.close });
+    const dismiss = (e) => { e.preventDefault(); e.stopPropagation(); opts.onDismiss(el); };
+    x.addEventListener("pointerdown", (e) => e.stopPropagation());
+    x.addEventListener("click", dismiss);
+    el.addEventListener("keydown", (e) => { if (e.key === "Delete") dismiss(e); });
+    art.append(x);
+  }
   if (opts.onFocus) {
     el.addEventListener("focus", () => opts.onFocus(m));
     el.addEventListener("mouseenter", () => opts.onFocus(m));
@@ -676,22 +748,41 @@ function renderBrowse(view, filterType) {
   };
 
   if (!filterType) {
-    const cont = continueItems();
-    if (cont.length) {
-      shelves.append(shelf("Xem tiếp", null, "wide", async () => cont.slice(0, 20), {
+    const hasSeries = app.library.some((i) => i.type === "series" && (!i.removed || i.temp) && i.state?.lastWatched);
+    if (continueItems().length || hasSeries) {
+      let fresh = new Map();
+      const sec = shelf("Xem tiếp", null, "wide", async () => {
+        fresh = await Promise.race([freshEpisodes(), new Promise((r) => setTimeout(() => r(new Map()), 4000))]);
+        return continueItems(fresh).slice(0, 20);
+      }, {
         eager: true,
         render: (li) => {
           const st = li.state || {};
           const m = { id: li._id, type: li.type, name: li.name, poster: li.poster };
-          const ep = li.type === "series" ? epLabelFromId(st.video_id) : "";
+          const add = fresh.get(li._id);
+          const vid = add && !(st.timeOffset > 0) ? add.first.id : st.video_id;
+          const ep = li.type === "series" ? epLabelFromId(vid) : "";
           return card(m, "wide", {
             label: ep ? `${li.name} · ${ep}` : li.name,
-            progress: st.duration ? st.timeOffset / st.duration : 0,
-            onClick: () => go("detail", { kind: li.type, id: li._id, video: st.video_id, autoplay: true }),
+            progress: st.timeOffset > 0 && st.duration ? st.timeOffset / st.duration : null,
+            badge: add ? `+${add.count}` : null,
+            onClick: () => go("detail", { kind: li.type, id: li._id, video: vid, autoplay: true }),
+            onDismiss: (el) => {
+              dismissContinue(li);
+              const row = el.parentElement;
+              el.classList.add("leaving");
+              setTimeout(() => {
+                const next = el.nextElementSibling || el.previousElementSibling;
+                el.remove();
+                if (!row.querySelector(".card")) sec.remove();
+                else if (document.activeElement === document.body) next?.focus({ preventScroll: true });
+              }, 260);
+            },
             onFocus: preview,
           });
         },
-      }));
+      });
+      shelves.append(sec);
     }
   }
 

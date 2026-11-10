@@ -207,6 +207,13 @@ a.btn { text-decoration: none; }
 .progress { position: absolute; left: 14px; right: 14px; bottom: 10px; height: 4px; border-radius: 2px; background: rgba(255,255,255,0.25); overflow: hidden; }
 .progress i { display: block; height: 100%; background: #fff; border-radius: 2px; }
 .card.wide .label.has-progress { padding-bottom: 22px; }
+.card-x { position: absolute; top: 8px; left: 8px; z-index: 2; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: rgba(10,10,14,0.62); color: #fff; opacity: 0; transition: opacity 200ms, background 200ms, transform 200ms var(--ease); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+.card-x svg { width: 16px; height: 16px; }
+.card:hover .card-x, .card:focus-visible .card-x, .card:focus-within .card-x { opacity: 1; }
+.card-x:hover { background: rgba(255,255,255,0.9); color: #000; transform: scale(1.08); }
+.card-badge { position: absolute; top: 8px; right: 8px; z-index: 2; min-width: 34px; height: 24px; padding: 0 8px; border-radius: 12px; display: grid; place-items: center; background: #fff; color: #000; font-size: 13px; font-weight: 800; box-shadow: 0 4px 12px rgba(0,0,0,0.4); }
+.card.leaving { transition: opacity 240ms, transform 240ms var(--ease); opacity: 0; transform: scale(0.92); }
+@media (hover: none) { .card-x { opacity: 1; } }
 
 .skeleton .art { animation: pulse 1.4s ease-in-out infinite; }
 @keyframes pulse { 0%, 100% { opacity: 0.55; } 50% { opacity: 0.9; } }

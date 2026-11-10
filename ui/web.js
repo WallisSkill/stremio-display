@@ -907,6 +907,16 @@ export const web = {
     store.set("wistv.profile", { user, id, token: token || "" });
     libraryCache = [];
   },
+  async library_rewind({ id }) {
+    const key = needKey("Đăng nhập tài khoản Stremio để dùng Thư viện");
+    const found = libraryCache.find((i) => i._id === id);
+    if (!found) throw "Không tìm thấy phim trong lịch sử xem";
+    const item = structuredClone(found);
+    item.state = { ...(item.state || {}), timeOffset: 0 };
+    item._mtime = nowIso();
+    await libraryPut(key, item);
+    Object.assign(found, item);
+  },
   async library_toggle({ meta }) {
     const key = needKey("Đăng nhập tài khoản Stremio để dùng Thư viện");
     if (!meta?.id) throw "Thiếu mã phim";

@@ -41,6 +41,7 @@ pub fn run() {
             commands::streams_from,
             commands::library,
             commands::library_toggle,
+            commands::library_rewind,
             commands::profiles,
             commands::profiles_save,
             commands::profile_use,
