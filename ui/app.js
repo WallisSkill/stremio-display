@@ -1,5 +1,5 @@
 import { web, onWebEvent } from "./web.js";
-import { t as tr, setLang, savedLang, getLang, formatDate, LANGS, errText, serverText } from "./i18n.js";
+import { t as tr, setLang, savedLang, getLang, formatDate, LANGS, errText, serverText, locale } from "./i18n.js";
 
 setLang(savedLang());
 
@@ -88,6 +88,7 @@ const ICON = {
   source: '<svg viewBox="0 0 24 24"><rect x="3.5" y="4" width="17" height="6" rx="1.8" fill="none" stroke="currentColor" stroke-width="2"/><rect x="3.5" y="14" width="17" height="6" rx="1.8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M7 7h.01M7 17h.01" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>',
   list: '<svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="12" height="8.5" rx="1.8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M18.5 7v9.5a2 2 0 0 1-2 2H6.5M3.5 17h0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   close: '<svg viewBox="0 0 24 24"><path d="m6.5 6.5 11 11m0-11-11 11" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>',
+  bell: '<svg viewBox="0 0 24 24"><path d="M12 3.2v1.6M6.2 16.6v-5.4a5.8 5.8 0 0 1 11.6 0v5.4l1.7 1.9H4.5Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M9.8 21a2.4 2.4 0 0 0 4.4 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   tv: '<svg viewBox="0 0 24 24"><rect x="2.8" y="6.2" width="18.4" height="12.6" rx="2.6" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="m8.4 2.6 3.6 3.4 3.6-3.4M8 21.4h8" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   people: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8.5" r="3.3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M3 19.5c.6-3.3 3-5.2 6-5.2s5.4 1.9 6 5.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M15.5 5.6a3.1 3.1 0 0 1 0 5.9M17.6 14.6c1.8.6 3 2.2 3.4 4.9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   cog: '<svg viewBox="0 0 24 24"><path d="M9.72 4.64 9.97 2.4h4.06l.25 2.24 1.31.55 1.76-1.41 2.87 2.87-1.41 1.76.55 1.31 2.24.25v4.06l-2.24.25-.55 1.31 1.41 1.76-2.87 2.87-1.76-1.41-1.31.55-.25 2.24H9.97l-.25-2.24-1.31-.55-1.76 1.41-2.87-2.87 1.41-1.76-.55-1.31-2.24-.25V9.97l2.24-.25.55-1.31-1.41-1.76 2.87-2.87 1.76 1.41Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="12" r="3.6" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>',
@@ -267,6 +268,7 @@ async function freshEpisodes() {
 
 async function dismissContinue(li) {
   seenNotif(li._id);
+  refreshBell();
   if (!(li.state?.timeOffset > 0)) return;
   try {
     await call("library_rewind", { id: li._id });
@@ -424,11 +426,13 @@ async function switchProfile(p, token, startup) {
   if (pl.open) closePlayer();
   const hit = cacheGet(bootKey());
   app.library = Array.isArray(hit?.v?.library) ? hit.v.library : [];
+  clearBell();
   go("home");
   toast(tr("pf.switched", { name: profileName(p) }));
   refreshLibrary().then(() => {
     const cur = app.stack[app.stack.length - 1];
     if (cur?.route === "home" && !pl.open && $("#sheet").hidden && !topLayer()) render();
+    refreshBell();
   });
   return true;
 }
@@ -561,6 +565,7 @@ async function logout() {
   app.profiles = NO_PROFILES();
   app.library = [];
   app.addons = [];
+  clearBell();
   paintAvatar();
   loadPrefs();
   go("login", {}, true);
@@ -2723,9 +2728,10 @@ function roomMenu() {
     h("h2", {}, tr("tg.title")),
     h("p", { class: "hint" }, tr("room.menuHint")),
     app.user ? null : h("p", { class: "hint" }, tr("room.menuLogin")),
-    h("div", { class: "pf-row end" },
+    h("div", { class: "pf-row stack" },
+      host ? h("button", { class: "btn primary focusable", onclick: () => { done(); createRoom(); } }, tr("room.createForThis")) : null,
       h("button", { class: "btn focusable", onclick: () => { done(); joinRoom(""); } }, tr("tg.joinByCode")),
-      host ? h("button", { class: "btn primary focusable", onclick: () => { done(); createRoom(); } }, tr("room.createForThis")) : null)));
+      h("button", { class: "btn ghost focusable", onclick: done }, tr("common.cancel")))));
   ($(".btn.primary", box) || $(".btn", box))?.focus({ preventScroll: true });
 }
 
@@ -4029,6 +4035,7 @@ document.addEventListener("mouseup", (e) => { if (e.button === 3) back(); });
     if (payload && payload.error) toast(tr("pl.progressFail", { e: errText(payload.error) }), true);
     if (payload && payload.quiet) return;
     await refreshLibrary();
+    refreshBell();
     const cur = app.stack[app.stack.length - 1];
     if (cur && !pl.open && $("#sheet").hidden && (cur.route === "home" || cur.route === "detail" || cur.route === "library")) {
       const scroll = $("#view").scrollTop;
@@ -4069,13 +4076,180 @@ async function boot() {
     apply(await fresh);
     const cur = app.stack[app.stack.length - 1];
     if (homeSig() !== before && cur?.route === "home" && !pl.open && $("#sheet").hidden && $("#view").scrollTop < 40) render();
+    refreshBell();
     return;
   }
   app.addons = [];
   app.library = [];
   apply(await fresh);
   go("home");
+  refreshBell();
 }
+
+const BELL_REFRESH_MS = 30 * 60 * 1000;
+const bell = { list: [], at: 0, run: null };
+const phoneLayout = () => matchMedia("(max-width: 760px), (hover: none) and (pointer: coarse) and (max-height: 520px)").matches;
+const bellMap = (k) => { const v = pref(k, {}); return v && typeof v === "object" ? v : {}; };
+
+function bellMark(key, ids) {
+  const now = new Map(bell.list.map((b) => [b.id, b.latest]));
+  const map = { ...bellMap(key) };
+  for (const id of ids) map[id] = now.get(id) || new Date().toISOString();
+  const keep = Object.entries(map).sort((a, b) => String(b[1]).localeCompare(String(a[1]))).slice(0, 300);
+  setPref(key, Object.fromEntries(keep));
+}
+
+function sinceText(iso) {
+  const days = Math.max(0, Math.floor((Date.now() - Date.parse(iso)) / 86400000));
+  if (days >= 30) return formatDate(new Date(iso), { day: "numeric", month: "short" });
+  return new Intl.RelativeTimeFormat(locale(), { numeric: "auto" }).format(-days, "day");
+}
+
+function paintBell(ring = false) {
+  const btn = $("#bell-btn");
+  if (!btn) return;
+  const n = bell.list.length;
+  const badge = $(".bell-badge", btn);
+  badge.hidden = !n;
+  badge.textContent = n > 9 ? "9+" : String(n);
+  btn.setAttribute("aria-label", n ? tr("bell.titleCount", { n }) : tr("bell.title"));
+  if (ring && n) { btn.classList.remove("ring"); void btn.offsetWidth; btn.classList.add("ring"); }
+}
+
+function refreshBell() {
+  if (bell.run) return bell.run;
+  bell.run = (async () => {
+    const before = new Set(bell.list.map((b) => `${b.id}@${b.latest}`));
+    let fresh = new Map();
+    try { fresh = app.library.length ? await freshEpisodes() : new Map(); } catch (e) { fresh = new Map(); }
+    const seen = bellMap("bellSeen");
+    bell.list = [...fresh.entries()]
+      .filter(([id, add]) => !(seen[id] && String(seen[id]) >= add.latest))
+      .map(([id, add]) => {
+        const li = libEntry(id);
+        return { id, name: plainName(li?.name || ""), poster: li?.poster || "", count: add.count, first: add.first, latest: add.latest };
+      })
+      .sort((a, b) => b.latest.localeCompare(a.latest));
+    bell.at = Date.now();
+    paintBell(bell.list.some((b) => !before.has(`${b.id}@${b.latest}`)));
+    if ($(".bell-layer")) drawBellList();
+    bellToast();
+  })().finally(() => { bell.run = null; });
+  return bell.run;
+}
+
+function clearBell() {
+  bell.list = [];
+  bell.at = 0;
+  paintBell();
+  $(".bell-toast")?.remove();
+}
+
+function openBellItem(b) {
+  bellMark("bellSeen", [b.id]);
+  bell.list = bell.list.filter((x) => x.id !== b.id);
+  paintBell();
+  $(".bell-layer")?.remove();
+  go("detail", { kind: "series", id: b.id, video: b.first.id });
+}
+
+function bellSeenOne(b, row) {
+  bellMark("bellSeen", [b.id]);
+  bell.list = bell.list.filter((x) => x.id !== b.id);
+  paintBell();
+  const next = row.nextElementSibling || row.previousElementSibling;
+  row.classList.add("leaving");
+  setTimeout(() => {
+    row.remove();
+    if (!bell.list.length) drawBellList();
+    else next?.focus({ preventScroll: true });
+  }, 220);
+}
+
+function bellRow(b) {
+  const poster = b.poster
+    ? h("img", { class: "bell-poster", src: b.poster, alt: "", loading: "lazy", onerror: (e) => e.target.replaceWith(h("span", { class: "bell-poster" }, firstLetter(b.name))) })
+    : h("span", { class: "bell-poster" }, firstLetter(b.name));
+  const ep = epLabelFromId(b.first.id);
+  const row = h("div", { class: "bell-item focusable", role: "button", tabindex: "0", "data-id": b.id },
+    poster,
+    h("div", { class: "bell-text" },
+      h("b", {}, b.name || tr("common.unknown")),
+      h("span", { class: "bell-new" }, tr("bell.count", { n: b.count })),
+      h("small", {}, [ep, sinceText(b.latest)].filter(Boolean).join(" · "))),
+    h("button", { class: "bell-seen focusable", title: tr("bell.seen"), "aria-label": tr("bell.seenOf", { name: b.name }), html: `${ICON.check}<span>${tr("bell.seenShort")}</span>`, onclick: (e) => { e.stopPropagation(); bellSeenOne(b, row); } }));
+  row.addEventListener("click", () => openBellItem(b));
+  row.addEventListener("keydown", (e) => { if ((e.key === "Enter" || e.key === " ") && e.target === row) { e.preventDefault(); openBellItem(b); } });
+  return row;
+}
+
+function drawBellList() {
+  const box = $(".bell-layer");
+  if (!box) return;
+  const panel = $(".bell-panel", box);
+  const all = h("button", { class: "bell-all focusable", onclick: () => {
+    bellMark("bellSeen", bell.list.map((b) => b.id));
+    bell.list = [];
+    paintBell();
+    drawBellList();
+  } }, tr("bell.allSeen"));
+  const head = h("div", { class: "bell-head" }, h("h2", {}, tr("bell.head")), bell.list.length > 1 ? all : null);
+  const body = bell.list.length
+    ? h("div", { class: "bell-list" }, ...bell.list.map(bellRow))
+    : h("div", { class: "bell-empty", html: ICON.bell }, h("b", {}, tr("bell.empty")), h("span", {}, tr("bell.emptyHint")));
+  put(panel, head, body);
+}
+
+function openBell() {
+  if ($(".bell-layer")) return;
+  $(".bell-toast")?.remove();
+  const btn = $("#bell-btn");
+  const close = () => { box.remove(); btn?.focus({ preventScroll: true }); };
+  const box = layer("bell-layer", close);
+  const r = btn.getBoundingClientRect();
+  const panel = h("div", { class: "bell-panel", role: "dialog", "aria-label": tr("bell.head") });
+  panel.style.setProperty("--bell-top", `${Math.round(r.bottom + 10)}px`);
+  panel.style.setProperty("--bell-right", `${Math.max(12, Math.round(innerWidth - r.right - 8))}px`);
+  box.append(panel);
+  box.addEventListener("click", (e) => { if (e.target === box) close(); });
+  drawBellList();
+  ($(".bell-item", panel) || $(".bell-all", panel))?.focus({ preventScroll: true });
+  if (Date.now() - bell.at > 60000) refreshBell();
+}
+
+function bellToast() {
+  if (!phoneLayout() || document.hidden || pl.open || topLayer() || !bell.list.length) return;
+  const told = bellMap("bellBanner");
+  const fresh = bell.list.filter((b) => !(told[b.id] && String(told[b.id]) >= b.latest));
+  if (!fresh.length) return;
+  bellMark("bellBanner", fresh.map((b) => b.id));
+  $(".bell-toast")?.remove();
+  const b = fresh[0];
+  const ep = epLabelFromId(b.first.id);
+  const line = fresh.length > 1 ? tr("bell.many", { name: b.name, n: fresh.length - 1 }) : ep ? `${b.name} · ${ep}` : b.name;
+  let timer;
+  const hide = () => {
+    clearTimeout(timer);
+    if (!el.isConnected) return;
+    el.classList.add("leaving");
+    setTimeout(() => el.remove(), 260);
+  };
+  const el = h("div", { class: "bell-toast", role: "status" },
+    h("span", { class: "bell-toast-icon", html: ICON.bell }, h("i", {}, String(Math.min(bell.list.length, 99)))),
+    h("button", { class: "bell-toast-text focusable", onclick: () => { hide(); if (fresh.length > 1) openBell(); else openBellItem(b); } },
+      h("b", {}, tr(fresh.length > 1 ? "bell.head" : "bell.newEp")),
+      h("span", {}, line)),
+    h("button", { class: "bell-toast-x focusable", "aria-label": tr("common.close"), html: ICON.close, onclick: hide }));
+  let startY = null;
+  el.addEventListener("touchstart", (e) => { startY = e.touches[0].clientY; }, { passive: true });
+  el.addEventListener("touchmove", (e) => { if (startY != null && e.touches[0].clientY - startY < -24) { startY = null; hide(); } }, { passive: true });
+  document.body.append(el);
+  timer = setTimeout(hide, 8000);
+}
+
+$("#bell-btn")?.addEventListener("click", openBell);
+setInterval(() => { if (app.user && !document.hidden) refreshBell(); }, BELL_REFRESH_MS);
+document.addEventListener("visibilitychange", () => { if (!document.hidden && app.user && Date.now() - bell.at > BELL_REFRESH_MS / 2) refreshBell(); });
 
 function playIntro() {
   const box = h("div", { id: "intro", "aria-hidden": "true" });

@@ -470,4 +470,17 @@ export default {
   "wk.roomCreateFail": "Chưa tạo được phòng, hãy thử lại",
   "wk.needWebSocket": "Cần kết nối WebSocket",
   "wk.badRoomCode": "Mã phòng không hợp lệ",
+
+  "bell.title": "Thông báo",
+  "bell.titleCount": {"one": "Thông báo: {n} phim có tập mới", "other": "Thông báo: {n} phim có tập mới"},
+  "bell.head": "Tập mới",
+  "bell.newEp": "Có tập mới",
+  "bell.count": {"one": "{n} tập mới", "other": "{n} tập mới"},
+  "bell.allSeen": "Đã xem hết",
+  "bell.seen": "Đánh dấu đã xem",
+  "bell.seenShort": "Đã xem",
+  "bell.seenOf": "Đánh dấu {name} đã xem",
+  "bell.empty": "Chưa có tập mới",
+  "bell.emptyHint": "Phim bộ bạn đang xem có tập mới sẽ hiện ở đây.",
+  "bell.many": {"one": "{name} và {n} phim khác có tập mới", "other": "{name} và {n} phim khác có tập mới"},
 };

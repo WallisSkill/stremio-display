@@ -470,4 +470,17 @@ export default {
   "wk.roomCreateFail": "暂时无法创建房间，请重试",
   "wk.needWebSocket": "需要 WebSocket 连接",
   "wk.badRoomCode": "房间代码无效",
+
+  "bell.title": "通知",
+  "bell.titleCount": "通知：{n} 部剧有新剧集",
+  "bell.head": "新剧集",
+  "bell.newEp": "有新剧集",
+  "bell.count": "{n} 集新剧集",
+  "bell.allSeen": "全部标为已读",
+  "bell.seen": "标为已读",
+  "bell.seenShort": "已读",
+  "bell.seenOf": "将{name}标为已读",
+  "bell.empty": "暂无新剧集",
+  "bell.emptyHint": "你在看的剧集有新集数时会显示在这里。",
+  "bell.many": "{name} 和另外 {n} 部剧有新剧集",
 };

@@ -1097,3 +1097,62 @@ body:not(.playing) .layer.room-layer { background: rgba(6,6,9,0.82); }
 .pl-level-bar i { position: absolute; left: 0; right: 0; bottom: 0; border-radius: 3px; background: #fff; transition: height 60ms linear; }
 .pl-level b { font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
 @media (max-height: 420px) { .pl-level-bar { height: 84px; } }
+
+.pf-row.stack { flex-direction: column; gap: 8px; margin-top: 8px; }
+.pf-row.stack .btn { width: 100%; justify-content: center; }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--muted); }
+.btn.ghost:hover { background: rgba(255,255,255,0.08); color: var(--text); }
+.btn.ghost:focus-visible { background: var(--accent); color: #000; }
+.bell-btn { position: relative; }
+.bell-badge { position: absolute; top: -4px; right: -5px; min-width: 19px; height: 19px; padding: 0 5px; border-radius: 10px; display: grid; place-items: center; background: #ff3b30; color: #fff; font-size: 11px; font-weight: 800; line-height: 1; border: 2px solid #0b0b0f; box-shadow: 0 3px 10px rgba(255,59,48,0.45); pointer-events: none; }
+.bell-badge[hidden] { display: none; }
+.bell-btn.ring svg { animation: bell-ring 900ms var(--ease); transform-origin: 50% 12%; }
+@keyframes bell-ring { 0%, 100% { transform: rotate(0); } 15% { transform: rotate(16deg); } 30% { transform: rotate(-14deg); } 45% { transform: rotate(10deg); } 60% { transform: rotate(-6deg); } 75% { transform: rotate(3deg); } }
+.layer.bell-layer { display: block; padding: 0; background: rgba(6,6,9,0.35); }
+.layer.bell-layer > * { margin: 0; }
+.bell-panel { position: absolute; top: var(--bell-top, 70px); right: var(--bell-right, 24px); width: min(400px, calc(100vw - 24px)); max-height: min(560px, calc(100% - var(--bell-top, 70px) - 24px)); display: flex; flex-direction: column; border-radius: 20px; background: rgba(22,22,28,0.97); border: 1px solid var(--line); box-shadow: 0 24px 60px rgba(0,0,0,0.6); overflow: hidden; animation: bell-drop 220ms var(--ease); }
+@keyframes bell-drop { from { opacity: 0; transform: translateY(-8px) scale(0.98); } }
+.bell-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 16px 10px 18px; }
+.bell-head h2 { margin: 0; font-size: 18px; }
+.bell-all { height: 32px; padding: 0 12px; border-radius: 999px; background: rgba(255,255,255,0.1); color: var(--text); font-size: 13px; font-weight: 600; outline: none; white-space: nowrap; }
+.bell-all:hover { background: rgba(255,255,255,0.16); }
+.bell-all:focus-visible { background: var(--accent); color: #000; }
+.bell-list { overflow-y: auto; overscroll-behavior: contain; padding: 0 8px 10px; }
+.bell-item { display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 10px; border-radius: 14px; cursor: pointer; outline: none; transition: background 180ms, opacity 220ms, transform 220ms var(--ease); }
+.bell-item:hover { background: rgba(255,255,255,0.06); }
+.bell-item:focus-visible { background: rgba(255,255,255,0.14); }
+.bell-item.leaving { opacity: 0; transform: translateX(24px); }
+.bell-poster { flex: none; width: 46px; height: 68px; border-radius: 8px; object-fit: cover; background: rgba(255,255,255,0.08); display: grid; place-items: center; font-weight: 800; color: var(--muted); }
+.bell-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.bell-text b { font-size: 15px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bell-new { align-self: flex-start; font-size: 12px; font-weight: 800; padding: 2px 8px; border-radius: 999px; background: rgba(255,59,48,0.18); color: #ff8a80; }
+.bell-text small { font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bell-seen { flex: none; height: 34px; padding: 0 11px; border-radius: 999px; display: inline-flex; align-items: center; gap: 5px; background: rgba(255,255,255,0.08); color: var(--text); font-size: 12.5px; font-weight: 600; outline: none; transition: background 180ms; }
+.bell-seen svg { width: 16px; height: 16px; }
+.bell-seen:hover { background: rgba(255,255,255,0.16); }
+.bell-seen:focus-visible { background: var(--accent); color: #000; }
+.bell-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 26px 24px 34px; text-align: center; color: var(--muted); font-size: 14px; }
+.bell-empty svg { width: 34px; height: 34px; opacity: 0.6; margin-bottom: 4px; }
+.bell-empty b { color: var(--text); font-size: 15px; }
+.bell-toast { position: fixed; z-index: 44; top: calc(10px + env(safe-area-inset-top)); left: 50%; width: min(520px, calc(100% - 24px)); transform: translateX(-50%); display: flex; align-items: center; gap: 12px; padding: 10px 8px 10px 12px; border-radius: 18px; background: rgba(24,24,30,0.97); border: 1px solid rgba(255,255,255,0.12); box-shadow: 0 18px 44px rgba(0,0,0,0.6); color: var(--text); animation: bell-toast-in 320ms var(--ease); }
+.bell-toast.leaving { opacity: 0; transform: translate(-50%, -16px); transition: opacity 240ms, transform 240ms var(--ease); }
+@keyframes bell-toast-in { from { opacity: 0; transform: translate(-50%, -20px); } }
+.bell-toast-icon { flex: none; position: relative; width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; background: linear-gradient(135deg, #ffb340, #ff8a00); color: #fff; }
+.bell-toast-icon svg { width: 22px; height: 22px; }
+.bell-toast-icon i { position: absolute; top: -5px; right: -6px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px; display: grid; place-items: center; background: #ff3b30; color: #fff; font-size: 10.5px; font-style: normal; font-weight: 800; border: 2px solid #18181e; }
+.bell-toast-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; text-align: left; outline: none; }
+.bell-toast-text b { font-size: 14px; }
+.bell-toast-text span { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bell-toast-x { flex: none; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; color: var(--muted); outline: none; }
+.bell-toast-x svg { width: 18px; height: 18px; }
+.bell-toast-x:focus-visible { background: var(--accent); color: #000; }
+body.playing .bell-toast { display: none; }
+@media (max-width: 760px), (hover: none) and (pointer: coarse) and (max-height: 520px) {
+  .layer.bell-layer { background: rgba(6,6,9,0.6); }
+  .bell-panel { top: auto; right: 0; left: 0; bottom: 0; width: 100%; max-height: 78%; border-radius: 22px 22px 0 0; padding-bottom: env(safe-area-inset-bottom); animation: bell-up 260ms var(--ease); }
+  .bell-panel::before { content: ""; align-self: center; width: 38px; height: 4px; margin-top: 8px; border-radius: 2px; background: rgba(255,255,255,0.2); }
+  @keyframes bell-up { from { transform: translateY(40px); opacity: 0; } }
+  .bell-head { padding-top: 10px; }
+  .top-right { gap: 10px; }
+}
+@media (prefers-reduced-motion: reduce) { .bell-btn.ring svg, .bell-panel, .bell-toast { animation: none; } }

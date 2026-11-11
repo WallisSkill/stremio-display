@@ -470,4 +470,17 @@ export default {
   "wk.roomCreateFail": "Couldn't create the room. Try again",
   "wk.needWebSocket": "A WebSocket connection is required",
   "wk.badRoomCode": "Invalid room code",
+
+  "bell.title": "Notifications",
+  "bell.titleCount": {"one": "Notifications: {n} show has new episodes", "other": "Notifications: {n} shows have new episodes"},
+  "bell.head": "New episodes",
+  "bell.newEp": "New episode",
+  "bell.count": {"one": "{n} new episode", "other": "{n} new episodes"},
+  "bell.allSeen": "Mark all as seen",
+  "bell.seen": "Mark as seen",
+  "bell.seenShort": "Seen",
+  "bell.seenOf": "Mark {name} as seen",
+  "bell.empty": "No new episodes",
+  "bell.emptyHint": "New episodes of series you're watching show up here.",
+  "bell.many": {"one": "{name} and {n} other show have new episodes", "other": "{name} and {n} other shows have new episodes"},
 };
