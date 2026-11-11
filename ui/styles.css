@@ -315,8 +315,8 @@ a.btn { text-decoration: none; }
 .search-box:focus-within { box-shadow: 0 0 0 3px rgba(255,255,255,0.5); }
 .search-box input { flex: 1; min-width: 0; background: none; border: 0; outline: none; font-size: 22px; }
 .search-box input::placeholder { color: var(--faint); }
-.plain .shelf-head, .plain .row { padding-left: 0; padding-right: 0; }
-.plain .row { margin-right: calc(var(--gutter) * -1); padding-right: var(--gutter); }
+.plain .shelf-head { padding-left: 0; padding-right: 0; }
+.plain .shelf-wrap { margin-inline: calc(var(--gutter) * -1); }
 
 .panel { background: var(--glass); backdrop-filter: blur(30px); border: 1px solid var(--line); border-radius: 18px; padding: 22px 24px; margin-bottom: 20px; max-width: 860px; }
 .panel h3 { margin: 0 0 12px; font-size: 13px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint); }
