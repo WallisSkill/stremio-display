@@ -483,4 +483,10 @@ export default {
   "bell.empty": "暂无新剧集",
   "bell.emptyHint": "你在看的剧集有新集数时会显示在这里。",
   "bell.many": "{name} 和另外 {n} 部剧有新剧集",
+
+  "det.trailer": "预告片",
+  "det.trailerN": "预告片 {n}",
+  "trailer.title": "预告片 · {name}",
+  "trailer.youtube": "在 YouTube 打开",
+  "trailer.blocked": "此预告片无法在应用内播放。",
 };

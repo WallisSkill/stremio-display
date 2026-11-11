@@ -483,4 +483,10 @@ export default {
   "bell.empty": "Chưa có tập mới",
   "bell.emptyHint": "Phim bộ bạn đang xem có tập mới sẽ hiện ở đây.",
   "bell.many": {"one": "{name} và {n} phim khác có tập mới", "other": "{name} và {n} phim khác có tập mới"},
+
+  "det.trailer": "Trailer",
+  "det.trailerN": "Trailer {n}",
+  "trailer.title": "Trailer · {name}",
+  "trailer.youtube": "Mở trên YouTube",
+  "trailer.blocked": "Không phát được trailer này trong app.",
 };

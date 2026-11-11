@@ -483,4 +483,10 @@ export default {
   "bell.empty": "No new episodes",
   "bell.emptyHint": "New episodes of series you're watching show up here.",
   "bell.many": {"one": "{name} and {n} other show have new episodes", "other": "{name} and {n} other shows have new episodes"},
+
+  "det.trailer": "Trailer",
+  "det.trailerN": "Trailer {n}",
+  "trailer.title": "Trailer · {name}",
+  "trailer.youtube": "Open on YouTube",
+  "trailer.blocked": "This trailer can't play inside the app.",
 };

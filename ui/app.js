@@ -65,6 +65,8 @@ const ICON = {
   plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>',
   check: '<svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   info: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 11v6M12 7.5v.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
+  film: '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M7 5v14M17 5v14M3 9.5h4M3 14.5h4M17 9.5h4M17 14.5h4" stroke="currentColor" stroke-width="2"/></svg>',
+  external: '<svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-8.5 8.5M18 13.5V18a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   left: '<svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   right: '<svg viewBox="0 0 24 24"><path d="m9 5 7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   search: '<svg viewBox="0 0 24 24" width="24" height="24"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M15.5 15.5 21 21" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
@@ -869,6 +871,16 @@ async function renderDetail(view, { kind, id, video, autoplay }) {
   const playLabel = resumeMs > 0 ? tr("det.resume", { ep: isSeries && target.video ? epShort(target.video) : "" }).trim() : isSeries && target.video ? tr("det.playEp", { ep: epShort(target.video) }) : tr("det.play");
   const playBtn = h("button", { class: "btn primary focusable", html: `${ICON.play}<span>${playLabel}</span>`, onclick: () => openStreams(m, target.vid, target.label) });
 
+  let trailers = metaTrailers(m);
+  const trailerBtn = h("button", { class: "btn focusable", html: `${ICON.film}<span>${tr("det.trailer")}</span>`, onclick: () => openTrailer(trailers, m.name) });
+  trailerBtn.hidden = !trailers.length;
+  watchStreams(m.type, isSeries ? target.vid : m.id, (e) => {
+    const more = mergeTrailers(trailers, streamTrailers(loadedGroups(e)));
+    if (more.length === trailers.length) return;
+    trailers = more;
+    trailerBtn.hidden = false;
+  });
+
   const cast = (m.cast || []).slice(0, 5).join(", ");
   const dir = (m.director || []).join(", ");
   const top = h("section", { class: "detail-top" },
@@ -876,7 +888,7 @@ async function renderDetail(view, { kind, id, video, autoplay }) {
     metaLine(m),
     m.description ? h("p", { class: "desc" }, m.description) : null,
     cast || dir ? h("div", { class: "credits" }, cast ? h("div", {}, h("b", {}, tr("det.cast") + " "), cast) : null, dir ? h("div", {}, h("b", {}, tr("det.director") + " "), dir) : null) : null,
-    h("div", { class: "actions" }, playBtn, libBtn));
+    h("div", { class: "actions" }, playBtn, trailerBtn, libBtn));
   put(page, top);
 
   if (isSeries && videos.length) {
@@ -2193,6 +2205,12 @@ function closePlayer(stop = true) {
 
 async function startPlayback(m, vid, label, stream, start, addon) {
   const ctx = (session) => ({ id: m.id, kind: m.type, name: m.name, title: m.type === "series" && label ? `${m.name} · ${label}` : m.name, poster: m.poster || null, video: vid, start: Math.floor(start || 0), session });
+  const yt = !stream.url && !stream.infoHash ? (YT_ID.test(stream.ytId || "") ? stream.ytId : ytFromUrl(stream.externalUrl)) : "";
+  if (yt) {
+    closeSheet();
+    openTrailer([{ id: yt, title: String(stream.title || stream.name || "").split("\n")[0].trim() }], m.name);
+    return;
+  }
   if ((stream.externalUrl || (!TAURI && stream.ytId)) && !stream.url && !stream.infoHash) {
     try { await call("play", { stream, ctx: ctx(0) }); closeSheet(); } catch (e) { toast(e, true); }
     return;
@@ -4250,6 +4268,85 @@ function bellToast() {
 $("#bell-btn")?.addEventListener("click", openBell);
 setInterval(() => { if (app.user && !document.hidden) refreshBell(); }, BELL_REFRESH_MS);
 document.addEventListener("visibilitychange", () => { if (!document.hidden && app.user && Date.now() - bell.at > BELL_REFRESH_MS / 2) refreshBell(); });
+
+const YT_ID = /^[\w-]{11}$/;
+const ytFromUrl = (u) => {
+  const m = /^https?:\/\/(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/)|youtu\.be\/)([\w-]{11})/.exec(String(u || ""));
+  return m ? m[1] : "";
+};
+
+function metaTrailers(m) {
+  const out = [];
+  for (const t of Array.isArray(m?.trailerStreams) ? m.trailerStreams : []) if (YT_ID.test(t?.ytId || "")) out.push({ id: t.ytId, title: t.title || "" });
+  for (const t of Array.isArray(m?.trailers) ? m.trailers : []) {
+    if (YT_ID.test(t?.source || "") && (!t.type || /trailer|teaser|clip/i.test(t.type))) out.push({ id: t.source, title: /^trailer$/i.test(t.type || "") ? "" : t.type || "" });
+  }
+  return out;
+}
+
+function streamTrailers(groups) {
+  const out = [];
+  for (const g of groups) for (const s of g.streams || []) {
+    if (s.url || s.infoHash) continue;
+    const id = YT_ID.test(s.ytId || "") ? s.ytId : ytFromUrl(s.externalUrl);
+    if (id) out.push({ id, title: String(s.title || s.name || "").split("\n")[0].trim() });
+  }
+  return out;
+}
+
+const mergeTrailers = (...lists) => {
+  const seen = new Set();
+  return lists.flat().filter((t) => !seen.has(t.id) && seen.add(t.id));
+};
+
+function openTrailer(list, name, start = 0) {
+  if (!list.length) return;
+  $(".trailer-layer")?.remove();
+  const back = document.activeElement;
+  let cur = Math.min(start, list.length - 1);
+  const frameBox = h("div", { class: "trailer-frame" });
+  const chips = h("div", { class: "trailer-chips" });
+  const youtube = h("button", { class: "btn focusable", html: `${ICON.external}<span>${tr("trailer.youtube")}</span>`, onclick: () => call("open_url", { url: `https://www.youtube.com/watch?v=${list[cur].id}` }).catch((e) => toast(e, true)) });
+  const onMsg = (e) => {
+    const frame = $("iframe", frameBox);
+    if (!frame || e.source !== frame.contentWindow) return;
+    let d;
+    try { d = typeof e.data === "string" ? JSON.parse(e.data) : e.data; } catch (x) { return; }
+    if (d && d.event === "onError") blocked();
+  };
+  const close = () => { window.removeEventListener("message", onMsg); box.remove(); back?.focus?.({ preventScroll: true }); };
+  const blocked = () => {
+    if ($(".trailer-blocked", frameBox)) return;
+    frameBox.append(h("div", { class: "trailer-blocked" },
+      h("p", {}, tr("trailer.blocked")),
+      h("button", { class: "btn primary focusable", html: `${ICON.external}<span>${tr("trailer.youtube")}</span>`, onclick: () => youtube.click() })));
+  };
+  const show = () => {
+    const frame = h("iframe", {
+      src: `https://www.youtube-nocookie.com/embed/${list[cur].id}?autoplay=1&rel=0&playsinline=1&enablejsapi=1`,
+      title: tr("trailer.title", { name }),
+      allow: "autoplay; encrypted-media; picture-in-picture; fullscreen",
+      allowfullscreen: true,
+      referrerpolicy: "strict-origin-when-cross-origin",
+    });
+    frame.addEventListener("load", () => {
+      try { frame.contentWindow.postMessage(JSON.stringify({ event: "listening", id: 1, channel: "widget" }), "*"); } catch (x) {}
+    });
+    put(frameBox, frame);
+    put(chips, ...(list.length > 1 ? list.map((t, i) => h("button", { class: `pill focusable ${i === cur ? "on" : ""}`, onclick: () => { cur = i; show(); } }, t.title || tr("det.trailerN", { n: i + 1 }))) : []));
+  };
+  const box = layer("trailer-layer", close);
+  box.addEventListener("click", (e) => { if (e.target === box) close(); });
+  put(box, h("div", { class: "trailer-box", role: "dialog", "aria-label": tr("trailer.title", { name }) },
+    h("div", { class: "trailer-head" },
+      h("h2", {}, tr("trailer.title", { name })),
+      h("button", { class: "icon-btn focusable trailer-x", "aria-label": tr("common.close"), html: ICON.close, onclick: close })),
+    frameBox,
+    h("div", { class: "trailer-foot" }, chips, youtube)));
+  window.addEventListener("message", onMsg);
+  show();
+  $(".trailer-x", box).focus({ preventScroll: true });
+}
 
 function playIntro() {
   const box = h("div", { id: "intro", "aria-hidden": "true" });
