@@ -306,7 +306,7 @@ const HOST_GRACE_MS = 3 * 60e3;
 const MAX_FRAME = 32 * 1024;
 const MAX_CHAT = 300;
 const CHAT_GAP_MS = 400;
-const REACTIONS = ["❤️", "😂", "😮", "😢", "👏", "🔥"];
+const REACTIONS = ["❤️", "😂", "😮", "😢", "👏", "🔥", "😍", "🤣", "😱", "😭", "👍", "👎", "🙏", "💯", "🎉", "😴", "🤔", "😡"];
 
 const clip = (v, n) => (typeof v === "string" ? v.trim().replace(/\s+/g, " ").slice(0, n) : "");
 const httpUrl = (v) => (typeof v === "string" && HTTP_URL.test(v) ? v : undefined);
@@ -450,7 +450,7 @@ export class WatchRoom extends DurableObject {
       await this.schedule();
     }
     const roster = this.roster();
-    this.send(server, { t: "welcome", you: id, host, now: Date.now(), media: room.media, play: this.play, tracks: this.tracks, ...roster });
+    this.send(server, { t: "welcome", you: id, host, now: Date.now(), media: room.media, play: this.play, tracks: this.tracks, reactions: REACTIONS, ...roster });
     const data = JSON.stringify({ t: "members", ...roster });
     for (const ws of this.sockets()) if (ws !== server) try { ws.send(data); } catch (e) {}
     return new Response(null, { status: 101, webSocket: client });

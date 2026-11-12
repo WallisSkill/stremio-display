@@ -1210,6 +1210,9 @@ function buildPlayer() {
     ui.stretch.classList.add("act");
     put(ui.stretch, ui.fillIcon, ui.fillLabel);
     ui.unlock = h("button", { class: "pl-unlock", tabindex: "-1", onclick: (e) => { e.stopPropagation(); setLock(false); } }, h("span", { html: ICON.unlock }), h("span", {}, tr("pl.unlock")));
+    ui.lockRoomCount = h("b", { class: "room-count", hidden: true });
+    ui.lockRoom = h("button", { class: "pl-unlock pl-lockroom", tabindex: "-1", "aria-label": tr("nav.together"), onclick: (e) => { e.stopPropagation(); showUnlock(); roomMenu(); } }, h("span", { html: ICON.people }), h("span", {}, tr("nav.togetherShort")), ui.lockRoomCount);
+    ui.lockbar = h("div", { class: "pl-lockbar" }, ui.lockRoom, ui.unlock);
     ui.play.classList.add("huge");
     back10.classList.add("big");
     fwd10.classList.add("big");
@@ -1233,7 +1236,7 @@ function buildPlayer() {
   ui.levelFill = h("i");
   ui.levelText = h("b");
   ui.level = h("div", { class: "pl-level", hidden: true }, ui.levelIcon, h("div", { class: "pl-level-bar" }, ui.levelFill), ui.levelText);
-  ui.root = h("div", { id: "player", class: TOUCH ? "touch" : "", hidden: true }, ui.bg, ui.dim, ui.hit, ui.level, h("div", { class: "pl-shade" }), ui.spin, ui.flash, top, ...(center ? [center] : []), bottom, ui.nextUp, ui.menu, ...(ui.unlock ? [ui.unlock] : []));
+  ui.root = h("div", { id: "player", class: TOUCH ? "touch" : "", hidden: true }, ui.bg, ui.dim, ui.hit, ui.level, h("div", { class: "pl-shade" }), ui.spin, ui.flash, top, ...(center ? [center] : []), bottom, ui.nextUp, ui.menu, ...(ui.lockbar ? [ui.lockbar] : []));
   let lastTap = 0;
   let tapTimer = null;
   let swipe = null;
@@ -1257,8 +1260,8 @@ function buildPlayer() {
     else if (r < 0.87 && fillMode) setFill(false, true);
   });
   ui.hit.addEventListener("pointerdown", (e) => {
-    if (e.pointerType === "mouse" || pinch || pl.locked || pl.menu) return;
-    const seekable = !!pl.s.loaded && pl.s.duration > 0;
+    if (e.pointerType === "mouse" || pinch || pl.menu) return;
+    const seekable = !pl.locked && !!pl.s.loaded && pl.s.duration > 0;
     const edge = e.clientX < 24 || e.clientX > window.innerWidth - 24 || e.clientY < 48 || e.clientY > window.innerHeight - 48;
     const side = e.clientX < window.innerWidth / 2 ? "light" : "vol";
     const vertical = TOUCH && !edge && !(side === "vol" && !TAURI && /iPhone|iPad|iPod/i.test(navigator.userAgent));
@@ -1319,8 +1322,8 @@ function buildPlayer() {
   ui.hit.addEventListener("pointerup", endSwipe);
   ui.hit.addEventListener("pointercancel", endSwipe);
   ui.hit.addEventListener("click", (e) => {
-    if (pl.locked) { showUnlock(); return; }
     if (Date.now() - swipedAt < 400) return;
+    if (pl.locked) { showUnlock(); return; }
     if (pl.menu) { toggleMenu(null); return; }
     if (!TOUCH) { togglePause(); return; }
     const now = Date.now();
@@ -2345,6 +2348,8 @@ const ROOM_API = document.querySelector('meta[name="wistv-room-api"]')?.content 
 const ROOM_WS = ROOM_API.replace(/^http/, "ws");
 const ROOM_CODE_RE = /^[A-HJ-NP-Z2-9]{6}$/;
 const ROOM_REACTIONS = ["❤️", "😂", "😮", "😢", "👏", "🔥"];
+const CHAT_EMOJI = ["😀", "😂", "🤣", "😊", "😍", "🥰", "😘", "😎", "🤩", "🥳", "😉", "😏", "🤔", "🤨", "😐", "🙄", "😴", "🥱", "😮", "😱", "😳", "🥺", "😢", "😭", "😤", "😡", "🤬", "🤯", "😬", "🤐", "🤫", "🤭", "👍", "👎", "👏", "🙌", "🙏", "💪", "👀", "✌️", "❤️", "💔", "🔥", "💯", "🎉", "🍿", "🎬", "⭐"];
+const roomReactList = (list) => (Array.isArray(list) && list.length && list.length <= 40 && list.every((e) => typeof e === "string" && e.length > 0 && e.length <= 8) ? list : ROOM_REACTIONS);
 const ROOM_HOLD_MS = 30000;
 const ROOM_BEAT_MS = 15000;
 const ROOM_SITE = !TAURI && /^https?:$/.test(location.protocol) ? location.origin + location.pathname : "https://film.wis237.online/";
@@ -2355,7 +2360,7 @@ const room = {
   retryTimer: null, pingTimer: null, syncTimer: null, members: [], hostOnline: true, media: null, play: null, offset: 0, rtt: Infinity,
   chat: [], unread: 0, hold: null, skip: new Set(), sent: null, hostPos: 0, bufSince: null, waiting: false, waitSince: null,
   rateSet: null, cool: { seek: 0, pause: 0, track: 0 }, joining: null, lastError: "", panel: null, feed: null, pill: null,
-  tracks: null, tracksSent: null, subTried: {},
+  tracks: null, tracksSent: null, subTried: {}, reactions: ROOM_REACTIONS,
 };
 
 const inRoom = () => !!room.code;
@@ -2385,7 +2390,7 @@ function roomStart({ code, key, name }) {
   Object.assign(room, {
     code, key: key || null, host: !!key, name, online: false, leaving: false, tries: 0, members: [], hostOnline: true, media: null, play: null,
     offset: 0, rtt: Infinity, chat: [], unread: 0, hold: null, skip: new Set(), sent: null, bufSince: null, waiting: false, waitSince: null,
-    rateSet: null, cool: { seek: 0, pause: 0, track: 0 }, joining: null, lastError: "", tracks: null, tracksSent: null, subTried: {},
+    rateSet: null, cool: { seek: 0, pause: 0, track: 0 }, joining: null, lastError: "", tracks: null, tracksSent: null, subTried: {}, reactions: ROOM_REACTIONS,
   });
   try { sessionStorage.setItem("wistv.room", JSON.stringify({ code, key: key || null, name })); } catch (e) {}
   roomConnect();
@@ -2469,6 +2474,7 @@ function roomMessage(m) {
   if (m.t === "react") { roomReact(m); return; }
   if (m.t === "welcome") {
     room.online = true;
+    room.reactions = roomReactList(m.reactions);
     if (room.rtt === Infinity) room.offset = m.now - Date.now();
     room.members = Array.isArray(m.members) ? m.members : [];
     room.hostOnline = !!m.hostOnline;
@@ -2914,6 +2920,7 @@ function paintRoomPanel() {
   paintPart(p.people, JSON.stringify(room.members), () => room.members.map((m) => h("span", { class: `room-person ${m.waiting ? "wait" : ""}` },
     h("i", { class: "pf-face", style: `background:${roomColor(m.id)}` }, firstLetter(m.name)), m.name,
     m.host ? h("em", {}, tr("room.hostTag")) : null, m.id === room.me ? h("em", {}, tr("room.you")) : null, m.waiting ? h("em", { class: "busy" }, tr("src.loading")) : null)));
+  paintPart(p.reacts, room.reactions.join(" "), () => room.reactions.map((e) => h("button", { class: "room-react-btn focusable", "aria-label": tr("room.react", { e }), onclick: () => roomSend({ t: "react", e }) }, e)));
   const last = room.chat[room.chat.length - 1];
   paintPart(p.log, `${room.chat.length}|${last?.at || 0}`, () => room.chat.length
     ? room.chat.map((m) => h("p", { class: m.id === room.me ? "me" : "" }, h("b", {}, m.from), m.text))
@@ -2943,15 +2950,32 @@ function roomPanel() {
   };
   input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); send(); } });
   box.addEventListener("click", (e) => { if (e.target === box) close(); });
-  const parts = { head: h("div", { class: "room-head" }), status: h("div", { class: "room-status" }), people: h("div", { class: "room-people" }), log: h("div", { class: "room-log" }), foot: h("div", { class: "pf-row room-foot" }) };
+  const put1 = (emoji) => {
+    const at = input.selectionStart ?? input.value.length;
+    const end = input.selectionEnd ?? at;
+    const next = input.value.slice(0, at) + emoji + input.value.slice(end);
+    if (next.length > 300) return;
+    input.value = next;
+    const caret = at + emoji.length;
+    try { input.setSelectionRange(caret, caret); } catch (e) {}
+  };
+  const picker = h("div", { class: "room-emoji", hidden: true, role: "listbox", "aria-label": tr("room.emoji") },
+    CHAT_EMOJI.map((e) => h("button", { class: "room-emoji-btn focusable", "aria-label": e, onclick: () => put1(e) }, e)));
+  const emojiBtn = h("button", { class: "btn focusable room-emoji-toggle", "aria-label": tr("room.emoji"), "aria-expanded": "false", onclick: () => {
+    picker.hidden = !picker.hidden;
+    emojiBtn.setAttribute("aria-expanded", String(!picker.hidden));
+    if (!picker.hidden) $(".room-emoji-btn", picker)?.focus({ preventScroll: true });
+  } }, "😊");
+  const parts = { head: h("div", { class: "room-head" }), status: h("div", { class: "room-status" }), people: h("div", { class: "room-people" }), reacts: h("div", { class: "room-reacts" }), log: h("div", { class: "room-log" }), foot: h("div", { class: "pf-row room-foot" }) };
   box._parts = parts;
   put(box, h("div", { class: "room-card" },
     h("button", { class: "pl-menu-x focusable", "aria-label": tr("common.close"), html: ICON.close, onclick: close }),
     h("div", { class: "room-col" }, h("h2", {}, tr("tg.title")), parts.head, parts.status, parts.people),
     h("div", { class: "room-col talk" },
-      h("div", { class: "room-reacts" }, ROOM_REACTIONS.map((e) => h("button", { class: "room-react-btn focusable", "aria-label": tr("room.react", { e }), onclick: () => roomSend({ t: "react", e }) }, e))),
+      parts.reacts,
       parts.log,
-      h("div", { class: "room-send" }, input, h("button", { class: "btn primary focusable", onclick: send }, tr("common.send"))),
+      picker,
+      h("div", { class: "room-send" }, emojiBtn, input, h("button", { class: "btn primary focusable", onclick: send }, tr("common.send"))),
       parts.foot)));
   paintRoom();
   (TOUCH ? $(".room-copy", box) : input)?.focus({ preventScroll: true });
@@ -2980,6 +3004,10 @@ function paintRoom() {
     pl.ui.roomCount.hidden = !inRoom();
     pl.ui.roomCount.textContent = inRoom() ? String(room.unread || room.members.length || 1) : "";
     pl.ui.roomCount.classList.toggle("unread", room.unread > 0);
+    if (pl.ui.lockRoomCount) {
+      pl.ui.lockRoomCount.hidden = !room.unread;
+      pl.ui.lockRoomCount.textContent = room.unread ? String(room.unread) : "";
+    }
     pl.ui.root.classList.toggle("room-guest", roomGuest());
     if (pl.open) paintState();
   }

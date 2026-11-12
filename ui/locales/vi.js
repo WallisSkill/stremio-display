@@ -314,6 +314,7 @@ export default {
   "room.close": "Đóng phòng",
   "room.watchWith": "Xem cùng phòng",
   "room.chatPh": "Nhắn cho cả phòng…",
+  "room.emoji": "Biểu tượng cảm xúc",
   "room.reconnecting": "Đang kết nối lại phòng…",
   "common.send": "Gửi",
   "room.opening": "Đang mở phim của phòng…",

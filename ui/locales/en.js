@@ -314,6 +314,7 @@ export default {
   "room.close": "Close room",
   "room.watchWith": "Watch with the room",
   "room.chatPh": "Message the room…",
+  "room.emoji": "Emoji",
   "room.reconnecting": "Reconnecting to the room…",
   "common.send": "Send",
   "room.opening": "Opening the room's video…",

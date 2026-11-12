@@ -314,6 +314,7 @@ export default {
   "room.close": "关闭房间",
   "room.watchWith": "和房间一起看",
   "room.chatPh": "给大家发消息…",
+  "room.emoji": "表情",
   "room.reconnecting": "正在重新连接房间…",
   "common.send": "发送",
   "room.opening": "正在打开房间的影片…",
