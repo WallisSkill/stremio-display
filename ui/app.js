@@ -2914,19 +2914,21 @@ function roomDialog({ join, code = "" }) {
     };
     for (const el of [nameIn, codeIn, pwIn].filter(Boolean)) el.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } });
     codeIn?.addEventListener("input", () => { codeIn.value = codeIn.value.toUpperCase(); });
-    put(box, h("div", { class: "pf-card" },
-      h("h2", {}, join ? tr("room.joinTitle") : tr("room.createTitle")),
-      h("p", { class: "hint" }, join
-        ? tr("room.joinHint")
-        : tr("room.createHint")),
-      join ? null : h("p", { class: "hint" }, tr("room.debridWarn")),
-      join ? [h("label", { class: "pf-label" }, tr("room.code")), codeIn] : null,
-      h("label", { class: "pf-label" }, tr("room.yourName")), nameIn,
-      join ? null : [h("label", { class: "pf-label" }, tr("room.pw")), pills, pwIn],
-      msg,
-      h("div", { class: "pf-row end" },
-        h("button", { class: "btn focusable", onclick: () => done(null) }, tr("common.cancel")),
-        h("button", { class: "btn primary focusable", onclick: submit }, join ? tr("room.join") : tr("room.create")))));
+    put(box, h("div", { class: "pf-card rd-split" },
+      h("div", { class: "rd-info" },
+        h("h2", {}, join ? tr("room.joinTitle") : tr("room.createTitle")),
+        h("p", { class: "hint" }, join
+          ? tr("room.joinHint")
+          : tr("room.createHint")),
+        join ? null : h("p", { class: "hint" }, tr("room.debridWarn"))),
+      h("div", { class: "rd-form" },
+        join ? [h("label", { class: "pf-label" }, tr("room.code")), codeIn] : null,
+        h("label", { class: "pf-label" }, tr("room.yourName")), nameIn,
+        join ? null : [h("label", { class: "pf-label" }, tr("room.pw")), pills, pwIn],
+        msg,
+        h("div", { class: "pf-row end" },
+          h("button", { class: "btn focusable", onclick: () => done(null) }, tr("common.cancel")),
+          h("button", { class: "btn primary focusable", onclick: submit }, join ? tr("room.join") : tr("room.create"))))));
     const first = TOUCH ? $(".btn.primary", box) : join && !code ? codeIn : !nameIn.value ? nameIn : $(".btn.primary", box);
     first.focus({ preventScroll: true });
   });

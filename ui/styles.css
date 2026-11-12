@@ -849,6 +849,17 @@ body.web-playing #wv { display: block; }
 .room-lock-text svg { width: 16px; height: 16px; }
 .room-pw-pick { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
 .room-dialog .pf-input[hidden] { display: none; }
+.rd-info, .rd-form { display: contents; }
+@media (max-height: 520px) and (orientation: landscape) and (min-width: 600px) {
+  .room-dialog .pf-card.rd-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 22px; align-items: start; width: min(820px, 100%); }
+  .rd-info, .rd-form { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .rd-info h2 { align-self: flex-start; }
+  .room-dialog .rd-info .hint { font-size: 12.5px; line-height: 1.45; }
+  .rd-form .pf-row.end { margin-top: 0; }
+  .rd-form .room-pw-pick { margin-bottom: 0; }
+  .rd-form .pin-msg { min-height: 0; }
+  .rd-form .pin-msg:empty { display: none; }
+}
 .room-person { display: inline-flex; align-items: center; gap: 7px; padding: 4px 11px 4px 4px; border-radius: 999px; background: rgba(255,255,255,0.08); font-size: 14px; font-weight: 600; }
 .room-person .pf-face { width: 26px; height: 26px; border-radius: 50%; font-size: 13px; }
 .room-person em { font-style: normal; font-size: 11px; font-weight: 600; color: var(--faint); }
