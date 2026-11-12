@@ -841,6 +841,14 @@ body.web-playing #wv { display: block; }
 .room-foot .btn.danger { margin-right: 0; }
 .room-status { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; font-size: 14px; color: var(--muted); line-height: 1.45; }
 .room-people { display: flex; flex-wrap: wrap; gap: 8px; }
+.room-secret { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.room-secret:empty { display: none; }
+.room-secret .btn { height: 40px; padding: 0 16px; font-size: 14px; }
+.room-lock-text { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); word-break: break-all; }
+.room-lock-text i { display: inline-flex; flex: none; width: 16px; height: 16px; }
+.room-lock-text svg { width: 16px; height: 16px; }
+.room-pw-pick { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.room-dialog .pf-input[hidden] { display: none; }
 .room-person { display: inline-flex; align-items: center; gap: 7px; padding: 4px 11px 4px 4px; border-radius: 999px; background: rgba(255,255,255,0.08); font-size: 14px; font-weight: 600; }
 .room-person .pf-face { width: 26px; height: 26px; border-radius: 50%; font-size: 13px; }
 .room-person em { font-style: normal; font-size: 11px; font-weight: 600; color: var(--faint); }

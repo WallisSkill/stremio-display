@@ -87,6 +87,8 @@ const SAID = {
   "wk.roomCreateFail": "Chưa tạo được phòng, hãy thử lại",
   "wk.needWebSocket": "Cần kết nối WebSocket",
   "wk.badRoomCode": "Mã phòng không hợp lệ",
+  "wk.roomPwFormat": "Mật khẩu phòng cần từ 4 đến 32 ký tự",
+  "wk.roomPwTries": "Nhập sai mật khẩu quá nhiều lần, hãy thử lại sau",
 };
 const said = (key, params) => (SAID[key] || key).replace(/\{(\w+)\}/g, (m, k) => (params && params[k] != null ? String(params[k]) : m));
 const coded = (key, params) => (SAID[key] ? { message: said(key, params), key, ...(params ? { params } : {}) } : { message: key });
@@ -310,6 +312,10 @@ const REACTIONS = ["❤️", "😂", "😮", "😢", "👏", "🔥", "😍", "�
 
 const clip = (v, n) => (typeof v === "string" ? v.trim().replace(/\s+/g, " ").slice(0, n) : "");
 const httpUrl = (v) => (typeof v === "string" && HTTP_URL.test(v) ? v : undefined);
+const PW_TRIES = 5;
+const PW_FAIL_WINDOW_MS = 10 * 60e3;
+const PW_FAIL_MAX = 30;
+const pwOk = (pw) => typeof pw === "string" && [...pw].length >= 4 && [...pw].length <= 32 && !/[\u0000-\u001f\u007f]/.test(pw);
 const memberName = (v) => [...clip(v, 80)].slice(0, MAX_NAME).join("") || "Khách";
 
 function cleanMedia(m) {
@@ -393,7 +399,7 @@ export class WatchRoom extends DurableObject {
   }
 
   sockets(except) {
-    return this.ctx.getWebSockets().filter((ws) => ws !== except && ws.readyState === 1 && this.who(ws).id);
+    return this.ctx.getWebSockets().filter((ws) => { if (ws === except || ws.readyState !== 1) return false; const w = this.who(ws); return !!w.id && !w.pending; });
   }
 
   who(ws) {
@@ -435,25 +441,64 @@ export class WatchRoom extends DurableObject {
     const key = url.searchParams.get("key") || "";
     const host = !!key && same(key, room.hostKey);
     if (key && !host) return refuse(4403, "wk.badHostKey");
-    const stale = this.sockets().filter((ws) => { const w = this.who(ws); return w.id === id || (host && w.host); });
-    const guests = this.sockets().filter((ws) => !stale.includes(ws) && !this.who(ws).host);
-    if (!host && guests.length >= MAX_MEMBERS - 1) return refuse(4409, "wk.roomFull");
-    for (const ws of stale) {
-      this.send(ws, { t: "replaced" });
-      try { ws.close(4001, "replaced"); } catch (e) {}
-    }
+    const name = memberName(url.searchParams.get("name"));
     this.ctx.acceptWebSocket(server);
-    server.serializeAttachment({ id, name: memberName(url.searchParams.get("name")), host, waiting: false, chatAt: 0, reactAt: 0 });
+    if (!host && room.pw) {
+      server.serializeAttachment({ pending: true, id, name, tries: 0 });
+      this.send(server, { t: "auth" });
+    } else {
+      await this.admit(server, id, name, host);
+    }
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  async admit(ws, id, name, host) {
+    const room = this.room;
+    for (const s of this.ctx.getWebSockets()) {
+      const w = this.who(s);
+      if (s !== ws && w.pending && w.id === id) try { s.close(4001, "replaced"); } catch (e) {}
+    }
+    const others = this.sockets(ws);
+    const stale = others.filter((s) => { const w = this.who(s); return w.id === id || (host && w.host); });
+    const guests = others.filter((s) => !stale.includes(s) && !this.who(s).host);
+    if (!host && guests.length >= MAX_MEMBERS - 1) {
+      this.send(ws, { t: "error", ...coded("wk.roomFull") });
+      try { ws.close(4409, "refused"); } catch (e) {}
+      return;
+    }
+    for (const s of stale) {
+      this.send(s, { t: "replaced" });
+      try { s.close(4001, "replaced"); } catch (e) {}
+    }
+    ws.serializeAttachment({ id, name, host, waiting: false, chatAt: 0, reactAt: 0 });
     if (host && room.hostGone) {
       room.hostGone = null;
       await this.save();
       await this.schedule();
     }
     const roster = this.roster();
-    this.send(server, { t: "welcome", you: id, host, now: Date.now(), media: room.media, play: this.play, tracks: this.tracks, reactions: REACTIONS, ...roster });
+    this.send(ws, { t: "welcome", you: id, host, now: Date.now(), media: room.media, play: this.play, tracks: this.tracks, reactions: REACTIONS, locked: !!room.pw, ...roster });
     const data = JSON.stringify({ t: "members", ...roster });
-    for (const ws of this.sockets()) if (ws !== server) try { ws.send(data); } catch (e) {}
-    return new Response(null, { status: 101, webSocket: client });
+    for (const s of this.sockets()) if (s !== ws) try { s.send(data); } catch (e) {}
+  }
+
+  async checkPassword(ws, me, room, msg) {
+    if (msg.t !== "auth") return;
+    if (!room.pw) return this.admit(ws, me.id, me.name, false);
+    const now = Date.now();
+    this.pwFails = (this.pwFails || []).filter((t) => now - t < PW_FAIL_WINDOW_MS);
+    const refuse = () => {
+      this.send(ws, { t: "error", ...coded("wk.roomPwTries") });
+      try { ws.close(4429, "refused"); } catch (e) {}
+    };
+    if (this.pwFails.length >= PW_FAIL_MAX) return refuse();
+    const pw = typeof msg.pw === "string" ? msg.pw : "";
+    if (pwOk(pw) && same(await pinHash(pw, room.pw.salt), room.pw.hash)) return this.admit(ws, me.id, me.name, false);
+    this.pwFails.push(now);
+    const tries = (me.tries || 0) + 1;
+    if (tries >= PW_TRIES) return refuse();
+    ws.serializeAttachment({ ...me, tries });
+    this.send(ws, { t: "auth", wrong: true, left: PW_TRIES - tries });
   }
 
   async webSocketMessage(ws, data) {
@@ -467,6 +512,7 @@ export class WatchRoom extends DurableObject {
       return;
     }
     const me = this.who(ws);
+    if (me.pending) return this.checkPassword(ws, me, room, msg);
     const now = Date.now();
     if (msg.t === "ping") {
       this.send(ws, { t: "pong", c: Number.isFinite(msg.c) ? msg.c : 0, s: now });
@@ -508,6 +554,18 @@ export class WatchRoom extends DurableObject {
       this.tracks = cleanTracks(msg, room.media.vid);
       await this.ctx.storage.put("tracks", this.tracks);
       this.broadcast({ t: "tracks", tracks: this.tracks }, ws);
+    } else if (msg.t === "secret") {
+      if (msg.pw !== null && !pwOk(msg.pw)) {
+        this.send(ws, { t: "error", ...coded("wk.roomPwFormat") });
+        return;
+      }
+      if (msg.pw === null) delete room.pw;
+      else {
+        const salt = crypto.randomUUID();
+        room.pw = { salt, hash: await pinHash(msg.pw, salt) };
+      }
+      await this.save();
+      this.broadcast({ t: "secret", on: !!room.pw });
     } else if (msg.t === "close") {
       await this.closeRoom("wk.hostClosed");
     }

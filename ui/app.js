@@ -2350,6 +2350,7 @@ const ROOM_CODE_RE = /^[A-HJ-NP-Z2-9]{6}$/;
 const ROOM_REACTIONS = ["❤️", "😂", "😮", "😢", "👏", "🔥"];
 const CHAT_EMOJI = ["😀", "😂", "🤣", "😊", "😍", "🥰", "😘", "😎", "🤩", "🥳", "😉", "😏", "🤔", "🤨", "😐", "🙄", "😴", "🥱", "😮", "😱", "😳", "🥺", "😢", "😭", "😤", "😡", "🤬", "🤯", "😬", "🤐", "🤫", "🤭", "👍", "👎", "👏", "🙌", "🙏", "💪", "👀", "✌️", "❤️", "💔", "🔥", "💯", "🎉", "🍿", "🎬", "⭐"];
 const roomReactList = (list) => (Array.isArray(list) && list.length && list.length <= 40 && list.every((e) => typeof e === "string" && e.length > 0 && e.length <= 8) ? list : ROOM_REACTIONS);
+const roomPwOk = (pw) => typeof pw === "string" && [...pw].length >= 4 && [...pw].length <= 32 && !/[\u0000-\u001f\u007f]/.test(pw);
 const ROOM_HOLD_MS = 30000;
 const ROOM_BEAT_MS = 15000;
 const ROOM_SITE = !TAURI && /^https?:$/.test(location.protocol) ? location.origin + location.pathname : "https://film.wis237.online/";
@@ -2360,7 +2361,7 @@ const room = {
   retryTimer: null, pingTimer: null, syncTimer: null, members: [], hostOnline: true, media: null, play: null, offset: 0, rtt: Infinity,
   chat: [], unread: 0, hold: null, skip: new Set(), sent: null, hostPos: 0, bufSince: null, waiting: false, waitSince: null,
   rateSet: null, cool: { seek: 0, pause: 0, track: 0 }, joining: null, lastError: "", panel: null, feed: null, pill: null,
-  tracks: null, tracksSent: null, subTried: {}, reactions: ROOM_REACTIONS,
+  tracks: null, tracksSent: null, subTried: {}, reactions: ROOM_REACTIONS, pw: null, pwNext: null, locked: false, secretWanted: null, pwAsk: null,
 };
 
 const inRoom = () => !!room.code;
@@ -2385,14 +2386,20 @@ function roomLocked() {
   return true;
 }
 
-function roomStart({ code, key, name }) {
+function roomSave() {
+  if (!room.code) return;
+  try { sessionStorage.setItem("wistv.room", JSON.stringify({ code: room.code, key: room.key, name: room.name, pw: room.pw })); } catch (e) {}
+}
+
+function roomStart({ code, key, name, pw }) {
   roomStop(false);
   Object.assign(room, {
     code, key: key || null, host: !!key, name, online: false, leaving: false, tries: 0, members: [], hostOnline: true, media: null, play: null,
     offset: 0, rtt: Infinity, chat: [], unread: 0, hold: null, skip: new Set(), sent: null, bufSince: null, waiting: false, waitSince: null,
     rateSet: null, cool: { seek: 0, pause: 0, track: 0 }, joining: null, lastError: "", tracks: null, tracksSent: null, subTried: {}, reactions: ROOM_REACTIONS,
+    pw: roomPwOk(pw) ? pw : null, pwNext: null, locked: false, secretWanted: null,
   });
-  try { sessionStorage.setItem("wistv.room", JSON.stringify({ code, key: key || null, name })); } catch (e) {}
+  roomSave();
   roomConnect();
   room.syncTimer = setInterval(roomTick, 500);
   paintRoom();
@@ -2409,8 +2416,9 @@ function roomStop(close) {
   clearInterval(room.pingTimer);
   clearInterval(room.syncTimer);
   if (!room.host && pl.open && room.rateSet != null && room.rateSet !== 1) setProp("speed", 1);
-  Object.assign(room, { code: null, key: null, host: false, online: false, members: [], media: null, play: null, hold: null, rateSet: null, joining: null, waiting: false, unread: 0, tracks: null, tracksSent: null, subTried: {} });
+  Object.assign(room, { code: null, key: null, host: false, online: false, members: [], media: null, play: null, hold: null, rateSet: null, joining: null, waiting: false, unread: 0, tracks: null, tracksSent: null, subTried: {}, pw: null, pwNext: null, locked: false, secretWanted: null });
   try { sessionStorage.removeItem("wistv.room"); } catch (e) {}
+  room.pwAsk?._close?.();
   room.panel?._close?.();
   paintRoom();
 }
@@ -2472,9 +2480,26 @@ function roomMessage(m) {
   }
   if (m.t === "chat") { roomChat(m); return; }
   if (m.t === "react") { roomReact(m); return; }
-  if (m.t === "welcome") {
+  if (m.t === "auth") { roomAuth(m); return; }
+  if (m.t === "secret") {
+    room.locked = !!m.on;
+    if (room.host) {
+      const wanted = room.pwNext;
+      room.pwNext = null;
+      room.pw = room.locked ? wanted || room.pw : null;
+      roomSave();
+      if (wanted || !room.locked) toast(room.locked ? tr("room.pwSaved") : tr("room.pwRemoved"));
+    }
+  } else if (m.t === "welcome") {
     room.online = true;
+    room.pwAsk?._close?.();
+    room.locked = !!m.locked;
     room.reactions = roomReactList(m.reactions);
+    if (room.host && room.secretWanted) {
+      room.pwNext = room.secretWanted;
+      room.secretWanted = null;
+      roomSend({ t: "secret", pw: room.pwNext });
+    }
     if (room.rtt === Infinity) room.offset = m.now - Date.now();
     room.members = Array.isArray(m.members) ? m.members : [];
     room.hostOnline = !!m.hostOnline;
@@ -2510,6 +2535,66 @@ function roomMessage(m) {
     roomSync();
   } else return;
   paintRoom();
+}
+
+async function roomAuth(m) {
+  const ws = room.ws;
+  const code = room.code;
+  if (!m.wrong && room.pw) { roomSend({ t: "auth", pw: room.pw }); return; }
+  room.pw = null;
+  roomSave();
+  room.pwAsk?._close?.();
+  const left = Number.isInteger(m.left) && m.left > 0 ? m.left : 0;
+  const pw = await roomPwDialog({
+    title: tr("room.pwAskTitle"), hint: tr("room.pwAskHint", { code }), action: tr("room.pwEnter"),
+    msg: m.wrong ? tr("room.pwWrong", { n: left }) : "", ask: true,
+  });
+  if (room.code !== code) return;
+  if (pw == null) { roomStop(false); toast(tr("room.left")); return; }
+  if (room.ws !== ws || !room.ws) return;
+  room.pw = pw;
+  roomSave();
+  roomSend({ t: "auth", pw });
+}
+
+function roomPwDialog({ title, hint, msg = "", value = "", action, ask = false }) {
+  return new Promise((resolve) => {
+    let over = false;
+    const done = (v) => { if (over) return; over = true; box.remove(); if (room.pwAsk === box) room.pwAsk = null; resolve(v); };
+    const box = layer("edit room-dialog", () => done(null));
+    box._close = () => done(null);
+    if (ask) room.pwAsk = box;
+    const input = h("input", { class: "pf-input focusable", maxlength: "32", placeholder: tr("room.pwPh"), value, autocomplete: "off", autocapitalize: "off", spellcheck: "false", enterkeyhint: "go" });
+    const note = h("p", { class: `pin-msg${msg ? " bad" : ""}` }, msg);
+    const submit = () => {
+      const pw = input.value;
+      if (!roomPwOk(pw)) { note.textContent = tr("room.pwBad"); note.classList.add("bad"); input.focus(); return; }
+      done(pw);
+    };
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } });
+    put(box, h("div", { class: "pf-card" },
+      h("h2", {}, title),
+      hint ? h("p", { class: "hint" }, hint) : null,
+      h("label", { class: "pf-label" }, tr("room.pw")), input, note,
+      h("div", { class: "pf-row end" },
+        h("button", { class: "btn focusable", onclick: () => done(null) }, ask ? tr("room.leave") : tr("common.cancel")),
+        h("button", { class: "btn primary focusable", onclick: submit }, action))));
+    (TOUCH ? $(".btn.primary", box) : input).focus({ preventScroll: true });
+  });
+}
+
+async function roomSetSecret() {
+  if (!room.host) return;
+  const pw = await roomPwDialog({ title: tr("room.pwSetTitle"), hint: tr("room.pwSetHint"), value: room.pw || "", action: tr("common.save") });
+  if (pw == null || !room.host) return;
+  room.pwNext = pw;
+  if (!roomSend({ t: "secret", pw })) { room.pwNext = null; toast(tr("room.reconnecting"), true); }
+}
+
+function roomDropSecret() {
+  if (!room.host) return;
+  room.pwNext = null;
+  if (!roomSend({ t: "secret", pw: null })) toast(tr("room.reconnecting"), true);
 }
 
 function roomMediaOf(c, start) {
@@ -2805,15 +2890,29 @@ function roomDialog({ join, code = "" }) {
     const codeIn = join ? h("input", { class: "pf-input focusable room-code-in", maxlength: "6", placeholder: tr("room.codePh"), value: code, autocapitalize: "characters", autocomplete: "off", spellcheck: "false", enterkeyhint: "next" }) : null;
     const msg = h("p", { class: "pin-msg" });
     const bad = (text, el) => { msg.textContent = text; msg.classList.add("bad"); el.focus(); };
+    const pwIn = join ? null : h("input", { class: "pf-input focusable", maxlength: "32", placeholder: tr("room.pwPh"), autocomplete: "off", autocapitalize: "off", spellcheck: "false", enterkeyhint: "go", hidden: true });
+    let usePw = false;
+    const pick = (on) => h("button", { class: `pill focusable${on === usePw ? " on" : ""}`, "aria-pressed": String(on === usePw), onclick: () => setPw(on) }, on ? tr("room.pwOn") : tr("room.pwOff"));
+    const pills = join ? null : h("div", { class: "room-pw-pick" });
+    const setPw = (on) => {
+      usePw = on;
+      put(pills, pick(false), pick(true));
+      pwIn.hidden = !on;
+      if (on) pwIn.focus({ preventScroll: true });
+      else $(".pill.on", pills)?.focus({ preventScroll: true });
+    };
+    if (pills) put(pills, pick(false), pick(true));
     const submit = () => {
       const name = nameIn.value.trim();
       const c = join ? codeIn.value.trim().toUpperCase() : "";
       if (join && !ROOM_CODE_RE.test(c)) { bad(tr("room.codeBad"), codeIn); return; }
       if (!name) { bad(tr("room.nameNeeded"), nameIn); return; }
+      const pw = usePw ? pwIn.value : null;
+      if (usePw && !roomPwOk(pw)) { bad(tr("room.pwBad"), pwIn); return; }
       setPref("roomName", name);
-      done({ name, code: c });
+      done({ name, code: c, pw });
     };
-    for (const el of [nameIn, codeIn].filter(Boolean)) el.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } });
+    for (const el of [nameIn, codeIn, pwIn].filter(Boolean)) el.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } });
     codeIn?.addEventListener("input", () => { codeIn.value = codeIn.value.toUpperCase(); });
     put(box, h("div", { class: "pf-card" },
       h("h2", {}, join ? tr("room.joinTitle") : tr("room.createTitle")),
@@ -2822,7 +2921,9 @@ function roomDialog({ join, code = "" }) {
         : tr("room.createHint")),
       join ? null : h("p", { class: "hint" }, tr("room.debridWarn")),
       join ? [h("label", { class: "pf-label" }, tr("room.code")), codeIn] : null,
-      h("label", { class: "pf-label" }, tr("room.yourName")), nameIn, msg,
+      h("label", { class: "pf-label" }, tr("room.yourName")), nameIn,
+      join ? null : [h("label", { class: "pf-label" }, tr("room.pw")), pills, pwIn],
+      msg,
       h("div", { class: "pf-row end" },
         h("button", { class: "btn focusable", onclick: () => done(null) }, tr("common.cancel")),
         h("button", { class: "btn primary focusable", onclick: submit }, join ? tr("room.join") : tr("room.create")))));
@@ -2841,6 +2942,7 @@ async function createRoom() {
   if (inRoom()) roomStop(room.host);
   room.hostPos = curTime();
   roomStart({ code: made.code, key: made.hostKey, name: r.name });
+  if (r.pw) room.secretWanted = r.pw;
   roomPanel();
 }
 
@@ -2917,6 +3019,15 @@ function paintRoomPanel() {
   ]);
   const status = roomStatusText();
   paintPart(p.status, `${status}|${!!room.hold}`, () => [h("span", {}, status), room.hold ? h("button", { class: "btn focusable", onclick: () => roomSkipHold(true) }, tr("room.skipWait")) : null]);
+  const pwSig = `${room.host}|${room.locked}|${room.host ? room.pw || "" : ""}`;
+  paintPart(p.secret, pwSig, () => room.host
+    ? [
+      h("span", { class: "room-lock-text" }, h("i", { html: room.locked ? ICON.lock : ICON.unlock }), room.locked ? (room.pw ? tr("room.pwIsOn", { pw: room.pw }) : tr("room.pwGuest")) : tr("room.pwIsOff")),
+      h("div", { class: "room-share" },
+        h("button", { class: "btn focusable", onclick: roomSetSecret }, room.locked ? tr("room.pwChange") : tr("room.pwSet")),
+        room.locked ? h("button", { class: "btn focusable", onclick: roomDropSecret }, tr("room.pwRemove")) : null),
+    ]
+    : room.locked ? h("span", { class: "room-lock-text" }, h("i", { html: ICON.lock }), tr("room.pwGuest")) : null);
   paintPart(p.people, JSON.stringify(room.members), () => room.members.map((m) => h("span", { class: `room-person ${m.waiting ? "wait" : ""}` },
     h("i", { class: "pf-face", style: `background:${roomColor(m.id)}` }, firstLetter(m.name)), m.name,
     m.host ? h("em", {}, tr("room.hostTag")) : null, m.id === room.me ? h("em", {}, tr("room.you")) : null, m.waiting ? h("em", { class: "busy" }, tr("src.loading")) : null)));
@@ -2966,11 +3077,11 @@ function roomPanel() {
     emojiBtn.setAttribute("aria-expanded", String(!picker.hidden));
     if (!picker.hidden) $(".room-emoji-btn", picker)?.focus({ preventScroll: true });
   } }, "😊");
-  const parts = { head: h("div", { class: "room-head" }), status: h("div", { class: "room-status" }), people: h("div", { class: "room-people" }), reacts: h("div", { class: "room-reacts" }), log: h("div", { class: "room-log" }), foot: h("div", { class: "pf-row room-foot" }) };
+  const parts = { head: h("div", { class: "room-head" }), status: h("div", { class: "room-status" }), secret: h("div", { class: "room-secret" }), people: h("div", { class: "room-people" }), reacts: h("div", { class: "room-reacts" }), log: h("div", { class: "room-log" }), foot: h("div", { class: "pf-row room-foot" }) };
   box._parts = parts;
   put(box, h("div", { class: "room-card" },
     h("button", { class: "pl-menu-x focusable", "aria-label": tr("common.close"), html: ICON.close, onclick: close }),
-    h("div", { class: "room-col" }, h("h2", {}, tr("tg.title")), parts.head, parts.status, parts.people),
+    h("div", { class: "room-col" }, h("h2", {}, tr("tg.title")), parts.head, parts.status, parts.secret, parts.people),
     h("div", { class: "room-col talk" },
       parts.reacts,
       parts.log,
@@ -3027,7 +3138,8 @@ function roomFromUrl() {
 function roomSaved() {
   let saved = null;
   try { saved = JSON.parse(sessionStorage.getItem("wistv.room") || "null"); } catch (e) {}
-  return saved && typeof saved === "object" && ROOM_CODE_RE.test(String(saved.code)) && typeof saved.name === "string" && saved.name ? saved : null;
+  if (!(saved && typeof saved === "object" && ROOM_CODE_RE.test(String(saved.code)) && typeof saved.name === "string" && saved.name)) return null;
+  return { code: saved.code, key: typeof saved.key === "string" ? saved.key : null, name: saved.name, pw: roomPwOk(saved.pw) ? saved.pw : null };
 }
 
 function roomResume(invite) {
