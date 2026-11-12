@@ -630,10 +630,14 @@ pub fn player_stop(app: AppHandle, st: State<'_, AppState>, keep: Option<bool>) 
     let keep = keep.unwrap_or(false);
     HOLD_LANDSCAPE.store(keep, std::sync::atomic::Ordering::SeqCst);
     st.player.stop();
-    if !keep {
-        keep_awake(&app, false);
-    }
     crate::torrent::release();
+    if !keep {
+        tauri::async_runtime::spawn_blocking(move || {
+            if !app.state::<AppState>().player.active() && !HOLD_LANDSCAPE.load(std::sync::atomic::Ordering::SeqCst) {
+                keep_awake(&app, false);
+            }
+        });
+    }
 }
 
 #[cfg(mobile)]
