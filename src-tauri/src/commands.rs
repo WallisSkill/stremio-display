@@ -165,6 +165,11 @@ pub async fn streams_from(st: State<'_, AppState>, url: String, kind: String, id
 }
 
 #[tauri::command]
+pub async fn torrent_warm(st: State<'_, AppState>) -> R<()> {
+    crate::torrent::engine(st.cache_dir.clone()).await.map(|_| ())
+}
+
+#[tauri::command]
 pub async fn library(st: State<'_, AppState>) -> R<Vec<Value>> {
     let Some(key) = st.auth_key() else {
         return Ok(Vec::new());
@@ -469,7 +474,8 @@ pub async fn play(
     if let Some(ext) = stream["externalUrl"].as_str() {
         return open_external(&app, ext);
     }
-    let url = resolve(&st, &stream).await?;
+    let (url, target) = tokio::join!(resolve(&st, &stream), video_target(&app, &st));
+    let url = url?;
     let headers: Vec<String> = stream["behaviorHints"]["proxyHeaders"]["request"]
         .as_object()
         .map(|o| {
@@ -478,7 +484,7 @@ pub async fn play(
                 .collect()
         })
         .unwrap_or_default();
-    let (wid, mut extra) = video_target(&app, &st).await?;
+    let (wid, mut extra) = target?;
     let spill = st.cache_dir.join("mpv-cache");
     if std::fs::create_dir_all(&spill).is_ok() {
         extra.push(("cache-on-disk".to_string(), "yes".to_string()));
@@ -526,6 +532,7 @@ pub async fn play(
         move |out| {
             if !app.state::<AppState>().player.active() && !HOLD_LANDSCAPE.load(std::sync::atomic::Ordering::SeqCst) {
                 keep_awake(&app, false);
+                crate::torrent::release();
             }
             let _ = app.emit(
                 "player-ended",
@@ -626,7 +633,7 @@ pub fn player_stop(app: AppHandle, st: State<'_, AppState>, keep: Option<bool>) 
     if !keep {
         keep_awake(&app, false);
     }
-    tauri::async_runtime::spawn(crate::torrent::release());
+    crate::torrent::release();
 }
 
 #[cfg(mobile)]

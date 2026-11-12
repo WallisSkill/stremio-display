@@ -42,6 +42,7 @@ pub fn run() {
             commands::meta,
             commands::stream_addons,
             commands::streams_from,
+            commands::torrent_warm,
             commands::library,
             commands::library_toggle,
             commands::library_rewind,

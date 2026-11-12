@@ -1099,6 +1099,13 @@ const touchMap = (map, key, value) => {
 };
 const addonSig = () => (app.addons || []).map((a) => a.transportUrl).join(" ");
 
+let torrentsWarm = false;
+function warmTorrents(g) {
+  if (torrentsWarm || !TAURI || !g?.streams?.some((s) => s.infoHash)) return;
+  torrentsWarm = true;
+  call("torrent_warm").catch(() => {});
+}
+
 function streamLoad(kind, id) {
   const key = `${kind}|${id}`;
   const sig = addonSig();
@@ -1115,7 +1122,7 @@ function streamLoad(kind, id) {
     emit();
     await Promise.all(e.addons.map((a, i) => call("streams_from", { url: a.url, kind, id })
       .then((g) => (g?.streams?.length ? g : null), () => null)
-      .then((g) => { e.slots[i] = g; emit(); })));
+      .then((g) => { e.slots[i] = g; warmTorrents(g); emit(); })));
     e.done = true;
     e.at = Date.now();
     if (streamStore.get(key) === e && (e.error || !e.slots.some(Boolean))) streamStore.delete(key);
