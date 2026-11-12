@@ -429,6 +429,8 @@ async fn video_target(_app: &AppHandle, st: &AppState) -> R<Target> {
     Ok((surface.wid, extra))
 }
 
+static HOLD_LANDSCAPE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 #[cfg(mobile)]
 fn keep_awake(app: &AppHandle, on: bool) {
     use tauri_plugin_wistv_video::VideoExt;
@@ -522,7 +524,7 @@ pub async fn play(
             }
         },
         move |out| {
-            if !app.state::<AppState>().player.active() {
+            if !app.state::<AppState>().player.active() && !HOLD_LANDSCAPE.load(std::sync::atomic::Ordering::SeqCst) {
                 keep_awake(&app, false);
             }
             let _ = app.emit(
@@ -557,6 +559,7 @@ pub async fn play(
     )
     .inspect_err(|_| keep_awake(&awake_app, false))?;
     keep_awake(&awake_app, true);
+    HOLD_LANDSCAPE.store(false, std::sync::atomic::Ordering::SeqCst);
     Ok(())
 }
 
@@ -616,8 +619,13 @@ pub async fn player_background(app: AppHandle, hidden: bool) -> R<()> {
 }
 
 #[tauri::command]
-pub fn player_stop(st: State<'_, AppState>) {
+pub fn player_stop(app: AppHandle, st: State<'_, AppState>, keep: Option<bool>) {
+    let keep = keep.unwrap_or(false);
+    HOLD_LANDSCAPE.store(keep, std::sync::atomic::Ordering::SeqCst);
     st.player.stop();
+    if !keep {
+        keep_awake(&app, false);
+    }
     tauri::async_runtime::spawn(crate::torrent::release());
 }
 
@@ -661,6 +669,18 @@ pub fn player_fullscreen(window: WebviewWindow, on: Option<bool>) -> R<bool> {
         window.set_fullscreen(next).map_err(|e| e.to_string())?;
     }
     Ok(next)
+}
+
+#[cfg(desktop)]
+#[tauri::command]
+pub async fn app_update(app: AppHandle) -> R<Value> {
+    crate::update::install(&app).await
+}
+
+#[cfg(mobile)]
+#[tauri::command]
+pub async fn app_update() -> R<Value> {
+    Ok(json!({ "version": null, "store": true }))
 }
 
 #[tauri::command]

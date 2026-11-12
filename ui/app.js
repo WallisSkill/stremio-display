@@ -1,5 +1,5 @@
 import { web, onWebEvent } from "./web.js";
-import { t as tr, setLang, savedLang, getLang, formatDate, LANGS, errText, serverText, locale } from "./i18n.js";
+import { t as tr, setLang, savedLang, getLang, formatDate, LANGS, errText, serverText, locale, hasKey } from "./i18n.js";
 
 setLang(savedLang());
 
@@ -66,6 +66,7 @@ const ICON = {
   check: '<svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   info: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 11v6M12 7.5v.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
   film: '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M7 5v14M17 5v14M3 9.5h4M3 14.5h4M17 9.5h4M17 14.5h4" stroke="currentColor" stroke-width="2"/></svg>',
+  refresh: '<svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   external: '<svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-8.5 8.5M18 13.5V18a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   left: '<svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   right: '<svg viewBox="0 0 24 24"><path d="m9 5 7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
@@ -98,6 +99,10 @@ const ICON = {
 
 const TYPES = new Set(["movie", "series", "channel", "tv", "anime"]);
 const typeLabel = (k) => (TYPES.has(k) ? tr(`type.${k}`) : undefined);
+const catName = (addon, cat) => {
+  const key = `cat.${String(addon?.manifest?.id || "").replace(/\W/g, "_")}_${String(cat.id || "").replace(/\W/g, "_")}`;
+  return hasKey(key) ? tr(key) : cat.name || cat.id;
+};
 
 const app = {
   user: null,
@@ -353,6 +358,15 @@ function followViewport() {
   sync();
 }
 followViewport();
+
+function followTopbar() {
+  const bar = document.getElementById("topbar");
+  if (!bar || typeof ResizeObserver === "undefined") return;
+  const sync = () => document.documentElement.style.setProperty("--topbar-h", `${Math.round(bar.getBoundingClientRect().height)}px`);
+  new ResizeObserver(sync).observe(bar);
+  sync();
+}
+followTopbar();
 
 function layer(cls, onBack) {
   const el = h("div", { class: `layer ${cls}` });
@@ -636,12 +650,14 @@ function skeletonRow(shape, n = 8) {
   return Array.from({ length: n }, () => h("div", { class: `card ${shape} skeleton` }, h("div", { class: "art" })));
 }
 
+const rowWrap = (row) => h("div", { class: "shelf-wrap" },
+  h("button", { class: "row-arrow l", tabindex: "-1", "aria-label": tr("common.prev"), html: ICON.left, onclick: () => row.scrollBy({ left: -row.clientWidth * 0.8 }) }),
+  row,
+  h("button", { class: "row-arrow r", tabindex: "-1", "aria-label": tr("common.next"), html: ICON.right, onclick: () => row.scrollBy({ left: row.clientWidth * 0.8 }) }));
+
 function shelf(title, sub, shape, load, opts = {}) {
   const row = h("div", { class: "row" }, skeletonRow(shape));
-  const wrap = h("div", { class: "shelf-wrap" },
-    h("button", { class: "row-arrow l", tabindex: "-1", html: ICON.left, onclick: () => row.scrollBy({ left: -row.clientWidth * 0.8 }) }),
-    row,
-    h("button", { class: "row-arrow r", tabindex: "-1", html: ICON.right, onclick: () => row.scrollBy({ left: row.clientWidth * 0.8 }) }));
+  const wrap = rowWrap(row);
   const sec = h("section", { class: "shelf" },
     h("div", { class: "shelf-head" }, h("h2", { class: "shelf-title" }, title), sub ? h("span", { class: "shelf-sub" }, sub) : null),
     wrap);
@@ -809,7 +825,7 @@ function renderBrowse(view, filterType) {
   }
   cats.forEach(({ addon, cat }, i) => {
     const shape = i === 0 ? "wide" : "poster";
-    const title = cat.name || cat.id;
+    const title = catName(addon, cat);
     const sub = `${typeLabel(cat.type) || cat.type} · ${addon.manifest.name}`;
     shelves.append(shelf(title, sub, shape, () => cachedCatalog(addon, cat), {
       eager: i < 2,
@@ -896,18 +912,56 @@ async function renderDetail(view, { kind, id, video, autoplay }) {
     let cur = (videos.find((v) => v.id === target.vid) || {}).season ?? seasons[0];
     const pills = h("div", { class: "seasons" });
     const row = h("div", { class: "row" });
-    const drawSeason = () => {
+    const epNo = (v) => v.episode ?? v.number;
+    const cardOf = (vid) => $$(".card", row).find((c) => c.dataset.vid === vid);
+    const reveal = (el, smooth) => {
+      const left = el.offsetLeft - (row.clientWidth - el.offsetWidth) / 2;
+      row.scrollTo({ left: Math.max(0, left), behavior: smooth ? "smooth" : "instant" });
+    };
+    const drawSeason = (focusVid = target.vid) => {
       put(pills, ...seasons.map((s) => h("button", { class: `pill focusable ${s === cur ? "on" : ""}`, onclick: () => { cur = s; drawSeason(); } }, s === 0 ? tr("ep.special") : tr("ep.season", { n: s }))));
       const eps = videos.filter((v) => (v.season ?? 0) === cur).sort(epSort);
       put(row, ...eps.map((v) => episodeCard(m, v, entry)));
       row.scrollLeft = 0;
-      const curEl = $$(".card", row).find((c) => c.dataset.vid === target.vid);
-      if (curEl) setTimeout(() => curEl.scrollIntoView({ inline: "center", block: "nearest" }), 50);
+      const el = cardOf(focusVid);
+      if (el) requestAnimationFrame(() => reveal(el, false));
     };
     drawSeason();
-    page.append(h("section", { class: "shelf", style: "padding-bottom:80px" },
+    let jumpTimer = 0;
+    let lit = null;
+    const jump = h("input", { class: "ep-jump focusable", type: "text", inputmode: "numeric", enterkeyhint: "go", autocomplete: "off", maxlength: "5", placeholder: tr("ep.jump"), "aria-label": tr("ep.jump") });
+    const goTo = (focus) => {
+      const n = parseInt(jump.value, 10);
+      jump.classList.remove("miss");
+      if (!Number.isFinite(n)) return;
+      const inSeason = (s) => videos.find((v) => (v.season ?? 0) === s && epNo(v) === n);
+      const v = inSeason(cur) || seasons.map(inSeason).find(Boolean);
+      if (!v) { jump.classList.add("miss"); return; }
+      if ((v.season ?? 0) !== cur) { cur = v.season ?? 0; drawSeason(v.id); }
+      const el = cardOf(v.id);
+      if (!el) return;
+      lit?.classList.remove("hit");
+      lit = el;
+      el.classList.add("hit");
+      reveal(el, true);
+      if (focus) el.focus({ preventScroll: true });
+    };
+    jump.addEventListener("input", () => {
+      const clean = jump.value.replace(/[^0-9]/g, "");
+      if (clean !== jump.value) jump.value = clean;
+      clearTimeout(jumpTimer);
+      jumpTimer = setTimeout(() => goTo(false), 250);
+    });
+    jump.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      clearTimeout(jumpTimer);
+      goTo(true);
+    });
+    const tools = videos.length > 12 ? h("div", { class: "ep-tools" }, pills, jump) : pills;
+    page.append(h("section", { class: "shelf ep-shelf", style: "padding-bottom:80px" },
       h("div", { class: "shelf-head", style: "padding:0" }, h("h2", { class: "shelf-title" }, tr("ep.list"))),
-      pills, row));
+      tools, rowWrap(row)));
   } else {
     page.lastChild.style.paddingBottom = "80px";
   }
@@ -1027,15 +1081,32 @@ async function openStreams(m, vid, label) {
 
 const LIST_TTL = 30 * 60e3;
 const streamStore = new Map();
+const STREAM_KEEP = 24;
+const SUB_KEEP = 24;
+const SUBINFO_KEEP = 300;
+const META_KEEP = 400;
+const trimMap = (map, max) => {
+  for (const k of map.keys()) {
+    if (map.size <= max) break;
+    map.delete(k);
+  }
+  return map;
+};
+const touchMap = (map, key, value) => {
+  map.delete(key);
+  map.set(key, value);
+  return value;
+};
 const addonSig = () => (app.addons || []).map((a) => a.transportUrl).join(" ");
 
 function streamLoad(kind, id) {
   const key = `${kind}|${id}`;
   const sig = addonSig();
   const have = streamStore.get(key);
-  if (have && have.sig === sig && (!have.done || Date.now() - have.at < LIST_TTL)) return have;
+  if (have && have.sig === sig && (!have.done || Date.now() - have.at < LIST_TTL)) return touchMap(streamStore, key, have);
   const e = { sig, at: Date.now(), addons: null, slots: [], done: false, error: "", subs: new Set() };
-  streamStore.set(key, e);
+  touchMap(streamStore, key, e);
+  trimMap(streamStore, STREAM_KEEP);
   const emit = () => e.subs.forEach((f) => f(e));
   e.job = (async () => {
     try { e.addons = await call("stream_addons", { kind, id }); }
@@ -1522,7 +1593,8 @@ function subsLoad(kind, id) {
   const e = { sig, at: Date.now() };
   const drop = () => { if (subStore.get(key) === e) subStore.delete(key); };
   e.job = call("subtitles", { kind, id }).then((list) => { e.at = Date.now(); if (!list.length) drop(); return list; }, (err) => { drop(); throw err; });
-  subStore.set(key, e);
+  touchMap(subStore, key, e);
+  trimMap(subStore, SUB_KEEP);
   return e.job;
 }
 
@@ -1594,39 +1666,66 @@ async function applySubStyle(keys) {
   }
 }
 
-function subSlider(label, min, max, step, value, show, onChange) {
+function subSlider(label, min, max, step, value, show, onChange, page = false) {
   const out = h("b", {}, show(value));
-  const input = h("input", { type: "range", min: String(min), max: String(max), step: String(step), value: String(value), tabindex: "-1", class: "pl-range" });
+  const input = h("input", { type: "range", min: String(min), max: String(max), step: String(step), value: String(value), tabindex: page ? null : "-1", class: `pl-range${page ? " focusable" : ""}`, "aria-label": label });
   const paint = () => input.style.setProperty("--v", `${((Number(input.value) - min) / (max - min)) * 100}%`);
   paint();
   input.addEventListener("input", () => { const v = Number(input.value); out.textContent = show(v); paint(); onChange(v); });
-  input.addEventListener("change", () => input.blur());
+  if (!page) input.addEventListener("change", () => input.blur());
   return h("div", { class: "pl-slider" }, h("div", { class: "pl-slider-head" }, h("span", {}, label), out), input);
 }
 
-function subStylePanel() {
-  const pick = (label, on, fn) => h("button", { class: `pl-mini ${on ? "on" : ""}`, tabindex: "-1", onclick: fn }, label);
-  const set = (key, value) => { subPrefs[key] = value; saveSubPrefs(); applySubStyle([key]); renderMenu(); };
-  return h("div", { class: "pl-substyle" },
-    h("h4", {}, tr("sub.style")),
-    subSlider(tr("sub.size"), 50, 250, 5, Math.round(subPrefs.scale * 100), (v) => `${v}%`, (v) => { subPrefs.scale = v / 100; saveSubPrefs(); applySubStyle(["scale"]); }),
-    subSlider(tr("sub.pos"), 0, 100, 1, Math.round(subPrefs.height), (v) => (v === 0 ? tr("sub.bottom") : v === SUB_BASE ? tr("common.default") : v < SUB_BASE ? tr("sub.lower", { n: SUB_BASE - v }) : tr("sub.higher", { n: v - SUB_BASE })), (v) => { subPrefs.height = v; saveSubPrefs(); applySubStyle(["height"]); }),
+function subStylePanel({ page = false, redraw = renderMenu, changed = () => {} } = {}) {
+  const tab = page ? null : "-1";
+  const mini = (on, extra = {}) => ({ class: `pl-mini${on ? " on" : ""}${page ? " focusable" : ""}`, tabindex: tab, "aria-pressed": on ? "true" : "false", ...extra });
+  const pick = (label, on, fn) => h("button", mini(on, { onclick: fn }), label);
+  const set = (key, value) => { subPrefs[key] = value; saveSubPrefs(); applySubStyle([key]); redraw(); };
+  const slide = (key, fn) => (v) => { fn(v); saveSubPrefs(); applySubStyle([key]); changed(); };
+  return h("div", { class: `pl-substyle${page ? " page" : ""}` },
+    page ? null : h("h4", {}, tr("sub.style")),
+    subSlider(tr("sub.size"), 50, 250, 5, Math.round(subPrefs.scale * 100), (v) => `${v}%`, slide("scale", (v) => { subPrefs.scale = v / 100; }), page),
+    subSlider(tr("sub.pos"), 0, 100, 1, Math.round(subPrefs.height), (v) => (v === 0 ? tr("sub.bottom") : v === SUB_BASE ? tr("common.default") : v < SUB_BASE ? tr("sub.lower", { n: SUB_BASE - v }) : tr("sub.higher", { n: v - SUB_BASE })), slide("height", (v) => { subPrefs.height = v; }), page),
     h("div", { class: "pl-choice wrap" }, h("span", {}, tr("sub.family")),
-      SUB_FONTS.map(([font, label]) => h("button", { class: `pl-mini ${subPrefs.font === font ? "on" : ""}`, tabindex: "-1", style: `font-family:'${font}'`, onclick: () => set("font", font) }, label))),
+      SUB_FONTS.map(([font, label]) => h("button", mini(subPrefs.font === font, { style: `font-family:'${font}'`, onclick: () => set("font", font) }), label))),
     h("div", { class: "pl-choice" }, h("span", {}, tr("sub.font")),
-      pick(tr("sub.regular"), !subPrefs.bold && !subPrefs.italic, () => { subPrefs.italic = false; set("bold", false); applySubStyle(["italic"]); }),
-      h("button", { class: `pl-mini ${subPrefs.bold ? "on" : ""}`, tabindex: "-1", style: "font-weight:800", onclick: () => set("bold", !subPrefs.bold) }, tr("sub.bold")),
-      h("button", { class: `pl-mini ${subPrefs.italic ? "on" : ""}`, tabindex: "-1", style: "font-style:italic", onclick: () => set("italic", !subPrefs.italic) }, tr("sub.italic"))),
+      pick(tr("sub.regular"), !subPrefs.bold && !subPrefs.italic, () => { subPrefs.italic = false; applySubStyle(["italic"]); set("bold", false); }),
+      h("button", mini(subPrefs.bold, { style: "font-weight:800", onclick: () => set("bold", !subPrefs.bold) }), tr("sub.bold")),
+      h("button", mini(subPrefs.italic, { style: "font-style:italic", onclick: () => set("italic", !subPrefs.italic) }), tr("sub.italic"))),
     h("div", { class: "pl-choice" }, h("span", {}, tr("sub.color")),
       SUB_COLORS.map(([c, label]) => pick(tr(label), subPrefs.color === c, () => set("color", c)))),
     h("div", { class: "pl-choice" }, h("span", {}, tr("sub.bg")),
       pick(tr("sub.outlineOpt"), !subPrefs.box, () => set("box", false)),
       pick(tr("sub.box"), subPrefs.box, () => set("box", true))),
-    subSlider(tr("sub.outline"), 0, 6, 0.2, subPrefs.outline, (v) => (v === 0 ? tr("sub.noOutline") : v.toFixed(1)), (v) => { subPrefs.outline = v; saveSubPrefs(); applySubStyle(["outline"]); }),
-    subSlider(tr("sub.shadow"), 0, 4, 0.5, subPrefs.shadow, (v) => (v === 0 ? tr("sub.noShadow") : v.toFixed(1)), (v) => { subPrefs.shadow = v; saveSubPrefs(); applySubStyle(["shadow"]); }),
+    subSlider(tr("sub.outline"), 0, 6, 0.2, subPrefs.outline, (v) => (v === 0 ? tr("sub.noOutline") : v.toFixed(1)), slide("outline", (v) => { subPrefs.outline = v; }), page),
+    subSlider(tr("sub.shadow"), 0, 4, 0.5, subPrefs.shadow, (v) => (v === 0 ? tr("sub.noShadow") : v.toFixed(1)), slide("shadow", (v) => { subPrefs.shadow = v; }), page),
     h("div", { class: "pl-choice" },
-      h("button", { class: "pl-mini", tabindex: "-1", onclick: () => { Object.assign(subPrefs, SUB_DEFAULT); saveSubPrefs(); applySubStyle(); applySubStyle(["box"]); renderMenu(); } }, tr("common.reset"))),
-    h("p", { class: "pl-none" }, tr("sub.styleHint")));
+      h("button", mini(false, { onclick: () => { Object.assign(subPrefs, SUB_DEFAULT); saveSubPrefs(); applySubStyle(); applySubStyle(["box"]); redraw(); } }), tr("common.reset"))),
+    page ? null : h("p", { class: "pl-none" }, tr("sub.styleHint")));
+}
+
+function subPreview() {
+  const text = h("div", { class: "sp-text" }, h("span", {}, tr("sub.sample1")), h("span", {}, tr("sub.sample2")));
+  const box = h("div", { class: "sub-preview", role: "img", "aria-label": tr("set.subPreview") }, h("div", { class: "sp-moon" }), h("div", { class: "sp-hills" }), text);
+  const paint = () => {
+    const u = (box.clientHeight || 300) / 720;
+    const p = subPlacement(subPrefs.height);
+    const e = text.style;
+    e.fontSize = `${44 * subPrefs.scale * u}px`;
+    e.bottom = `calc(${100 - Math.min(100, p.pos)}% + ${p.margin * u}px)`;
+    e.color = subPrefs.color;
+    e.fontFamily = `'${subPrefs.font}', 'Segoe UI', system-ui, sans-serif`;
+    e.fontWeight = subPrefs.bold ? "800" : subPrefs.font.includes("Semibold") ? "600" : "400";
+    e.fontStyle = subPrefs.italic ? "italic" : "normal";
+    e.setProperty("--stroke", `${subPrefs.box ? 0 : subPrefs.outline * u * 2}px`);
+    const sh = subPrefs.shadow * u;
+    e.textShadow = subPrefs.shadow > 0 ? `${sh}px ${sh}px ${sh}px rgba(0,0,0,0.85)` : "none";
+    text.classList.toggle("box", !!subPrefs.box);
+  };
+  const ro = new ResizeObserver(() => (box.isConnected ? paint() : ro.disconnect()));
+  ro.observe(box);
+  paint();
+  return { box, paint };
 }
 
 const cmd = (...args) => call("player_command", { args: args.map(String) }).catch((e) => toast(e, true));
@@ -1843,7 +1942,8 @@ async function playEpisode(v, auto) {
   const c = pl.ctx;
   if (!c || !v || roomLocked()) return false;
   const session = ++pl.session;
-  call("player_stop").catch(() => {});
+  pl.held = true;
+  call("player_stop", { keep: true }).catch(() => {});
   pl.menu = null;
   renderMenu();
   pl.ui.root.classList.add("loading");
@@ -1937,6 +2037,7 @@ let subInfoBusy = 0;
 function wantSubInfo(url) {
   if (subInfo.has(url)) return;
   subInfo.set(url, null);
+  trimMap(subInfo, SUBINFO_KEEP);
   subInfoQueue.push(url);
   pumpSubInfo();
 }
@@ -2193,13 +2294,15 @@ function closePlayer(stop = true) {
   pl.session++;
   clearTimeout(pl.hideTimer);
   restoreBrightness();
-  if (stop) call("player_stop").catch(() => {});
+  if (stop || pl.held) call("player_stop").catch(() => {});
+  pl.held = false;
   if (pl.fs) { call("player_fullscreen", { on: false }).catch(() => {}); pl.fs = false; pl.ui.fs.innerHTML = ICON.full; }
   pl.menu = null;
   pl.ui.root.hidden = true;
   document.body.classList.remove("playing", "see-through", "ext-video");
   pl.returnFocus?.focus?.({ preventScroll: true });
   if (room.host) hostWatch();
+  offerUpdate();
   return true;
 }
 
@@ -2224,7 +2327,7 @@ async function startPlayback(m, vid, label, stream, start, addon) {
   }
   try {
     await call("play", { stream, ctx: ctx(session) });
-    if (pl.session === session) applySubStyle();
+    if (pl.session === session) { pl.held = false; applySubStyle(); }
   } catch (e) {
     if (pl.session === session) closePlayer(false);
     toast(e, true);
@@ -2986,7 +3089,8 @@ async function playChannel(m, { fromPlayer = false, tile = null } = {}) {
   let session = null;
   if (fromPlayer) {
     session = ++pl.session;
-    call("player_stop").catch(() => {});
+    pl.held = true;
+    call("player_stop", { keep: true }).catch(() => {});
     pl.menu = null;
     renderMenu();
     pl.ui.root.classList.add("loading");
@@ -3165,7 +3269,7 @@ function renderDiscover(view, params = {}) {
     put(selType, ...types.map((t) => option(t, typeLabel(t) || t, t === state.type)));
     const cats = all.filter((c) => c.cat.type === state.type);
     if (!cats.some((c) => c.key === state.key)) state.key = cats[0].key;
-    put(selCat, ...cats.map((c) => option(c.key, `${c.cat.name || c.cat.id} · ${c.addon.manifest.name}`, c.key === state.key)));
+    put(selCat, ...cats.map((c) => option(c.key, `${catName(c.addon, c.cat)} · ${c.addon.manifest.name}`, c.key === state.key)));
     cur = cats.find((c) => c.key === state.key);
     if (!cur.genres.includes(state.genre)) state.genre = cur.genreRequired ? cur.genres[0] : "";
     put(selGenre, ...(cur.genreRequired ? [] : [option("", tr("dm.allGenres"), !state.genre)]), ...cur.genres.map((g) => option(g, g, g === state.genre)));
@@ -3246,7 +3350,7 @@ function renderDiscover(view, params = {}) {
     const have = app.metaCache.get(key);
     if (have) { paintPanel(have); return; }
     call("meta", { kind: m.type, id: m.id })
-      .then((full) => { app.metaCache.set(key, full); if (picked === m && panel.isConnected) paintPanel({ ...m, ...full }); })
+      .then((full) => { trimMap(touchMap(app.metaCache, key, full) && app.metaCache, META_KEEP); if (picked === m && panel.isConnected) paintPanel({ ...m, ...full }); })
       .catch(() => {});
     if (fromTap) panel.scrollTop = 0;
   }
@@ -3332,7 +3436,7 @@ function renderSearch(view, { q = "" } = {}) {
     const cats = catalogsOf(null, { search: true });
     if (!cats.length) { put(results, h("div", { class: "empty" }, tr("search.noAddon"))); return; }
     put(results, ...cats.map(({ addon, cat }) =>
-      shelf(`${typeLabel(cat.type) || cat.type}`, `${cat.name || cat.id} · ${addon.manifest.name}`, "poster",
+      shelf(`${typeLabel(cat.type) || cat.type}`, `${catName(addon, cat)} · ${addon.manifest.name}`, "poster",
         async () => (mine === token ? call("catalog", { url: addon.transportUrl, kind: cat.type, id: cat.id, extra: [["search", term]] }) : []),
         { eager: true })));
   };
@@ -3417,7 +3521,7 @@ function discoverMenu(chip) {
       h("div", { class: "dm-sec" }, h("div", { class: "chip-menu-h" }, tr("dm.type")),
         h("div", { class: "dm-row" }, ...types.map((t) => pill(typeLabel(t) || t, t === sel.type, () => { sel.type = t; draw(); })))),
       h("div", { class: "dm-sec" }, h("div", { class: "chip-menu-h" }, tr("dm.catalog")),
-        h("div", { class: "dm-row wrap" }, ...cats.map((c) => pill(`${c.cat.name || c.cat.id} · ${c.addon.manifest.name}`, c.key === sel.key, () => { sel.key = c.key; draw(); })))),
+        h("div", { class: "dm-row wrap" }, ...cats.map((c) => pill(`${catName(c.addon, c.cat)} · ${c.addon.manifest.name}`, c.key === sel.key, () => { sel.key = c.key; draw(); })))),
       genres.length > 1 || cat.genreRequired ? h("div", { class: "dm-sec" }, h("div", { class: "chip-menu-h" }, tr("dm.genre")),
         h("div", { class: "dm-genres" }, ...genres.map((g) => h("button", { class: `chip-item focusable${g === sel.genre ? " on" : ""}`, onclick: () => pick(g) }, g || tr("dm.allGenres"))))) : null,
       h("div", { class: "dm-foot" }, h("button", { class: "btn primary focusable", onclick: () => pick(cat.genreRequired ? sel.genre || cat.genres[0] : sel.genre) }, tr("dm.open"))));
@@ -3508,13 +3612,25 @@ async function renderSettings(view) {
     h("div", { class: "pl-pick", style: "display:flex;gap:8px;flex-wrap:wrap;margin-top:12px" },
       SUB_LANGS.map(([code, label]) => h("button", { class: `btn focusable ${subLang === code ? "primary" : ""}`, onclick: () => { setSubLang(code); paintSubs(); } }, label ?? tr("set.subsOff")))));
   paintSubs();
+  const look = h("div", { class: "panel sub-look" });
+  const preview = subPreview();
+  const lookBody = h("div", { class: "sub-look-body" });
+  const paintLook = () => {
+    const keep = document.activeElement && lookBody.contains(document.activeElement) ? [...lookBody.querySelectorAll(".focusable")].indexOf(document.activeElement) : -1;
+    put(lookBody, subStylePanel({ page: true, redraw: paintLook, changed: preview.paint }));
+    preview.paint();
+    if (keep >= 0) lookBody.querySelectorAll(".focusable")[keep]?.focus({ preventScroll: true });
+  };
+  put(look, h("h3", {}, tr("set.subStyle")), h("p", { class: "hint" }, tr("set.subStyleHint")), h("div", { class: "sub-look-grid" }, h("div", { class: "sub-look-stage" }, preview.box), lookBody));
+  paintLook();
+  const updates = updatePanel();
   const language = h("div", { class: "panel" }, h("h3", {}, tr("set.lang")),
     h("p", { class: "hint" }, tr("set.langHint")),
     h("div", { class: "pl-pick", style: "display:flex;gap:8px;flex-wrap:wrap;margin-top:12px" },
       LANGS.map(([code, label]) => h("button", { class: `btn focusable ${getLang() === code ? "primary" : ""}`, lang: code, onclick: () => chooseLang(code) }, label))));
   const version = h("p", { class: "hint", style: "margin-top:18px" });
   if (TAURI?.app?.getVersion) TAURI.app.getVersion().then((v) => { version.textContent = tr("set.version", { v }); }).catch(() => {});
-  view.append(h("div", { class: "page plain" }, h("h1", {}, tr("set.title")), account, people, language, together, own, subs, ios, pc, list, TOUCH ? h("div", { class: "panel" }, h("h3", {}, tr("set.controls")), touchHelp) : help, version));
+  view.append(h("div", { class: "page plain" }, h("h1", {}, tr("set.title")), account, people, language, together, own, subs, look, updates, ios, pc, list, TOUCH ? h("div", { class: "panel" }, h("h3", {}, tr("set.controls")), touchHelp) : help, version));
   $(".panel .btn")?.focus({ preventScroll: true });
 }
 
@@ -3592,7 +3708,7 @@ async function seriesMetas(onProgress) {
       const id = ids[next++];
       let m = app.metaCache.get(id);
       if (!m) {
-        try { m = await call("meta", { kind: "series", id }); app.metaCache.set(id, m); } catch (e) { m = null; }
+        try { m = await call("meta", { kind: "series", id }); trimMap(touchMap(app.metaCache, id, m) && app.metaCache, META_KEEP); } catch (e) { m = null; }
       }
       done++;
       if (m) out.push(m);
@@ -4095,6 +4211,7 @@ async function boot() {
     const cur = app.stack[app.stack.length - 1];
     if (homeSig() !== before && cur?.route === "home" && !pl.open && $("#sheet").hidden && $("#view").scrollTop < 40) render();
     refreshBell();
+    startAutoUpdate();
     return;
   }
   app.addons = [];
@@ -4102,6 +4219,7 @@ async function boot() {
   apply(await fresh);
   go("home");
   refreshBell();
+  startAutoUpdate();
 }
 
 const BELL_REFRESH_MS = 30 * 60 * 1000;
@@ -4346,6 +4464,90 @@ function openTrailer(list, name, start = 0) {
   window.addEventListener("message", onMsg);
   show();
   $(".trailer-x", box).focus({ preventScroll: true });
+}
+
+const DOWNLOAD_PAGE = "https://film.wis237.online/";
+const UPDATE_EVERY_MS = 6 * 60 * 60 * 1000;
+const upd = { ready: 0, busy: false, timer: 0 };
+
+const stampText = (v) => (v > 0 ? new Intl.DateTimeFormat(locale(), { dateStyle: "short", timeStyle: "short" }).format(new Date(v * 1000)) : "");
+
+async function applyUiUpdate() {
+  const r = await call("ui_update", { apply: true });
+  if (r?.state === "applied") {
+    await flushPrefs().catch(() => {});
+    setTimeout(() => location.reload(), 600);
+  }
+  return r;
+}
+
+function updatePanel() {
+  const panel = h("div", { class: "panel upd-panel" });
+  const info = h("p", { class: "hint" });
+  const status = h("p", { class: "upd-status", role: "status" });
+  const btn = h("button", { class: "btn focusable", html: `${ICON.refresh}<span>${tr("upd.check")}</span>` });
+  const getApp = h("button", { class: "btn primary focusable", hidden: true, html: `${ICON.external}<span>${tr("upd.getApp")}</span>`, onclick: () => call("open_url", { url: DOWNLOAD_PAGE }).catch((e) => toast(e, true)) });
+  const say = (text, bad = false) => { status.textContent = text; status.classList.toggle("bad", bad); };
+  const showInfo = async () => {
+    const appV = TAURI?.app?.getVersion ? await TAURI.app.getVersion().catch(() => "") : "";
+    const ui = TAURI ? await call("ui_version").catch(() => null) : null;
+    const bits = [appV ? tr("upd.appV", { v: appV }) : "", ui?.v ? tr("upd.uiV", { t: stampText(ui.v) }) : "", ui?.hot ? tr("upd.hot") : ""].filter(Boolean);
+    info.textContent = bits.join(" · ");
+  };
+  btn.addEventListener("click", async () => {
+    if (upd.busy) return;
+    upd.busy = true;
+    btn.disabled = true;
+    getApp.hidden = true;
+    say(tr("upd.checking"));
+    try {
+      if (!TAURI) { say(tr("upd.applied")); setTimeout(() => location.reload(), 600); return; }
+      const r = await applyUiUpdate();
+      if (r?.state === "applied") { say(tr("upd.applied")); return; }
+      if (!PHONE_APP) {
+        say(tr("upd.checkingApp"));
+        const a = await call("app_update").catch(() => null);
+        if (a?.version) { say(tr("app.updating", { v: a.version })); return; }
+      }
+      if (r?.state === "native") { say(PHONE_APP ? tr("upd.needApp") : tr("upd.latest")); getApp.hidden = !PHONE_APP; }
+      else if (r?.state === "off") say(tr("upd.off"));
+      else say(tr("upd.latest"));
+    } catch (e) {
+      say(tr("upd.failed", { e: errText(e) }), true);
+    } finally {
+      upd.busy = false;
+      btn.disabled = false;
+    }
+  });
+  put(panel, h("h3", {}, tr("upd.title")), h("p", { class: "hint" }, tr("upd.hint")), info, h("div", { class: "upd-actions" }, btn, getApp), status);
+  showInfo();
+  return panel;
+}
+
+function offerUpdate() {
+  if (!upd.ready || pl.open || $(".upd-bar")) return;
+  const bar = h("div", { class: "upd-bar", role: "status" },
+    h("span", {}, tr("upd.ready")),
+    h("button", { class: "btn primary focusable", onclick: async () => {
+      bar.remove();
+      try { const r = await applyUiUpdate(); if (r?.state !== "applied") toast(tr("upd.latest")); } catch (e) { toast(e, true); }
+    } }, tr("upd.now")),
+    h("button", { class: "icon-btn focusable", "aria-label": tr("common.close"), html: ICON.close, onclick: () => { bar.remove(); upd.ready = 0; } }));
+  document.body.append(bar);
+}
+
+async function autoUpdate() {
+  if (!TAURI || upd.busy || document.hidden) return;
+  try {
+    const r = await call("ui_update", { apply: false });
+    if (r?.state === "staged") { upd.ready = r.v; offerUpdate(); }
+  } catch (e) {}
+}
+
+function startAutoUpdate() {
+  if (!TAURI || upd.timer) return;
+  upd.timer = setInterval(autoUpdate, UPDATE_EVERY_MS);
+  setTimeout(autoUpdate, 20000);
 }
 
 function playIntro() {

@@ -1,4 +1,4 @@
-use serde_json::json;
+use serde_json::{json, Value};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_updater::UpdaterExt;
@@ -15,10 +15,13 @@ pub fn spawn(app: AppHandle) {
     });
 }
 
-async fn install(app: &AppHandle) -> Result<(), String> {
+pub async fn install(app: &AppHandle) -> Result<Value, String> {
+    if cfg!(debug_assertions) {
+        return Ok(json!({ "version": null }));
+    }
     let updater = app.updater().map_err(|e| e.to_string())?;
     let Some(update) = updater.check().await.map_err(|e| e.to_string())? else {
-        return Ok(());
+        return Ok(json!({ "version": null }));
     };
     let _ = app.emit("update-state", json!({ "version": update.version }));
     update

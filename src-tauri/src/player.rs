@@ -372,6 +372,8 @@ const PLATFORM_OPTIONS: &[(&str, &str)] = &[
     ("ao", "audiotrack,opensles"),
     ("sub-font", "Roboto"),
     ("config", "yes"),
+    ("demuxer-max-bytes", "96MiB"),
+    ("demuxer-max-back-bytes", "24MiB"),
 ];
 
 #[cfg(target_os = "linux")]
@@ -395,6 +397,8 @@ const PLATFORM_OPTIONS: &[(&str, &str)] = &[
     ("video-rotate", "no"),
     ("sub-font", "Helvetica Neue"),
     ("audio-exclusive", "no"),
+    ("demuxer-max-bytes", "96MiB"),
+    ("demuxer-max-back-bytes", "24MiB"),
 ];
 
 pub struct Request {
@@ -534,8 +538,8 @@ impl Player {
                 ("idle", "yes"),
                 ("keep-open", "no"),
                 ("cache", "yes"),
-                ("demuxer-max-bytes", "400MiB"),
-                ("demuxer-max-back-bytes", "100MiB"),
+                ("demuxer-max-bytes", "150MiB"),
+                ("demuxer-max-back-bytes", "40MiB"),
                 ("sub-font-size", "44"),
                 ("sub-border-size", "2.4"),
                 ("sub-shadow-offset", "1"),

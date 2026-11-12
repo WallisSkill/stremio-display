@@ -3,7 +3,7 @@ name: Deploy download page to GitHub Pages
 on:
   push:
     branches: [main]
-    paths: ["site/**", ".github/workflows/pages.yml"]
+    paths: ["site/**", "ui/**", "src-tauri/src/hotui.rs", ".github/scripts/ui_bundle.mjs", ".github/workflows/pages.yml"]
   workflow_dispatch:
   workflow_run:
     workflows: ["iOS app", "Windows app", "Android app", "Linux app"]
@@ -26,7 +26,27 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/configure-pages@v5
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: tauri-cli@2
+      - name: Build the signed interface bundle
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: |
+          set -e
+          v=$(git log -1 --format=%ct -- ui)
+          api=$(sed -E -n 's/^pub const API: u32 = ([0-9]+);$/\1/p' src-tauri/src/hotui.rs)
+          test -n "$v" && test -n "$api"
+          mkdir -p site/ui
+          node .github/scripts/ui_bundle.mjs ui "$v" "$api" site/ui/bundle.json
+          cargo tauri signer sign site/ui/bundle.json
+          test -s site/ui/bundle.json.sig
+          jq -cn --argjson v "$v" --argjson api "$api" '{v: $v, api: $api}' > site/ui/version.json
+          cat site/ui/version.json
       - name: Snapshot the app releases
         env:
           GH_TOKEN: ${{ github.token }}

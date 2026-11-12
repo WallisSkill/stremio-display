@@ -4,6 +4,7 @@ mod android;
 mod api;
 mod autocrop;
 mod commands;
+mod hotui;
 mod player;
 mod server;
 mod state;
@@ -17,6 +18,8 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let mut context = tauri::generate_context!();
+    hotui::wrap(&mut context);
     let builder = tauri::Builder::default();
     #[cfg(mobile)]
     let builder = builder.plugin(tauri_plugin_wistv_video::init());
@@ -66,7 +69,10 @@ pub fn run() {
             commands::addon_remove,
             commands::addon_move,
             commands::addon_discover,
+            commands::app_update,
+            hotui::ui_update,
+            hotui::ui_version,
         ])
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("WiS TV failed to start");
 }

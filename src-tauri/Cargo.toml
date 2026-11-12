@@ -19,6 +19,8 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 tokio = { version = "1", features = ["time", "net", "io-util", "sync", "fs", "rt-multi-thread", "macros"] }
 futures = "0.3"
 urlencoding = "2"
+base64 = "0.22"
+minisign-verify = "0.3"
 librqbit = { version = "9.1", default-features = false, features = ["rust-tls"] }
 
 [target.'cfg(any(windows, target_os = "android", target_os = "linux"))'.dependencies]

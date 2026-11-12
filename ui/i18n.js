@@ -12,6 +12,7 @@ let lang = "vi";
 const plurals = {};
 
 export const getLang = () => lang;
+export const hasKey = (key) => key in DICTS.vi;
 export const locale = () => LOCALES[lang];
 
 export function savedLang() {
