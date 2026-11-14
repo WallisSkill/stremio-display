@@ -8,6 +8,7 @@ const EXT_VIDEO = !!TAURI && /Linux/.test(navigator.userAgent) && !/Android/.tes
 const TOUCH = window.matchMedia("(hover: none) and (pointer: coarse)").matches;
 const PHONE_APP = !!TAURI && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 const ANDROID = /Android/i.test(navigator.userAgent);
+const SEE_THROUGH = !!TAURI && /Windows/.test(navigator.userAgent);
 const listen = (name, fn) => (TAURI ? TAURI.event.listen(name, fn) : onWebEvent(name, fn));
 
 const JUNK = new Set(["null", "undefined", ""]);
@@ -4107,7 +4108,7 @@ async function renderLogin(view) {
     const metas = await web.catalog({ url: addons[0].transportUrl, kind: cat.type, id: cat.id, extra: [] });
     const imgs = metas.filter((m) => m.poster).concat(metas.filter((m) => m.poster)).slice(0, 64).map((m) => h("img", { src: smallPoster(m.poster), alt: "", decoding: "async" }));
     put(wall, ...imgs);
-    const ready = () => { if (!wall.isConnected) return; wall.classList.add("ready"); watchWall(wall); };
+    const ready = () => { if (!wall.isConnected) return; wall.classList.add("ready"); if (SEE_THROUGH || matchMedia("(prefers-reduced-motion: reduce)").matches) wall.classList.add("still"); else watchWall(wall); };
     Promise.race([Promise.allSettled(imgs.map((i) => i.decode())), new Promise((r) => setTimeout(r, 4000))]).then(ready);
   } catch (e) {}
 }
