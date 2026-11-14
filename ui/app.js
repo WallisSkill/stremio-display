@@ -1050,9 +1050,11 @@ async function openStreams(m, vid, label) {
       const firstLine = (s.name || g.addon).replace(/\n/g, " ");
       const sub = s.title || s.description || "";
       const metaBits = [q.size, q.seeds ? `${q.seeds} seed` : ""].filter(Boolean).join(" · ");
+      const seen = srcTimeText(vid, s, g.addon);
+      const base = metaBits || (s.infoHash ? "Torrent" : s.externalUrl ? tr("src.external") : "");
       const btn = h("button", { class: "stream focusable" },
         h("div", { class: "s-name" }, q.tags.map(([t, solid]) => h("span", { class: `badge ${solid ? "solid" : ""}` }, t)), firstLine),
-        h("div", { class: "s-meta" }, metaBits || (s.infoHash ? "Torrent" : s.externalUrl ? tr("src.external") : "")),
+        h("div", { class: "s-meta" }, base, seen ? h("span", { class: "s-seen" }, seen) : null),
         sub ? h("div", { class: "s-sub" }, sub) : null);
       btn.addEventListener("click", () => startPlayback(m, vid, label, s, resume ? resumeMs : 0, g.addon));
       slot.append(btn);
@@ -1161,6 +1163,10 @@ function buildPlayer() {
   ui.sub = h("span", { class: "pl-sub" });
   ui.spin = h("div", { class: "pl-spin" }, h("div", { class: "spinner" }), ui.bufText = h("span"));
   ui.flash = h("div", { class: "pl-flash" });
+  const arrows = (cls) => h("span", { class: cls }, h("i"), h("i"), h("i"));
+  ui.fast = h("div", { class: "pl-fast", "aria-hidden": "true" }, h("b", {}, "2×"), arrows("pl-arrows"));
+  const ripple = (side) => h("div", { class: `pl-ripple ${side}`, "aria-hidden": "true" }, h("div", { class: "pl-ripple-in" }, arrows("pl-arrows"), h("b")));
+  ui.ripple = { left: ripple("left"), right: ripple("right") };
   ui.buf = h("div", { class: "pl-buf" });
   ui.fill = h("div", { class: "pl-fill" });
   ui.knob = h("div", { class: "pl-knob" });
@@ -1236,7 +1242,7 @@ function buildPlayer() {
   ui.levelFill = h("i");
   ui.levelText = h("b");
   ui.level = h("div", { class: "pl-level", hidden: true }, ui.levelIcon, h("div", { class: "pl-level-bar" }, ui.levelFill), ui.levelText);
-  ui.root = h("div", { id: "player", class: TOUCH ? "touch" : "", hidden: true }, ui.bg, ui.dim, ui.hit, ui.level, h("div", { class: "pl-shade" }), ui.spin, ui.flash, top, ...(center ? [center] : []), bottom, ui.nextUp, ui.menu, ...(ui.lockbar ? [ui.lockbar] : []));
+  ui.root = h("div", { id: "player", class: TOUCH ? "touch" : "", hidden: true }, ui.bg, ui.dim, ui.hit, ui.ripple.left, ui.ripple.right, ui.level, h("div", { class: "pl-shade" }), ui.spin, ui.flash, ui.fast, top, ...(center ? [center] : []), bottom, ui.nextUp, ui.menu, ...(ui.lockbar ? [ui.lockbar] : []));
   let lastTap = 0;
   let tapTimer = null;
   let swipe = null;
@@ -1248,8 +1254,69 @@ function buildPlayer() {
     ui.tip.style.left = `${Math.min(92, Math.max(8, pl.drag * 100))}%`;
   };
   let pinch = null;
+  let tapSeek = null;
+  let fast = null;
+  let holdAt = null;
+  let holdTimer = null;
+  const endTapSeek = () => {
+    if (tapSeek) clearTimeout(tapSeek.timer);
+    tapSeek = null;
+    ui.ripple.left.classList.remove("on");
+    ui.ripple.right.classList.remove("on");
+  };
+  const stepSeek = (dir, e) => {
+    if (!pl.s.loaded || roomLocked()) return;
+    if (tapSeek && tapSeek.dir !== dir) endTapSeek();
+    if (!tapSeek) tapSeek = { dir, total: 0, timer: null };
+    tapSeek.total += 10;
+    tapSeek.last = Date.now();
+    clearTimeout(tapSeek.timer);
+    tapSeek.timer = setTimeout(endTapSeek, 750);
+    seekTo(curTime() + dir * 10);
+    const r = dir < 0 ? ui.ripple.left : ui.ripple.right;
+    $("b", r).textContent = tr("pl.seekSecs", { n: `${dir < 0 ? "−" : "+"}${tapSeek.total}` });
+    r.classList.add("on");
+    const box = r.getBoundingClientRect();
+    const wave = h("span", { class: "pl-wave" });
+    wave.style.left = `${e.clientX - box.left}px`;
+    wave.style.top = `${e.clientY - box.top}px`;
+    wave.addEventListener("animationend", () => wave.remove());
+    r.append(wave);
+  };
+  const cancelHold = () => { clearTimeout(holdTimer); holdTimer = null; };
+  const holdStart = () => {
+    holdTimer = null;
+    if (!pl.open || !pl.s.loaded || pl.s.paused || pl.locked || pl.menu || pinch || swipe?.on || swipe?.level || !holdAt) return;
+    swipe = null;
+    clearTimeout(tapTimer);
+    lastTap = 0;
+    endTapSeek();
+    try { ui.hit.setPointerCapture(holdAt.id); } catch (err) {}
+    if (roomLocked()) { fast = { denied: true }; return; }
+    fast = { prev: pl.s.speed || 1, session: pl.session };
+    pl.s.speed = 2;
+    setProp("speed", 2);
+    ui.fast.classList.add("on");
+    paintState();
+  };
+  const holdEnd = (e) => {
+    if (holdAt && e && e.pointerId !== holdAt.id) return;
+    cancelHold();
+    holdAt = null;
+    if (!fast) return;
+    const was = fast;
+    fast = null;
+    swipedAt = Date.now();
+    ui.fast.classList.remove("on");
+    if (was.denied || !pl.open || pl.session !== was.session) return;
+    pl.s.speed = was.prev;
+    setProp("speed", was.prev);
+    paintState();
+  };
+  pl.resetGestures = () => { endTapSeek(); cancelHold(); holdAt = null; fast = null; ui.fast.classList.remove("on"); };
   const span = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
-  ui.hit.addEventListener("touchstart", (e) => { if (e.touches.length === 2 && !pl.locked) { pinch = { from: span(e.touches), ratio: 1 }; swipe = null; } }, { passive: true });
+  ui.hit.addEventListener("contextmenu", (e) => e.preventDefault());
+  ui.hit.addEventListener("touchstart", (e) => { if (e.touches.length === 2 && !pl.locked) { cancelHold(); pinch = { from: span(e.touches), ratio: 1 }; swipe = null; } }, { passive: true });
   ui.hit.addEventListener("touchmove", (e) => { if (pinch && e.touches.length === 2) { pinch.ratio = span(e.touches) / pinch.from; e.preventDefault(); } }, { passive: false });
   ui.hit.addEventListener("touchend", (e) => {
     if (!pinch || e.touches.length) return;
@@ -1261,6 +1328,11 @@ function buildPlayer() {
   });
   ui.hit.addEventListener("pointerdown", (e) => {
     if (e.pointerType === "mouse" || pinch || pl.menu) return;
+    cancelHold();
+    if (e.isPrimary && !fast && !pl.locked && pl.s.loaded && !pl.s.paused) {
+      holdAt = { id: e.pointerId, x: e.clientX, y: e.clientY };
+      holdTimer = setTimeout(holdStart, 450);
+    }
     const seekable = !pl.locked && !!pl.s.loaded && pl.s.duration > 0;
     const edge = e.clientX < 24 || e.clientX > window.innerWidth - 24 || e.clientY < 48 || e.clientY > window.innerHeight - 48;
     const side = e.clientX < window.innerWidth / 2 ? "light" : "vol";
@@ -1269,6 +1341,10 @@ function buildPlayer() {
     swipe = { id: e.pointerId, x: e.clientX, y: e.clientY, from: seekable ? curTime() / pl.s.duration : 0, on: false, seekable, vertical, side };
   });
   ui.hit.addEventListener("pointermove", (e) => {
+    if (holdAt && e.pointerId === holdAt.id) {
+      if (fast) return;
+      if (holdTimer && Math.hypot(e.clientX - holdAt.x, e.clientY - holdAt.y) > 12) cancelHold();
+    }
     if (!swipe || e.pointerId !== swipe.id) return;
     const dx = e.clientX - swipe.x;
     if (swipe.level) {
@@ -1319,8 +1395,9 @@ function buildPlayer() {
     paintTime();
     wake();
   };
-  ui.hit.addEventListener("pointerup", endSwipe);
-  ui.hit.addEventListener("pointercancel", endSwipe);
+  ui.hit.addEventListener("pointerup", (e) => { holdEnd(e); endSwipe(e); });
+  ui.hit.addEventListener("pointercancel", (e) => { holdEnd(e); endSwipe(e); });
+  ui.hit.addEventListener("lostpointercapture", (e) => { if (fast) holdEnd(e); });
   ui.hit.addEventListener("click", (e) => {
     if (Date.now() - swipedAt < 400) return;
     if (pl.locked) { showUnlock(); return; }
@@ -1328,11 +1405,17 @@ function buildPlayer() {
     if (!TOUCH) { togglePause(); return; }
     const now = Date.now();
     const x = e.clientX / window.innerWidth;
+    const dir = x < 0.35 ? -1 : x > 0.65 ? 1 : 0;
+    if (dir && tapSeek && tapSeek.dir === dir && now - tapSeek.last < 750) {
+      clearTimeout(tapTimer);
+      lastTap = 0;
+      stepSeek(dir, e);
+      return;
+    }
     if (now - lastTap < 300) {
       clearTimeout(tapTimer);
       lastTap = 0;
-      if (x < 0.35) seekBy(-10);
-      else if (x > 0.65) seekBy(10);
+      if (dir) stepSeek(dir, e);
       else togglePause();
       return;
     }
@@ -1912,14 +1995,78 @@ function onPlayerState(s) {
     const session = pl.session;
     applyFill(fillMode);
     setTimeout(() => autoSub(session), 600);
-    pl.ui.root.classList.remove("loading");
-    document.body.classList.add(EXT_VIDEO ? "ext-video" : "see-through");
-    wake();
+    pl.reveal = { at: Date.now(), t0: s.time || 0 };
+    clearTimeout(pl.revealTimer);
+    pl.revealTimer = setTimeout(() => { if (pl.open && pl.session === session) revealVideo(); }, 20000);
   }
+  if (pl.reveal && frameShown()) revealVideo();
+  srcTimeSave(false);
   paintState();
   if (pl.menu === "tracks" && s.tracks) renderMenu();
   else if (pl.ui.delayVal && s.subDelay != null) pl.ui.delayVal.textContent = delayText(s.subDelay);
   if (room.host) hostWatch();
+}
+
+function frameShown() {
+  const s = pl.s;
+  const waited = Date.now() - pl.reveal.at;
+  if (!s.loaded) return false;
+  if (waited > 20000) return true;
+  if (s.buffering) return false;
+  return Math.abs((s.time || 0) - pl.reveal.t0) > 0.12 || (!!s.paused && waited > 700) || waited > 6000;
+}
+
+function revealVideo() {
+  if (!pl.reveal) return;
+  pl.reveal = null;
+  clearTimeout(pl.revealTimer);
+  pl.ui.root.classList.remove("loading");
+  document.body.classList.add(EXT_VIDEO ? "ext-video" : "see-through");
+  wake();
+}
+
+const SRC_TIMES = "wistv.srcTimes";
+const SRC_TIMES_KEEP = 500;
+let srcTimesMemo = null;
+
+function srcKey(c) {
+  const s = c?.stream;
+  if (!s || !c.vid || String(c.vid).startsWith("local:")) return null;
+  const file = s.behaviorHints?.filename;
+  const id = s.infoHash ? `${String(s.infoHash).toLowerCase()}:${s.fileIdx ?? ""}` : file ? `${c.addon || ""}:${file}` : s.url ? String(s.url).split(/[?#]/)[0] : null;
+  return id ? `${c.vid}|${id}` : null;
+}
+
+function srcTimes() {
+  if (srcTimesMemo) return srcTimesMemo;
+  let all = null;
+  try { all = JSON.parse(localStorage.getItem(SRC_TIMES)); } catch (e) {}
+  srcTimesMemo = all && typeof all === "object" && !Array.isArray(all) ? all : {};
+  return srcTimesMemo;
+}
+
+function srcTimeSave(force) {
+  const key = srcKey(pl.ctx);
+  const d = pl.s.duration;
+  const p = pl.s.time;
+  if (!key || !pl.s.loaded || !(d > 0) || !Number.isFinite(p)) return;
+  const t = Date.now();
+  if (!force && t - (pl.srcSavedAt || 0) < 5000) return;
+  pl.srcSavedAt = t;
+  const all = srcTimes();
+  delete all[key];
+  all[key] = { d: Math.round(d), p: Math.round(Math.min(d, Math.max(0, p))), at: t };
+  const keys = Object.keys(all);
+  for (const k of keys.slice(0, Math.max(0, keys.length - SRC_TIMES_KEEP))) delete all[k];
+  try { localStorage.setItem(SRC_TIMES, JSON.stringify(all)); } catch (e) {}
+}
+
+function srcTimeText(vid, stream, addon) {
+  const v = srcTimes()[srcKey({ vid, stream, addon })];
+  if (!v || !(v.d > 0)) return "";
+  const len = tr("src.length", { time: secs(v.d) });
+  if (v.p >= v.d - Math.max(30, v.d * 0.04)) return `${len} · ${tr("src.watchedAll")}`;
+  return v.p >= 20 ? `${len} · ${tr("src.watched", { time: secs(v.p) })}` : len;
 }
 
 function nextEpisode() {
@@ -1951,6 +2098,7 @@ function sameSource(groups, c) {
 async function playEpisode(v, auto) {
   const c = pl.ctx;
   if (!c || !v || roomLocked()) return false;
+  srcTimeSave(true);
   const session = ++pl.session;
   pl.held = true;
   call("player_stop", { keep: true }).catch(() => {});
@@ -1959,6 +2107,7 @@ async function playEpisode(v, auto) {
   pl.ui.root.classList.add("loading");
   document.body.classList.remove("see-through", "ext-video");
   pl.s = { ...pl.s, loaded: false };
+  pl.reveal = null;
   pl.ui.title.textContent = c.m.name;
   pl.ui.sub.textContent = epName(v);
   paintState();
@@ -2159,9 +2308,11 @@ function renderSources(box) {
       const q = quality(s);
       const on = sameStream(s, c.stream);
       const meta = [q.size, q.seeds ? `${q.seeds} seed` : "", s.infoHash ? "Torrent" : ""].filter(Boolean).join(" · ");
+      const seen = on ? "" : srcTimeText(c.vid, s, g.addon);
       list.append(h("button", { class: `pl-src ${on ? "on" : ""}`, tabindex: "-1", disabled: (s.externalUrl && !s.url && !s.infoHash) || null, onclick: () => switchSource(s, g.addon) },
         h("div", { class: "pl-src-name" }, q.tags.map(([t, solid]) => h("span", { class: `badge ${solid ? "solid" : ""}` }, t)), h("span", {}, (s.name || g.addon).replace(/\n/g, " "))),
-        h("small", {}, on ? `${tr("src.playing")}${meta ? " · " + meta : ""}` : meta || (s.title || s.description || "").split("\n")[0])));
+        h("small", {}, on ? `${tr("src.playing")}${meta ? " · " + meta : ""}` : meta || (s.title || s.description || "").split("\n")[0]),
+        seen ? h("small", { class: "s-seen" }, seen) : null));
     }
   }
   if (data.pending) list.append(h("div", { class: "spinner small" }));
@@ -2244,6 +2395,8 @@ function fillMenu(box) {
 function openPlayer(c) {
   if (!pl.ui) buildPlayer();
   if (!pl.open) { pl.returnFocus = document.activeElement; readBrightness(); }
+  else srcTimeSave(true);
+  clearTimeout(pl.revealTimer);
   pl.open = true;
   navSync();
   pl.ctx = c;
@@ -2257,6 +2410,8 @@ function openPlayer(c) {
   pl.epSeason = null;
   pl.drag = null;
   pl.seekUntil = 0;
+  pl.reveal = null;
+  pl.resetGestures?.();
   const ui = pl.ui;
   const tv = isTvCtx(c) && tvState.list.length > 1;
   const setBtn = (btn, icon, title, label) => {
@@ -2303,6 +2458,9 @@ function closePlayer(stop = true) {
   navSync();
   pl.session++;
   clearTimeout(pl.hideTimer);
+  clearTimeout(pl.revealTimer);
+  pl.resetGestures?.();
+  srcTimeSave(true);
   restoreBrightness();
   if (stop || pl.held) call("player_stop").catch(() => {});
   pl.held = false;
@@ -2396,7 +2554,7 @@ function roomStart({ code, key, name, pw }) {
   Object.assign(room, {
     code, key: key || null, host: !!key, name, online: false, leaving: false, tries: 0, members: [], hostOnline: true, media: null, play: null,
     offset: 0, rtt: Infinity, chat: [], unread: 0, hold: null, skip: new Set(), sent: null, bufSince: null, waiting: false, waitSince: null,
-    rateSet: null, cool: { seek: 0, pause: 0, track: 0 }, joining: null, lastError: "", tracks: null, tracksSent: null, subTried: {}, reactions: ROOM_REACTIONS,
+    rateSet: null, cool: { seek: 0, pause: 0, track: 0 }, joining: null, lastError: "", tracks: null, tracksSent: null, subTried: {}, subFell: null, reactions: ROOM_REACTIONS,
     pw: roomPwOk(pw) ? pw : null, pwNext: null, locked: false, secretWanted: null,
   });
   roomSave();
@@ -2416,7 +2574,7 @@ function roomStop(close) {
   clearInterval(room.pingTimer);
   clearInterval(room.syncTimer);
   if (!room.host && pl.open && room.rateSet != null && room.rateSet !== 1) setProp("speed", 1);
-  Object.assign(room, { code: null, key: null, host: false, online: false, members: [], media: null, play: null, hold: null, rateSet: null, joining: null, waiting: false, unread: 0, tracks: null, tracksSent: null, subTried: {}, pw: null, pwNext: null, locked: false, secretWanted: null });
+  Object.assign(room, { code: null, key: null, host: false, online: false, members: [], media: null, play: null, hold: null, rateSet: null, joining: null, waiting: false, unread: 0, tracks: null, tracksSent: null, subTried: {}, subFell: null, pw: null, pwNext: null, locked: false, secretWanted: null });
   try { sessionStorage.removeItem("wistv.room"); } catch (e) {}
   room.pwAsk?._close?.();
   room.panel?._close?.();
@@ -2616,11 +2774,19 @@ function roomShareMedia(start) {
   if (roomSend({ t: "media", media: roomMediaOf(pl.ctx, at) })) { room.sent = null; room.tracksSent = null; roomBeat(false); }
 }
 
+function subUrlSafe(u) {
+  const v = String(u || "").trim().replace(/[\s"<>\\]/g, (c) => encodeURIComponent(c));
+  return /^https?:\/\/./.test(v) && v.length <= 2000 ? v : null;
+}
+
 function trackPick(type) {
   const list = pl.tracks.filter((t) => t.type === type);
   const on = list.find((t) => t.selected);
   if (!on) return type === "sub" ? { off: true } : null;
-  if (on.external) return /^https?:\/\//.test(on.file || "") ? { url: on.file, lang: on.lang || "", title: on.title || "" } : null;
+  if (on.external) {
+    const url = subUrlSafe(on.file);
+    return url ? { url, lang: on.lang || "", title: on.title || "" } : { lang: on.lang || "", title: on.title || "" };
+  }
   return { lang: on.lang || "", title: on.title || "", idx: list.filter((t) => !t.external).indexOf(on) };
 }
 
@@ -2637,6 +2803,64 @@ function matchTrack(list, want) {
   const at = Number.isInteger(want.idx) ? inner[want.idx] : null;
   if (at && same(at)) return at;
   return inner.find(same) || (want.lang && inner.find((t) => sameLang(t.lang, want.lang))) || at || null;
+}
+
+function pickSubTrack(x) {
+  if (x.selected) return false;
+  quietSet("sid", x.id);
+  return true;
+}
+
+function guestSubFallback(w, key, t, list) {
+  if (!w.lang) return false;
+  if (!Array.isArray(pl.subs)) { loadAddonSubs(); return false; }
+  const inner = list.find((x) => !x.external && sameLang(x.lang, w.lang));
+  const alt = pl.subs.find((x) => x.url !== w.url && sameLang(x.lang, w.lang));
+  room.subFell = { key, at: t, id: null, url: null };
+  if (inner && (w.url || !alt)) room.subFell.id = inner.id;
+  else if (alt) room.subFell.url = alt.url;
+  else return false;
+  toast(tr("room.subFallback", { lang: langName(w.lang) || w.lang }));
+  if (room.subFell.id != null) return pickSubTrack(inner);
+  const have = list.find((x) => x.external && x.file === alt.url);
+  if (have) return pickSubTrack(have);
+  addAddonSub(alt, true);
+  return true;
+}
+
+function guestSub(w, t) {
+  const list = pl.tracks.filter((x) => x.type === "sub");
+  if (w.off) {
+    if (!list.some((x) => x.selected)) return false;
+    quietSet("sid", "no");
+    return true;
+  }
+  const key = `${room.tracks.vid}|${w.url || ""}|${w.lang || ""}|${w.title || ""}|${w.idx ?? ""}`;
+  const tried = w.url ? room.subTried[w.url] : null;
+  const mine = w.url && list.find((x) => x.external && (x.file === w.url || (!!tried && x.title === tried.title && !tried.ids.includes(x.id))));
+  if (mine) return pickSubTrack(mine);
+  const fell = room.subFell?.key === key ? room.subFell : null;
+  if (fell) {
+    const x = fell.id != null ? list.find((y) => y.id === fell.id) : fell.url ? list.find((y) => y.external && y.file === fell.url) : null;
+    return x ? pickSubTrack(x) : false;
+  }
+  if (w.url) {
+    if (!tried || (tried.n < 2 && t - tried.at >= 4000)) {
+      const title = w.title || langName(w.lang) || tr("set.subs");
+      room.subTried[w.url] = { at: t, n: (tried?.n || 0) + 1, title, ids: list.filter((x) => x.external).map((x) => x.id) };
+      pl.added.add(w.url);
+      loadAddonSubs();
+      call("player_command", { args: ["sub-add", w.url, "select", title, w.lang || ""] }).catch(() => {});
+      return true;
+    }
+    if (t - tried.at < 5000) return false;
+    return guestSubFallback(w, key, t, list);
+  }
+  const hit = matchTrack(list, w);
+  if (hit && (!w.lang || !hit.lang || sameLang(hit.lang, w.lang))) return pickSubTrack(hit);
+  if (guestSubFallback(w, key, t, list)) return true;
+  if (room.subFell?.key === key || !hit) return false;
+  return pickSubTrack(hit);
 }
 
 function guestTracks() {
@@ -2662,7 +2886,7 @@ function guestTracks() {
     quietSet(prop, hit.id);
     return true;
   };
-  let moved = pick("sid", "sub", want.sub);
+  let moved = !!want.sub && guestSub(want.sub, t);
   moved = pick("aid", "audio", want.audio) || moved;
   const delay = want.delay || 0;
   if (Math.abs((pl.s.subDelay || 0) - delay) > 0.05) { quietSet("sub-delay", delay); pl.s.subDelay = delay; moved = true; }
@@ -3058,11 +3282,14 @@ function roomPanel() {
   const send = () => {
     const text = input.value.trim();
     if (!text) return;
-    if (roomSend({ t: "chat", text })) input.value = "";
+    if (roomSend({ t: "chat", text })) { input.value = ""; showEmoji(false); }
     else toast(tr("room.reconnecting"), true);
   };
   input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); send(); } });
-  box.addEventListener("click", (e) => { if (e.target === box) close(); });
+  box.addEventListener("click", (e) => {
+    if (e.target === box) { close(); return; }
+    if (!picker.hidden && !e.target.closest(".room-emoji, .room-emoji-toggle")) showEmoji(false);
+  });
   const put1 = (emoji) => {
     const at = input.selectionStart ?? input.value.length;
     const end = input.selectionEnd ?? at;
@@ -3074,9 +3301,12 @@ function roomPanel() {
   };
   const picker = h("div", { class: "room-emoji", hidden: true, role: "listbox", "aria-label": tr("room.emoji") },
     CHAT_EMOJI.map((e) => h("button", { class: "room-emoji-btn focusable", "aria-label": e, onclick: () => put1(e) }, e)));
+  const showEmoji = (on) => {
+    picker.hidden = !on;
+    emojiBtn.setAttribute("aria-expanded", String(on));
+  };
   const emojiBtn = h("button", { class: "btn focusable room-emoji-toggle", "aria-label": tr("room.emoji"), "aria-expanded": "false", onclick: () => {
-    picker.hidden = !picker.hidden;
-    emojiBtn.setAttribute("aria-expanded", String(!picker.hidden));
+    showEmoji(picker.hidden);
     if (!picker.hidden) $(".room-emoji-btn", picker)?.focus({ preventScroll: true });
   } }, "😊");
   const parts = { head: h("div", { class: "room-head" }), status: h("div", { class: "room-status" }), secret: h("div", { class: "room-secret" }), people: h("div", { class: "room-people" }), reacts: h("div", { class: "room-reacts" }), log: h("div", { class: "room-log" }), foot: h("div", { class: "pf-row room-foot" }) };
@@ -3087,8 +3317,7 @@ function roomPanel() {
     h("div", { class: "room-col talk" },
       parts.reacts,
       parts.log,
-      picker,
-      h("div", { class: "room-send" }, emojiBtn, input, h("button", { class: "btn primary focusable", onclick: send }, tr("common.send"))),
+      h("div", { class: "room-send" }, picker, emojiBtn, input, h("button", { class: "btn primary focusable", onclick: send }, tr("common.send"))),
       parts.foot)));
   paintRoom();
   (TOUCH ? $(".room-copy", box) : input)?.focus({ preventScroll: true });
@@ -3237,6 +3466,7 @@ async function playChannel(m, { fromPlayer = false, tile = null } = {}) {
   const meta = { ...m, type: "tv" };
   let session = null;
   if (fromPlayer) {
+    srcTimeSave(true);
     session = ++pl.session;
     pl.held = true;
     call("player_stop", { keep: true }).catch(() => {});
@@ -3245,6 +3475,7 @@ async function playChannel(m, { fromPlayer = false, tile = null } = {}) {
     pl.ui.root.classList.add("loading");
     document.body.classList.remove("see-through", "ext-video");
     pl.s = { ...pl.s, loaded: false };
+    pl.reveal = null;
     pl.ui.title.textContent = m.name;
     pl.ui.sub.textContent = m.group || tr("nav.tv");
     paintState();
