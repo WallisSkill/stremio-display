@@ -9,6 +9,8 @@ const TOUCH = window.matchMedia("(hover: none) and (pointer: coarse)").matches;
 const PHONE_APP = !!TAURI && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 const ANDROID = /Android/i.test(navigator.userAgent);
 const SEE_THROUGH = !!TAURI && /Windows/.test(navigator.userAgent);
+const TV_APP = !!TAURI && ANDROID && !window.matchMedia("(any-pointer: coarse)").matches;
+if (TV_APP) document.documentElement.classList.add("tv");
 const listen = (name, fn) => (TAURI ? TAURI.event.listen(name, fn) : onWebEvent(name, fn));
 
 const JUNK = new Set(["null", "undefined", ""]);
@@ -1473,7 +1475,7 @@ function wake() {
   pl.ui.root.classList.remove("idle");
   clearTimeout(pl.hideTimer);
   pl.hideTimer = setTimeout(() => {
-    if (pl.open && !pl.s.paused && !pl.menu && pl.drag == null && (TOUCH || !pl.ui.root.querySelector(".pl-bottom:hover, .pl-top:hover"))) pl.ui.root.classList.add("idle");
+    if (pl.open && !pl.s.paused && !pl.menu && pl.drag == null && (TOUCH || !pl.ui.root.querySelector(".pl-bottom:hover, .pl-top:hover"))) { if (TV_APP) plFocus()?.blur(); pl.ui.root.classList.add("idle"); }
     else wake();
   }, 3000);
 }
@@ -2273,6 +2275,7 @@ function renderMenu() {
   if (!pl.menu) { put(box, ); return; }
   fillMenu(box);
   box.prepend(h("button", { class: "pl-menu-x", tabindex: "-1", "aria-label": tr("common.close"), title: tr("common.close"), html: ICON.close, onclick: () => toggleMenu(null) }));
+  if (TV_APP && !box.contains(document.activeElement)) plFocusStart();
 }
 
 function loadSources() {
@@ -3403,8 +3406,46 @@ function roomResume(invite) {
   if (saved) roomStart(saved);
 }
 
+function plFocus() {
+  const a = document.activeElement;
+  return a && a !== document.body && pl.ui?.root.contains(a) ? a : null;
+}
+
+function plPool() {
+  const box = pl.menu ? pl.ui.menu : pl.ui.root;
+  return [...box.querySelectorAll("button, input[type=range]")].filter((el) => visible(el) && (pl.menu || !pl.ui.menu.contains(el)));
+}
+
+function plFocusStart() {
+  const pool = plPool();
+  const items = pool.filter((el) => el.classList.contains("pl-item") || el.type === "range");
+  (pl.menu ? items.find((el) => el.classList.contains("on")) || items[0] || pool[0] : pool.includes(pl.ui.play) ? pl.ui.play : pool[0])?.focus();
+}
+
+function tvPlayerKey(e) {
+  const k = e.key;
+  const dirs = { ArrowLeft: "l", ArrowRight: "r", ArrowUp: "u", ArrowDown: "d" };
+  const cur = plFocus();
+  if (dirs[k]) {
+    if (!cur && !pl.menu && (k === "ArrowLeft" || k === "ArrowRight")) return false;
+    wake();
+    if (cur?.type === "range" && (k === "ArrowLeft" || k === "ArrowRight")) return true;
+    e.preventDefault();
+    if (!cur) plFocusStart();
+    else moveFocus(dirs[k], plPool());
+    return true;
+  }
+  if (k === "Enter") {
+    wake();
+    if (!cur) { e.preventDefault(); togglePause(); }
+    return true;
+  }
+  return false;
+}
+
 function playerKey(e) {
   if (e.target instanceof HTMLInputElement && e.target.type !== "range") return false;
+  if (TV_APP && tvPlayerKey(e)) return true;
   const k = e.key;
   const handled = () => { e.preventDefault(); wake(); return true; };
   if (k === " " || k === "k" || k === "K" || k === "MediaPlayPause") { togglePause(); return handled(); }
@@ -4427,7 +4468,11 @@ if (!TAURI) {
 function stepBack() {
   const top = topLayer();
   if (top) { top._back?.(); return true; }
-  if (pl.open) return closePlayer();
+  if (pl.open) {
+    if (pl.menu) { toggleMenu(null); if (TV_APP) plFocusStart(); return true; }
+    if (TV_APP && plFocus()) { plFocus().blur(); pl.ui.root.classList.add("idle"); return true; }
+    return closePlayer();
+  }
   if (!$("#sheet").hidden) { closeSheet(); return true; }
   if (app.stack.length > 1) { app.stack.pop(); render(); return true; }
   const cur = app.stack[0]?.route;
@@ -4463,9 +4508,9 @@ function visible(el) {
   return r.width > 0 && r.height > 0;
 }
 
-function moveFocus(dir) {
+function moveFocus(dir, pool) {
   const scope = topLayer() || (!$("#sheet").hidden ? $("#sheet") : document);
-  const items = $$(".focusable", scope).filter(visible);
+  const items = pool || $$(".focusable", scope).filter(visible);
   const cur = document.activeElement;
   if (!cur || !items.includes(cur)) { items[0]?.focus(); return; }
   const a = cur.getBoundingClientRect();
@@ -4486,7 +4531,8 @@ function moveFocus(dir) {
     if (score < bestScore) { bestScore = score; best = el; }
   }
   if (!best) return;
-  best.focus({ preventScroll: true });
+  best.focus({ preventScroll: !pool });
+  if (pool) return;
   const row = best.closest(".row");
   if (row) {
     const rr = row.getBoundingClientRect(), br = best.getBoundingClientRect();

@@ -52,6 +52,8 @@ jobs:
           cd src-tauri
           cargo tauri android init --ci
           cargo tauri icon icons/icon.png
+          cd ..
+          python3 .github/scripts/android_tv.py
 
       - name: Build APK
         run: |
