@@ -4039,6 +4039,33 @@ async function renderSettings(view) {
 
 const smallPoster = (u) => String(u).replace(/^(https:\/\/images\.metahub\.space\/poster\/)(?:medium|large)\//, "$1small/");
 
+function watchWall(wall) {
+  let n = 0;
+  let slow = 0;
+  let last = 0;
+  const end = performance.now() + 3000;
+  const tick = (t) => {
+    if (!wall.isConnected) return;
+    if (last) { n++; if (t - last > 25) slow++; }
+    last = t;
+    if (t < end) requestAnimationFrame(tick);
+    else if (n && slow / n > 0.15) wall.classList.add("still");
+  };
+  requestAnimationFrame(tick);
+}
+
+async function loginUpdate(...fields) {
+  if (!TAURI || upd.busy) return;
+  let r = null;
+  try { r = await call("ui_update", { apply: false }); } catch (e) { return; }
+  if (r?.state !== "staged" || !fields[0].isConnected) return;
+  upd.ready = r.v;
+  if (fields.every((f) => !f.value)) {
+    try { if ((await applyUiUpdate())?.state === "applied") return; } catch (e) {}
+  }
+  offerUpdate();
+}
+
 async function renderLogin(view) {
   $("#topbar").hidden = true;
   document.body.classList.remove("dim");
@@ -4072,13 +4099,15 @@ async function renderLogin(view) {
       form, guest, together,
       h("div", { class: "login-langs" }, ...LANGS.map(([code, label]) => h("button", { class: `link focusable${getLang() === code ? " on" : ""}`, lang: code, onclick: () => chooseLang(code) }, label))))));
   email.focus({ preventScroll: true });
+  loginUpdate(email, pass);
+  startAutoUpdate();
   try {
     const addons = await web.addons();
     const cat = addons[0].manifest.catalogs.find((c) => c.type === "movie" && !(c.extra || []).some((e) => e.isRequired));
     const metas = await web.catalog({ url: addons[0].transportUrl, kind: cat.type, id: cat.id, extra: [] });
     const imgs = metas.filter((m) => m.poster).concat(metas.filter((m) => m.poster)).slice(0, 64).map((m) => h("img", { src: smallPoster(m.poster), alt: "", decoding: "async" }));
     put(wall, ...imgs);
-    const ready = () => { if (wall.isConnected) wall.classList.add("ready"); };
+    const ready = () => { if (!wall.isConnected) return; wall.classList.add("ready"); watchWall(wall); };
     Promise.race([Promise.allSettled(imgs.map((i) => i.decode())), new Promise((r) => setTimeout(r, 4000))]).then(ready);
   } catch (e) {}
 }
