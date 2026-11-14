@@ -92,14 +92,18 @@ pub struct AutoCrop {
     seen: Option<Rect>,
     samples: u32,
     applied: Option<Rect>,
+    steady: u32,
     next: Instant,
     done: bool,
     idle: bool,
 }
 
+const STEADY_SAMPLES: u32 = 4;
+const STEADY_DELAY: Duration = Duration::from_secs(300);
+
 impl AutoCrop {
     pub fn new() -> Self {
-        Self { frame: None, seen: None, samples: 0, applied: None, next: Instant::now() + Duration::from_secs(1), done: false, idle: false }
+        Self { frame: None, seen: None, samples: 0, applied: None, steady: 0, next: Instant::now() + Duration::from_secs(1), done: false, idle: false }
     }
 
     pub fn disable(&mut self) -> Option<Change> {
@@ -142,8 +146,7 @@ impl AutoCrop {
             Some(a) if (f.w, f.h) == (a.w, a.h) => (a.x, a.y),
             _ => (0, 0),
         };
-        let delay = [1, 1, 3, 4, 5, 6].get(self.samples as usize).copied().unwrap_or(20);
-        self.next = Instant::now() + Duration::from_secs(delay);
+        self.next = Instant::now() + self.delay();
         let Some(mut r) = content(f) else {
             return None;
         };
@@ -164,10 +167,20 @@ impl AutoCrop {
             return self.applied.take().map(|_| Change::Clear);
         }
         if self.applied.is_some_and(|a| a.near(target)) {
+            self.steady += 1;
+            self.next = Instant::now() + self.delay();
             return None;
         }
+        self.steady = 0;
         self.applied = Some(target);
         Some(Change::Crop(target))
+    }
+
+    fn delay(&self) -> Duration {
+        if self.steady >= STEADY_SAMPLES {
+            return STEADY_DELAY;
+        }
+        Duration::from_secs([1, 1, 3, 4, 5, 6].get(self.samples as usize).copied().unwrap_or(20))
     }
 }
 
@@ -236,6 +249,25 @@ mod tests {
             Some(Change::Crop(r)) => assert_eq!(r, Rect { x: 0, y: 140, w: 1920, h: 800 }),
             _ => panic!("expected wider crop"),
         }
+    }
+
+    #[test]
+    fn slows_down_once_crop_holds() {
+        let mut a = AutoCrop::new();
+        let d = frame(1920, 1080, Rect { x: 0, y: 140, w: 1920, h: 800 });
+        let f = Frame { w: 1920, h: 1080, stride: 1920 * 4, data: &d };
+        a.observe(&f);
+        a.observe(&f);
+        assert!(matches!(a.observe(&f), Some(Change::Crop(_))));
+        for _ in 0..STEADY_SAMPLES {
+            assert!(a.observe(&f).is_none());
+        }
+        assert!(a.next >= Instant::now() + STEADY_DELAY - Duration::from_secs(1));
+        let wider = frame(1920, 1080, Rect { x: 0, y: 100, w: 1920, h: 880 });
+        let f2 = Frame { w: 1920, h: 1080, stride: 1920 * 4, data: &wider };
+        assert!(matches!(a.observe(&f2), Some(Change::Crop(_))));
+        a.observe(&f2);
+        assert!(a.next < Instant::now() + Duration::from_secs(30));
     }
 
     #[test]

@@ -23,6 +23,20 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(4);
 const INIT_TIMEOUT: Duration = Duration::from_secs(60);
 const PAUSE_AFTER: Duration = Duration::from_secs(8);
 const DROP_AFTER: Duration = Duration::from_secs(180);
+#[cfg(any(target_os = "android", target_os = "ios"))]
+const PHONE_DOWN_BPS: u32 = 10 * 1024 * 1024;
+#[cfg(any(target_os = "android", target_os = "ios"))]
+const PHONE_UP_BPS: u32 = 1024 * 1024;
+
+fn limits() -> librqbit::limits::LimitsConfig {
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    return librqbit::limits::LimitsConfig {
+        download_bps: std::num::NonZeroU32::new(PHONE_DOWN_BPS),
+        upload_bps: std::num::NonZeroU32::new(PHONE_UP_BPS),
+    };
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    librqbit::limits::LimitsConfig::default()
+}
 
 struct Current {
     hash: String,
@@ -56,6 +70,7 @@ pub async fn engine(cache: PathBuf) -> Result<Arc<Engine>, String> {
                     ..Default::default()
                 }),
                 trackers: TRACKERS.iter().filter_map(|t| t.parse::<tauri::Url>().ok()).collect(),
+                ratelimits: limits(),
                 ..Default::default()
             };
             let session = Session::new_with_opts(dir, opts)
