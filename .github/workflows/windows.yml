@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 concurrency:
   group: windows
@@ -20,6 +21,8 @@ concurrency:
 jobs:
   build:
     runs-on: windows-latest
+    env:
+      SIGN: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
     defaults:
       run:
         shell: bash
@@ -50,27 +53,136 @@ jobs:
           cp "$RUNNER_TEMP/mpv/out/libmpv-2.dll" src-tauri/libmpv-2.dll
           ls -la src-tauri/libmpv-2.dll
 
-      - name: Build installer
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+      - name: Set version
         run: |
           set -e
           VERSION="0.1.${{ github.run_number }}"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           printf '{"version":"%s"}' "$VERSION" > "$RUNNER_TEMP/version.json"
+
+      - name: Build installer
+        if: env.SIGN != 'true'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: |
+          set -e
           cd src-tauri
           cargo tauri build --config tauri.windows-release.json --config "$RUNNER_TEMP/version.json"
 
-      - name: Collect installer
+      - name: Build app
+        if: env.SIGN == 'true'
         run: |
           set -e
-          dir=src-tauri/target/release/bundle/nsis
-          ls -la "$dir"
-          exe=$(ls "$dir"/*-setup.exe | head -1)
+          cd src-tauri
+          cargo tauri build --no-bundle --config tauri.windows-release.json --config "$RUNNER_TEMP/version.json"
+
+      - name: Mark app as installed by NSIS
+        if: env.SIGN == 'true'
+        shell: python
+        run: |
+          import pathlib, sys
+          exe = pathlib.Path("src-tauri/target/release/wistv.exe")
+          data = exe.read_bytes()
+          unknown, nsis = b"__TAURI_BUNDLE_TYPE_VAR_UNK", b"__TAURI_BUNDLE_TYPE_VAR_NSS"
+          if data.count(unknown) != 1:
+              sys.exit("bundle type marker not found exactly once in wistv.exe")
+          exe.write_bytes(data.replace(unknown, nsis))
+
+      - name: Stage app for signing
+        if: env.SIGN == 'true'
+        run: |
+          set -e
+          mkdir -p sign/app
+          cp src-tauri/target/release/wistv.exe sign/app/wistv.exe
+
+      - id: upload-app
+        if: env.SIGN == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: WiSTV-app-unsigned
+          path: sign/app/wistv.exe
+          if-no-files-found: error
+
+      - name: Sign app
+        if: env.SIGN == 'true'
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'wis-tv' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: app
+          github-artifact-id: ${{ steps.upload-app.outputs.artifact-id }}
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: sign/app-signed
+
+      - name: Put signed app back
+        if: env.SIGN == 'true'
+        run: |
+          set -e
+          cp sign/app-signed/wistv.exe src-tauri/target/release/wistv.exe
+          powershell -NoProfile -Command '$s = Get-AuthenticodeSignature src-tauri/target/release/wistv.exe; $s.Status; $s.SignerCertificate.Subject; if ($s.Status -ne "Valid") { exit 1 }'
+
+      - name: Bundle installer
+        if: env.SIGN == 'true'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: |
+          set -e
+          cd src-tauri
+          cargo tauri bundle --no-binary-patching --config tauri.windows-release.json --config "$RUNNER_TEMP/version.json"
+
+      - name: Stage installer for signing
+        if: env.SIGN == 'true'
+        run: |
+          set -e
+          mkdir -p sign/installer
+          cp "$(ls src-tauri/target/release/bundle/nsis/*-setup.exe | head -1)" sign/installer/WiSTV-setup.exe
+
+      - id: upload-installer
+        if: env.SIGN == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: WiSTV-installer-unsigned
+          path: sign/installer/WiSTV-setup.exe
+          if-no-files-found: error
+
+      - name: Sign installer
+        if: env.SIGN == 'true'
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'wis-tv' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: installer
+          github-artifact-id: ${{ steps.upload-installer.outputs.artifact-id }}
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: sign/installer-signed
+
+      - name: Collect installer
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: |
+          set -e
           mkdir -p out
-          cp "$exe" out/WiSTV-setup.exe
-          sig=$(cat "$exe.sig")
+          if [ "$SIGN" = "true" ]; then
+            cp sign/installer-signed/WiSTV-setup.exe out/WiSTV-setup.exe
+            powershell -NoProfile -Command '$s = Get-AuthenticodeSignature out/WiSTV-setup.exe; $s.Status; $s.SignerCertificate.Subject; if ($s.Status -ne "Valid") { exit 1 }'
+            rm -f out/WiSTV-setup.exe.sig
+            cargo tauri signer sign out/WiSTV-setup.exe
+            sig=$(cat out/WiSTV-setup.exe.sig)
+            rm out/WiSTV-setup.exe.sig
+          else
+            dir=src-tauri/target/release/bundle/nsis
+            ls -la "$dir"
+            exe=$(ls "$dir"/*-setup.exe | head -1)
+            cp "$exe" out/WiSTV-setup.exe
+            sig=$(cat "$exe.sig")
+          fi
           url="https://github.com/${{ github.repository }}/releases/download/windows/WiSTV-setup.exe"
           date=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           printf '{"version":"%s","notes":"","pub_date":"%s","platforms":{"windows-x86_64":{"signature":"%s","url":"%s"}}}\n' "$VERSION" "$date" "$sig" "$url" > out/latest.json

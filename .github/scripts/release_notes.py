@@ -19,7 +19,7 @@ OTHER = {
 TITLES = {"ios": "WiS TV cho iPhone", "windows": "WiS TV cho Windows", "android": "WiS TV cho Android", "linux": "WiS TV cho Linux"}
 INTRO = {
     "ios": "Cài bằng Sideloadly, ký lại mỗi 7 ngày.",
-    "windows": "Bản cài đặt cho Windows. Ứng dụng tự cập nhật khi mở.",
+    "windows": "Bản cài đặt cho Windows. Ứng dụng tự cập nhật khi mở. [Code signing policy](https://github.com/WallisSkill/stremio-display#code-signing-policy).",
     "android": "Bản cài đặt cho Android (arm64).",
     "linux": "Gói .deb cho Ubuntu/Debian (tự cài libmpv) và bản AppImage tự cập nhật (cần libmpv2 có sẵn trên máy).",
 }
