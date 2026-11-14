@@ -1157,7 +1157,8 @@ function iconBtn(icon, title, onclick, cls = "") {
 
 function buildPlayer() {
   const ui = {};
-  ui.bg = h("div", { class: "pl-loading-bg" });
+  ui.bgCanvas = h("canvas", { width: "64", height: "36" });
+  ui.bg = h("div", { class: "pl-loading-bg" }, ui.bgCanvas);
   ui.hit = h("div", { class: "pl-hit" });
   ui.title = h("b", { class: "pl-title" });
   ui.sub = h("span", { class: "pl-sub" });
@@ -2426,7 +2427,7 @@ function openPlayer(c) {
   ui.title.textContent = c.m.name || "";
   ui.sub.textContent = isEp ? c.label : isTvCtx(c) ? c.m.group || tr("nav.tv") : yearOf(c.m) || "";
   const bg = bgOf(c.m);
-  ui.bg.style.backgroundImage = bg ? `url("${bg}")` : "";
+  paintLoadingBg(bg);
   ui.root.classList.add("loading");
   ui.root.classList.remove("idle");
   ui.root.hidden = false;
@@ -2437,6 +2438,28 @@ function openPlayer(c) {
   clearInterval(app.heroTimer);
   paintState();
   wake();
+}
+
+function paintLoadingBg(url) {
+  const c = pl.ui.bgCanvas;
+  const g = c.getContext("2d");
+  pl.bgWant = url || null;
+  pl.ui.bg.classList.remove("has-img");
+  if (!url || !g) return;
+  const img = new Image();
+  img.decoding = "async";
+  img.onload = () => {
+    if (pl.bgWant !== url || !img.naturalWidth) return;
+    const s = Math.max(c.width / img.naturalWidth, c.height / img.naturalHeight) * 1.15;
+    const w = img.naturalWidth * s;
+    const ht = img.naturalHeight * s;
+    g.clearRect(0, 0, c.width, c.height);
+    g.filter = "blur(2px)";
+    g.drawImage(img, (c.width - w) / 2, (c.height - ht) / 2, w, ht);
+    g.filter = "none";
+    pl.ui.bg.classList.add("has-img");
+  };
+  img.src = url;
 }
 
 function closePlayer(stop = true) {
@@ -4014,6 +4037,8 @@ async function renderSettings(view) {
   $(".panel .btn")?.focus({ preventScroll: true });
 }
 
+const smallPoster = (u) => String(u).replace(/^(https:\/\/images\.metahub\.space\/poster\/)(?:medium|large)\//, "$1small/");
+
 async function renderLogin(view) {
   $("#topbar").hidden = true;
   document.body.classList.remove("dim");
@@ -4051,7 +4076,10 @@ async function renderLogin(view) {
     const addons = await web.addons();
     const cat = addons[0].manifest.catalogs.find((c) => c.type === "movie" && !(c.extra || []).some((e) => e.isRequired));
     const metas = await web.catalog({ url: addons[0].transportUrl, kind: cat.type, id: cat.id, extra: [] });
-    put(wall, ...metas.concat(metas).slice(0, 64).map((m) => h("img", { src: m.poster, alt: "" })));
+    const imgs = metas.filter((m) => m.poster).concat(metas.filter((m) => m.poster)).slice(0, 64).map((m) => h("img", { src: smallPoster(m.poster), alt: "", decoding: "async" }));
+    put(wall, ...imgs);
+    const ready = () => { if (wall.isConnected) wall.classList.add("ready"); };
+    Promise.race([Promise.allSettled(imgs.map((i) => i.decode())), new Promise((r) => setTimeout(r, 4000))]).then(ready);
   } catch (e) {}
 }
 
