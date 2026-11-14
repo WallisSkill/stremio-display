@@ -29,3 +29,11 @@ class_name = "WatchRoom"
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["WatchRoom"]
+
+[[durable_objects.bindings]]
+name = "CAST"
+class_name = "CastHub"
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["CastHub"]

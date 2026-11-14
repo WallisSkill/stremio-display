@@ -610,6 +610,139 @@ export class WatchRoom extends DurableObject {
   }
 }
 
+const CAST_TOKEN_LIFE_MS = 30 * 24 * 3600e3;
+const CAST_TOKENS = 24;
+const CAST_SOCKETS = 16;
+const CAST_CMDS = new Set(["pause", "play", "seek", "stop", "volume"]);
+const CAST_ROLES = new Set(["screen", "remote"]);
+const CAST_NAME = 40;
+
+export class CastHub extends DurableObject {
+  async issue() {
+    const now = Date.now();
+    const tokens = ((await this.ctx.storage.get("tokens")) || []).filter((t) => t.until > now);
+    const token = hex(crypto.getRandomValues(new Uint8Array(32)));
+    tokens.push({ token, until: now + CAST_TOKEN_LIFE_MS });
+    await this.ctx.storage.put("tokens", tokens.slice(-CAST_TOKENS));
+    return token;
+  }
+
+  async valid(token) {
+    if (typeof token !== "string" || !TOKEN.test(token)) return false;
+    const now = Date.now();
+    const tokens = (await this.ctx.storage.get("tokens")) || [];
+    return tokens.some((t) => t.until > now && same(t.token, token));
+  }
+
+  who(ws) {
+    try { return ws.deserializeAttachment() || {}; } catch (e) { return {}; }
+  }
+
+  send(ws, msg) {
+    try { ws.send(JSON.stringify(msg)); } catch (e) {}
+  }
+
+  live(role, except) {
+    return this.ctx.getWebSockets().filter((ws) => ws !== except && ws.readyState === 1 && (!role || this.who(ws).role === role));
+  }
+
+  screens(except) {
+    return this.live("screen", except).map((ws) => this.who(ws)).map(({ id, name, state }) => ({ id, name, state: state || null }));
+  }
+
+  shareScreens(except) {
+    const data = JSON.stringify({ t: "screens", list: this.screens(except) });
+    for (const ws of this.live("remote", except)) try { ws.send(data); } catch (e) {}
+  }
+
+  async fetch(request) {
+    const url = new URL(request.url);
+    const [client, server] = Object.values(new WebSocketPair());
+    const refuse = (code, key) => {
+      server.accept();
+      server.send(JSON.stringify({ t: "error", ...coded(key) }));
+      server.close(code, "refused");
+      return new Response(null, { status: 101, webSocket: client });
+    };
+    if (!(await this.valid(url.searchParams.get("t")))) return refuse(4401, "wk.sessionExpired");
+    const role = url.searchParams.get("role") || "";
+    const id = url.searchParams.get("id") || "";
+    if (!CAST_ROLES.has(role) || !CLIENT_ID.test(id)) return refuse(4400, "wk.badRequest");
+    const name = String(url.searchParams.get("name") || "").replace(/[\u0000-\u001f]/g, "").trim().slice(0, CAST_NAME);
+    for (const ws of this.live(null)) {
+      const w = this.who(ws);
+      if (w.id === id && w.role === role) try { ws.close(4001, "replaced"); } catch (e) {}
+    }
+    if (this.live(null).length >= CAST_SOCKETS) return refuse(4409, "wk.badRequest");
+    this.ctx.acceptWebSocket(server);
+    server.serializeAttachment({ role, id, name, state: null });
+    if (role === "screen") this.shareScreens();
+    else this.send(server, { t: "screens", list: this.screens() });
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  async webSocketMessage(ws, data) {
+    if (typeof data !== "string" || data.length > MAX_FRAME) return;
+    let msg;
+    try { msg = JSON.parse(data); } catch (e) { return; }
+    if (!msg || typeof msg !== "object") return;
+    const me = this.who(ws);
+    if (msg.t === "ping") {
+      this.send(ws, { t: "pong", c: Number.isFinite(msg.c) ? msg.c : 0, s: Date.now() });
+      return;
+    }
+    if (me.role === "screen" && msg.t === "state") {
+      const s = msg.state && typeof msg.state === "object" ? msg.state : null;
+      const state = s ? {
+        title: String(s.title || "").slice(0, 200),
+        poster: typeof s.poster === "string" && HTTP_URL.test(s.poster) ? s.poster : null,
+        time: Number.isFinite(s.time) ? s.time : 0,
+        duration: Number.isFinite(s.duration) ? s.duration : 0,
+        paused: !!s.paused,
+        volume: Number.isFinite(s.volume) ? s.volume : null,
+        from: CLIENT_ID.test(String(s.from || "")) ? s.from : null,
+      } : null;
+      ws.serializeAttachment({ ...me, state });
+      const out = JSON.stringify({ t: "state", id: me.id, state });
+      for (const r of this.live("remote")) try { r.send(out); } catch (e) {}
+      return;
+    }
+    if (me.role !== "remote") return;
+    const target = this.live("screen").find((s) => this.who(s).id === msg.to);
+    if (!target) {
+      this.send(ws, { t: "gone", id: msg.to });
+      return;
+    }
+    if (msg.t === "cast" && msg.media && typeof msg.media === "object") {
+      this.send(target, { t: "cast", media: msg.media, from: me.id, by: me.name });
+    } else if (msg.t === "cmd" && CAST_CMDS.has(msg.cmd)) {
+      this.send(target, { t: "cmd", cmd: msg.cmd, value: Number.isFinite(msg.value) ? msg.value : null, from: me.id });
+    }
+  }
+
+  async webSocketClose(ws) {
+    try { ws.close(1000, "bye"); } catch (e) {}
+    if (this.who(ws).role === "screen") this.shareScreens(ws);
+  }
+
+  async webSocketError(ws) {
+    await this.webSocketClose(ws);
+  }
+}
+
+async function castHubId(uid) {
+  return hex(await crypto.subtle.digest("SHA-256", enc(`cast:${uid}`))).slice(0, 32);
+}
+
+async function castToken(request, env) {
+  const body = await request.json().catch(() => null);
+  const uid = await cachedUserId(body && body.authKey, env);
+  if (!uid) return fail("wk.sessionExpired", 401);
+  const hub = await castHubId(uid);
+  const token = await env.CAST.get(env.CAST.idFromName(hub)).issue();
+  return reply({ result: { hub, token } });
+}
+
 function roomCode() {
   return [...crypto.getRandomValues(new Uint8Array(6))].map((b) => ROOM_LETTERS[b % ROOM_LETTERS.length]).join("");
 }
@@ -692,6 +825,15 @@ export default {
     if (pathname === "/api/room/create") {
       if (request.method !== "POST") return fail("method not allowed", 405);
       return roomCreate(request, env);
+    }
+    if (pathname === "/api/cast/token") {
+      if (request.method !== "POST") return fail("method not allowed", 405);
+      return castToken(request, env);
+    }
+    const cast = /^\/api\/cast\/([0-9a-f]{32})\/ws$/.exec(pathname);
+    if (cast) {
+      if ((request.headers.get("upgrade") || "").toLowerCase() !== "websocket") return fail("wk.needWebSocket", 426);
+      return env.CAST.get(env.CAST.idFromName(cast[1])).fetch(request);
     }
     const room = /^\/api\/room\/([A-Za-z0-9]{6})\/ws$/.exec(pathname);
     if (room) return roomSocket(request, env, room[1].toUpperCase());

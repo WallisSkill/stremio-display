@@ -96,6 +96,7 @@ const ICON = {
   close: '<svg viewBox="0 0 24 24"><path d="m6.5 6.5 11 11m0-11-11 11" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>',
   bell: '<svg viewBox="0 0 24 24"><path d="M12 3.2v1.6M6.2 16.6v-5.4a5.8 5.8 0 0 1 11.6 0v5.4l1.7 1.9H4.5Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M9.8 21a2.4 2.4 0 0 0 4.4 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   tv: '<svg viewBox="0 0 24 24"><rect x="2.8" y="6.2" width="18.4" height="12.6" rx="2.6" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="m8.4 2.6 3.6 3.4 3.6-3.4M8 21.4h8" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  cast: '<svg viewBox="0 0 24 24"><path d="M3 7V5.8A2.8 2.8 0 0 1 5.8 3h12.4A2.8 2.8 0 0 1 21 5.8v12.4a2.8 2.8 0 0 1-2.8 2.8H15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><path d="M3 17.6A3.4 3.4 0 0 1 6.4 21M3 13.4A7.6 7.6 0 0 1 10.6 21M3 9.2A11.8 11.8 0 0 1 14.8 21" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>',
   people: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8.5" r="3.3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M3 19.5c.6-3.3 3-5.2 6-5.2s5.4 1.9 6 5.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M15.5 5.6a3.1 3.1 0 0 1 0 5.9M17.6 14.6c1.8.6 3 2.2 3.4 4.9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   cog: '<svg viewBox="0 0 24 24"><path d="M9.72 4.64 9.97 2.4h4.06l.25 2.24 1.31.55 1.76-1.41 2.87 2.87-1.41 1.76.55 1.31 2.24.25v4.06l-2.24.25-.55 1.31 1.41 1.76-2.87 2.87-1.76-1.41-1.31.55-.25 2.24H9.97l-.25-2.24-1.31-.55-1.76 1.41-2.87-2.87 1.41-1.76-.55-1.31-2.24-.25V9.97l2.24-.25.55-1.31-1.41-1.76 2.87-2.87 1.76 1.41Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="12" r="3.6" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>',
 };
@@ -576,6 +577,9 @@ function editProfile(p) {
 
 async function logout() {
   roomStop(room.host);
+  castStop();
+  castEnd();
+  castStore("wistv.castTicket", null);
   if (pl.open) closePlayer();
   await flushPrefs();
   try { await call("logout"); } catch (e) {}
@@ -1188,6 +1192,8 @@ function buildPlayer() {
   ui.eps = iconBtn("list", tr("pl.episodes"), () => toggleMenu("episodes"));
   ui.src = iconBtn("source", tr("pl.sources"), () => toggleMenu("sources"));
   ui.room = iconBtn("people", tr("pl.together"), () => roomMenu(), "room-btn");
+  ui.cast = iconBtn("cast", tr("cast.button"), () => castPick(), "cast-btn");
+  ui.cast.hidden = true;
   ui.roomCount = h("span", { class: "room-count", hidden: true });
   ui.room.append(ui.roomCount);
   ui.nextUp = h("button", { class: "pl-nextup", tabindex: "-1", hidden: true, onclick: (e) => { e.stopPropagation(); playNext(false); } });
@@ -1210,7 +1216,7 @@ function buildPlayer() {
   let center = null;
   let bottom;
   if (TOUCH) {
-    for (const [btn, text] of [[ui.room, tr("nav.togetherShort")], [ui.eps, tr("ep.list")], [ui.src, tr("pl.src")], [ui.cc, tr("set.subs")], [ui.next, tr("pl.next")]]) {
+    for (const [btn, text] of [[ui.cast, tr("cast.short")], [ui.room, tr("nav.togetherShort")], [ui.eps, tr("ep.list")], [ui.src, tr("pl.src")], [ui.cc, tr("set.subs")], [ui.next, tr("pl.next")]]) {
       btn.classList.add("act");
       btn.append(h("span", { class: "pl-label" }, text));
     }
@@ -1227,7 +1233,7 @@ function buildPlayer() {
     back10.classList.add("big");
     fwd10.classList.add("big");
     center = h("div", { class: "pl-center" }, back10, ui.play, fwd10);
-    ui.actions = h("div", { class: "pl-actions" }, ui.stretch, ui.speed, ui.room, ui.eps, ui.src, ui.cc, ui.next);
+    ui.actions = h("div", { class: "pl-actions" }, ui.stretch, ui.speed, ui.cast, ui.room, ui.eps, ui.src, ui.cc, ui.next);
     bottom = h("div", { class: "pl-bottom" }, seekRow, ui.actions);
     window.addEventListener("resize", () => { ui.fitSig = ""; fitActions(); });
   } else {
@@ -1235,7 +1241,7 @@ function buildPlayer() {
       seekRow,
       h("div", { class: "pl-row" },
         h("div", { class: "pl-group" }, ui.play, back10, fwd10, ui.next, h("div", { class: "pl-volwrap" }, ui.volBtn, ui.vol)),
-        h("div", { class: "pl-group" }, ui.room, ui.stretch, ui.eps, ui.src, ui.cc, ui.speed, ui.fs)));
+        h("div", { class: "pl-group" }, ui.cast, ui.room, ui.stretch, ui.eps, ui.src, ui.cc, ui.speed, ui.fs)));
   }
   for (const el of [bottom, center].filter(Boolean)) {
     el.addEventListener("click", (e) => e.stopPropagation());
@@ -2405,6 +2411,7 @@ function openPlayer(c) {
   pl.open = true;
   navSync();
   pl.ctx = c;
+  setTimeout(paintCast, 0);
   pl.s = { loaded: false, volume: pl.s.volume ?? 100 };
   pl.tracks = [];
   pl.subs = null;
@@ -2497,6 +2504,7 @@ function closePlayer(stop = true) {
   document.body.classList.remove("playing", "see-through", "ext-video");
   pl.returnFocus?.focus?.({ preventScroll: true });
   if (room.host) hostWatch();
+  paintCast();
   offerUpdate();
   return true;
 }
@@ -3380,6 +3388,305 @@ function paintRoom() {
     pl.ui.root.classList.toggle("room-guest", roomGuest());
     if (pl.open) paintState();
   }
+}
+
+const CAST_WS = ROOM_WS.replace(/room\/$/, "cast/");
+const CAST_SCREEN = !!TAURI && !TOUCH;
+const CAST_REMOTE = TOUCH;
+const CAST_BEAT_MS = 5000;
+const CAST_PING_MS = 30000;
+const cast = { ws: null, role: null, tries: 0, ticketFails: 0, timer: 0, beat: 0, ping: 0, screens: [], target: null, targetName: "", state: null, at: 0, from: null, sig: "", last: null, sentAt: 0, panel: null, chip: null };
+
+function castStore(key, value) {
+  try {
+    if (value === undefined) return JSON.parse(localStorage.getItem(key));
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, JSON.stringify(value));
+  } catch (e) {}
+  return null;
+}
+
+function castId() {
+  let id = castStore("wistv.castId");
+  if (typeof id !== "string" || !/^[a-z0-9]{16}$/.test(id)) {
+    id = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => "abcdefghijklmnopqrstuvwxyz0123456789"[b % 36]).join("");
+    castStore("wistv.castId", id);
+  }
+  return id;
+}
+
+function castName() {
+  if (CAST_SCREEN) return TV_APP ? tr("cast.tv") : tr("cast.pc");
+  return roomName() || tr("cast.phone");
+}
+
+async function castTicket() {
+  const uid = app.user?._id;
+  const saved = castStore("wistv.castTicket");
+  if (saved && saved.uid === uid && saved.hub && saved.token) return saved;
+  const r = await call("cast_token");
+  if (!r?.hub || !r?.token) throw new Error(tr("room.badReply"));
+  const t = { uid, hub: r.hub, token: r.token };
+  castStore("wistv.castTicket", t);
+  return t;
+}
+
+function castStart() {
+  if (!app.user || app.guest) { castStop(); return; }
+  const role = CAST_SCREEN ? "screen" : CAST_REMOTE && !document.hidden ? "remote" : null;
+  if (!role) { castStop(); return; }
+  if (cast.role === role && (cast.ws || cast.timer)) return;
+  cast.ticketFails = 0;
+  castConnect(role);
+}
+
+function castStop() {
+  const ws = cast.ws;
+  cast.role = null;
+  cast.ws = null;
+  clearTimeout(cast.timer);
+  cast.timer = 0;
+  clearInterval(cast.beat);
+  clearInterval(cast.ping);
+  if (ws) try { ws.close(1000, "bye"); } catch (e) {}
+  cast.screens = [];
+  paintCast();
+}
+
+async function castConnect(role) {
+  castStop();
+  cast.role = role;
+  let t;
+  try { t = await castTicket(); cast.ticketFails = 0; } catch (e) {
+    if (++cast.ticketFails >= 3) { cast.role = null; return; }
+    castRetry();
+    return;
+  }
+  if (cast.role !== role || cast.ws) return;
+  const q = new URLSearchParams({ t: t.token, role, id: castId(), name: castName() });
+  let ws;
+  try { ws = new WebSocket(`${CAST_WS}${t.hub}/ws?${q}`); } catch (e) { castRetry(); return; }
+  cast.ws = ws;
+  ws.onopen = () => {
+    if (cast.ws !== ws) return;
+    cast.tries = 0;
+    clearInterval(cast.ping);
+    cast.ping = setInterval(() => castSend({ t: "ping", c: Date.now() }), CAST_PING_MS);
+    if (role === "screen") {
+      cast.sig = "";
+      castReport(true);
+      clearInterval(cast.beat);
+      cast.beat = setInterval(() => castReport(false), 1000);
+    }
+  };
+  ws.onmessage = (e) => {
+    if (cast.ws !== ws) return;
+    let m;
+    try { m = JSON.parse(e.data); } catch (x) { return; }
+    if (m && typeof m === "object") castMessage(m);
+  };
+  ws.onclose = (e) => {
+    if (cast.ws !== ws) return;
+    cast.ws = null;
+    clearInterval(cast.beat);
+    clearInterval(cast.ping);
+    cast.screens = [];
+    paintCast();
+    if (e.code === 4401) castStore("wistv.castTicket", null);
+    if (e.code === 4001 || !cast.role) return;
+    castRetry();
+  };
+}
+
+function castRetry() {
+  const role = cast.role;
+  if (!role) return;
+  cast.tries++;
+  clearTimeout(cast.timer);
+  cast.timer = setTimeout(() => { cast.timer = 0; if (cast.role === role && !cast.ws) castConnect(role); }, Math.min(60000, 2000 * 2 ** Math.min(cast.tries - 1, 5)));
+}
+
+function castSend(msg) {
+  if (cast.ws?.readyState !== 1) return false;
+  try { cast.ws.send(JSON.stringify(msg)); return true; } catch (e) { return false; }
+}
+
+function castMessage(m) {
+  if (m.t === "screens") {
+    cast.screens = Array.isArray(m.list) ? m.list : [];
+    const on = cast.screens.find((s) => s.id === cast.target);
+    if (on) { cast.state = on.state; cast.at = Date.now(); }
+    paintCast();
+  } else if (m.t === "state") {
+    const s = cast.screens.find((x) => x.id === m.id);
+    if (s) s.state = m.state;
+    if (m.id === cast.target) { cast.state = m.state; cast.at = Date.now(); paintCast(); }
+  } else if (m.t === "gone") {
+    if (m.id === cast.target) { toast(tr("cast.gone"), true); castEnd(); }
+  } else if (m.t === "cast" && cast.role === "screen") {
+    castPlay(m);
+  } else if (m.t === "cmd" && cast.role === "screen") {
+    castCmd(m);
+  }
+}
+
+async function castPlay(m) {
+  const md = m.media;
+  if (!md?.id || !md?.vid) return;
+  if (inRoom()) roomStop(room.host);
+  if (!$("#sheet").hidden) closeSheet();
+  toast(tr("cast.incoming", { name: m.by || tr("cast.phone") }));
+  cast.from = m.from || null;
+  const hit = await roomFindStream(md);
+  const meta = { id: md.id, type: md.type, name: md.name || "", poster: md.poster, background: md.background };
+  if (!hit) { toast(tr("cast.noSource"), true); openStreams(meta, md.vid, md.label); return; }
+  startPlayback(meta, md.vid, md.label, hit.stream, Math.floor((md.start || 0) * 1000), hit.addon);
+}
+
+function castCmd(m) {
+  if (!pl.open) return;
+  if (m.cmd === "pause" && !pl.s.paused) togglePause();
+  else if (m.cmd === "play" && pl.s.paused) togglePause();
+  else if (m.cmd === "seek" && Number.isFinite(m.value)) { seekTo(m.value); wake(); }
+  else if (m.cmd === "volume" && Number.isFinite(m.value)) setVolume(m.value);
+  else if (m.cmd === "stop") closePlayer();
+  setTimeout(() => castReport(true), 300);
+}
+
+function castReport(force) {
+  if (cast.role !== "screen" || cast.ws?.readyState !== 1) return;
+  const c = pl.open ? pl.ctx : null;
+  const st = c ? { title: [c.m?.name, c.label && c.label !== c.m?.name ? c.label : ""].filter(Boolean).join(" · "), poster: c.m?.poster || null, time: Math.round(curTime() * 10) / 10, duration: pl.s.duration || 0, paused: !!pl.s.paused, volume: pl.s.volume ?? null, from: cast.from } : null;
+  const sig = st ? `${st.title}|${st.paused}|${Math.round(st.duration)}` : "none";
+  const now = Date.now();
+  const was = cast.last;
+  const drift = st && was ? Math.abs(st.time - (was.time + (was.paused ? 0 : (now - cast.sentAt) / 1000))) : 0;
+  if (!force && sig === cast.sig && (!st || (drift < 3 && now - cast.sentAt < CAST_BEAT_MS))) return;
+  cast.sig = sig;
+  cast.last = st;
+  cast.sentAt = now;
+  if (!st) cast.from = null;
+  castSend({ t: "state", state: st });
+}
+
+function castable() {
+  return CAST_REMOTE && pl.open && !!pl.ctx && !String(pl.ctx.vid).startsWith("local:") && !inRoom() && cast.screens.length > 0;
+}
+
+function castPick() {
+  if (!castable()) return;
+  const box = layer("edit cast-layer", () => box.remove());
+  const list = cast.screens.map((s) => h("button", { class: "cast-screen focusable", onclick: () => { box.remove(); castTo(s); } },
+    h("span", { class: "cast-ico", html: ICON.tv }),
+    h("span", { class: "cast-name" }, s.name || tr("cast.tv"), s.state?.title ? h("small", {}, tr("cast.playing", { title: s.state.title })) : null)));
+  put(box, h("div", { class: "room-card cast-card" },
+    h("h2", {}, tr("cast.title")),
+    h("p", { class: "hint" }, tr("cast.hint")),
+    h("div", { class: "cast-list" }, ...list),
+    h("div", { class: "pf-row end" }, h("button", { class: "btn focusable", onclick: () => box.remove() }, tr("common.cancel")))));
+  $(".cast-screen", box)?.focus({ preventScroll: true });
+}
+
+function castTo(s) {
+  if (!castable()) return;
+  const media = roomMediaOf(pl.ctx, curTime());
+  if (!castSend({ t: "cast", to: s.id, media })) { toast(tr("cast.offline"), true); return; }
+  cast.target = s.id;
+  cast.targetName = s.name || tr("cast.tv");
+  cast.state = null;
+  closePlayer();
+  castPanel();
+}
+
+function castEnd() {
+  cast.target = null;
+  cast.state = null;
+  cast.panel?.remove();
+  cast.panel = null;
+  paintCast();
+}
+
+function castTime() {
+  const s = cast.state;
+  if (!s) return 0;
+  const t = s.time + (s.paused ? 0 : (Date.now() - cast.at) / 1000);
+  return s.duration ? Math.min(s.duration, t) : t;
+}
+
+function castCommand(cmd, value) {
+  if (!cast.target) return;
+  if (!castSend({ t: "cmd", to: cast.target, cmd, value })) { toast(tr("cast.offline"), true); return; }
+  if (cast.state && (cmd === "pause" || cmd === "play")) { cast.state = { ...cast.state, time: castTime(), paused: cmd === "pause" }; cast.at = Date.now(); }
+  if (cast.state && cmd === "seek") { cast.state = { ...cast.state, time: value }; cast.at = Date.now(); }
+  paintCast();
+}
+
+function castPanel() {
+  if (!cast.target) return;
+  cast.panel?.remove();
+  const close = () => { clearInterval(timer); box.remove(); if (cast.panel === box) cast.panel = null; paintCast(); };
+  const box = layer("edit cast-layer", close);
+  cast.panel = box;
+  const ui = {
+    poster: h("img", { class: "cast-poster", alt: "" }),
+    title: h("h3", { class: "cast-title" }),
+    status: h("p", { class: "hint" }),
+    seek: h("input", { type: "range", class: "cast-seek focusable", min: "0", max: "1", step: "1", value: "0" }),
+    time: h("span", { class: "cast-time" }),
+    play: h("button", { class: "icon-btn cast-play focusable", onclick: () => castCommand(cast.state?.paused ? "play" : "pause") }),
+  };
+  ui.seek.addEventListener("change", () => castCommand("seek", Number(ui.seek.value)));
+  ui.seek.addEventListener("input", () => { box._dragging = true; ui.time.textContent = `${secs(Number(ui.seek.value))} / ${secs(cast.state?.duration)}`; });
+  ui.seek.addEventListener("change", () => { box._dragging = false; });
+  box._ui = ui;
+  put(box, h("div", { class: "room-card cast-card" },
+    h("h2", {}, tr("cast.on", { name: cast.targetName })),
+    ui.poster, ui.title, ui.status,
+    h("div", { class: "cast-bar" }, ui.seek, ui.time),
+    h("div", { class: "cast-ctl" },
+      h("button", { class: "icon-btn focusable", "aria-label": tr("pl.back10"), html: ICON.back10, onclick: () => castCommand("seek", Math.max(0, castTime() - 10)) }),
+      ui.play,
+      h("button", { class: "icon-btn focusable", "aria-label": tr("pl.fwd10"), html: ICON.fwd10, onclick: () => castCommand("seek", castTime() + 10) })),
+    h("div", { class: "pf-row end" },
+      h("button", { class: "btn focusable", onclick: () => { castCommand("stop"); castEnd(); } }, tr("cast.stop")),
+      h("button", { class: "btn primary focusable", onclick: close }, tr("cast.hide")))));
+  const timer = setInterval(() => { if (!box.isConnected) { clearInterval(timer); return; } paintCastPanel(); }, 1000);
+  paintCast();
+}
+
+function paintCastPanel() {
+  const box = cast.panel;
+  if (!box?.isConnected) return;
+  const ui = box._ui;
+  const s = cast.state;
+  if (s?.poster && ui.poster.getAttribute("src") !== s.poster) ui.poster.src = s.poster;
+  ui.poster.hidden = !s?.poster;
+  ui.title.textContent = s?.title || "";
+  ui.status.textContent = !cast.ws ? tr("cast.reconnect") : s ? "" : tr("cast.idle", { name: cast.targetName });
+  ui.play.innerHTML = s?.paused ? ICON.play : ICON.pause;
+  ui.play.setAttribute("aria-label", s?.paused ? tr("pl.play") : tr("pl.pause"));
+  ui.play.disabled = !s;
+  ui.seek.disabled = !s;
+  if (!box._dragging) {
+    const t = castTime();
+    ui.seek.max = String(Math.max(1, Math.round(s?.duration || 0)));
+    ui.seek.value = String(Math.round(t));
+    ui.time.textContent = `${secs(t)} / ${secs(s?.duration)}`;
+  }
+}
+
+function paintCast() {
+  if (pl.ui?.cast) pl.ui.cast.hidden = !castable();
+  if (pl.ui?.actions && TOUCH) fitActions();
+  paintCastPanel();
+  const want = !!cast.target && !cast.panel && !pl.open;
+  if (!want) { cast.chip?.remove(); cast.chip = null; return; }
+  const text = cast.state?.title ? tr("cast.chip", { title: cast.state.title }) : tr("cast.on", { name: cast.targetName });
+  if (!cast.chip) {
+    cast.chip = h("button", { class: "cast-chip focusable", onclick: () => castPanel() }, h("span", { html: ICON.tv }), h("span", { class: "cast-chip-text" }));
+    document.body.append(cast.chip);
+  }
+  $(".cast-chip-text", cast.chip).textContent = text;
 }
 
 function roomFromUrl() {
@@ -4544,6 +4851,8 @@ function back() {
 
 window.__wistvBack = () => stepBack();
 
+if (CAST_REMOTE) document.addEventListener("visibilitychange", () => { if (document.hidden) castStop(); else castStart(); });
+
 if (TAURI) document.addEventListener("visibilitychange", async () => {
   if (document.hidden || pl.open) return;
   const route = app.stack[app.stack.length - 1]?.route;
@@ -4731,6 +5040,7 @@ const homeSig = () => JSON.stringify([
 ]);
 
 async function boot() {
+  castStart();
   const hit = cacheGet(bootKey());
   const fresh = Promise.allSettled([call("addons"), call("library")]);
   const apply = ([addons, library]) => {

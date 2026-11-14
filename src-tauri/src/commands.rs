@@ -228,6 +228,12 @@ pub async fn room_create(st: State<'_, AppState>) -> R<Value> {
 }
 
 #[tauri::command]
+pub async fn cast_token(st: State<'_, AppState>) -> R<Value> {
+    let key = st.auth_key().ok_or_else(|| crate::util::msg("room.needLogin"))?;
+    api::cast_token(&st.http, &key).await
+}
+
+#[tauri::command]
 pub async fn prefs_get(st: State<'_, AppState>) -> R<Value> {
     let Some(key) = st.auth_key() else {
         return Ok(Value::Null);

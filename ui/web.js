@@ -54,6 +54,7 @@ function activeProfile() {
 }
 
 const ROOM_API = document.querySelector('meta[name="wistv-room-api"]')?.content || "https://film.wis237.online/api/room/";
+const CAST_API = ROOM_API.replace(/room\/$/, "cast/");
 
 async function workerApi(base, who, method, body) {
   let res;
@@ -895,6 +896,10 @@ export const web = {
   async room_create() {
     const key = needKey(tr("room.needLogin"));
     return workerApi(ROOM_API, tr("who.rooms"), "create", { authKey: key });
+  },
+  async cast_token() {
+    const key = needKey(tr("room.needLogin"));
+    return workerApi(CAST_API, tr("who.rooms"), "token", { authKey: key });
   },
   async prefs_get() {
     const key = authKey();
