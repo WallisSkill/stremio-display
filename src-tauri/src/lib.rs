@@ -36,6 +36,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::session,
             commands::login,
+            commands::login_key,
             commands::logout,
             commands::addons,
             commands::catalog,

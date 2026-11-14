@@ -78,6 +78,10 @@ export default {
   "login.guest": "无需账号先试用",
   "login.room": "用房间码加入一起看",
   "login.intro": "使用 Stremio 账号登录，即可使用你的插件和片库。",
+  "login.qrTitle": "用手机登录",
+  "login.qrStep": "用手机相机扫描二维码，在打开的页面登录 Stremio 并确认。",
+  "login.qrAlt": "或打开 link.stremio.com 并输入代码",
+  "login.qrFail": "无法生成登录代码。",
 
   "tg.title": "一起看",
   "tg.inRoom": "你在房间 {code} 中。",

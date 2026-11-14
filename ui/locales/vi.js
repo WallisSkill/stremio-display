@@ -78,6 +78,10 @@ export default {
   "login.guest": "Dùng thử không cần tài khoản",
   "login.room": "Vào phòng xem chung bằng mã",
   "login.intro": "Đăng nhập bằng tài khoản Stremio để dùng addon và thư viện của bạn.",
+  "login.qrTitle": "Đăng nhập bằng điện thoại",
+  "login.qrStep": "Quét mã bằng camera điện thoại, đăng nhập Stremio trên trang mở ra rồi bấm xác nhận.",
+  "login.qrAlt": "Hoặc mở link.stremio.com và nhập mã",
+  "login.qrFail": "Không tạo được mã đăng nhập.",
 
   "tg.title": "Xem chung",
   "tg.inRoom": "Bạn đang ở phòng {code}.",

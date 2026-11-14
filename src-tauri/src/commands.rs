@@ -83,6 +83,24 @@ pub async fn login(st: State<'_, AppState>, email: String, password: String) -> 
 }
 
 #[tauri::command]
+pub async fn login_key(st: State<'_, AppState>, auth_key: String) -> R<Value> {
+    let auth_key = auth_key.trim().to_string();
+    if auth_key.is_empty() {
+        return Err(crate::util::msg("err.loginFailed"));
+    }
+    let res = api::get_user(&st.http, &auth_key).await?;
+    if res.get("_id").is_none() {
+        return Err(crate::util::msg("err.loginFailed"));
+    }
+    let user = crate::state::slim_user(&res);
+    st.set_session(Some(Session {
+        auth_key,
+        user: user.clone(),
+    }))?;
+    Ok(user)
+}
+
+#[tauri::command]
 pub async fn logout(st: State<'_, AppState>) -> R<()> {
     if let Some(key) = st.auth_key() {
         let _ = api::logout(&st.http, &key).await;

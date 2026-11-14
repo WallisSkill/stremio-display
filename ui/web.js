@@ -818,6 +818,17 @@ export const web = {
     relay = { base: null, at: 0 };
     return user;
   },
+  async login_key({ authKey: key }) {
+    const u = await api("getUser", { type: "GetUser", authKey: key });
+    if (!u?._id) throw tr("err.loginFailed");
+    const user = { _id: u._id, email: u.email, fullname: u.fullname, avatar: u.avatar };
+    store.set("wistv.session", { authKey: key, user });
+    store.set("wistv.profile", null);
+    libraryCache = [];
+    addonCache = null;
+    relay = { base: null, at: 0 };
+    return user;
+  },
   async logout() {
     const key = authKey();
     store.set("wistv.session", null);

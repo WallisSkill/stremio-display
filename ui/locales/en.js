@@ -78,6 +78,10 @@ export default {
   "login.guest": "Try it without an account",
   "login.room": "Join a watch-together room with a code",
   "login.intro": "Sign in with your Stremio account to use your add-ons and library.",
+  "login.qrTitle": "Sign in with your phone",
+  "login.qrStep": "Scan the code with your phone camera, sign in to Stremio on the page that opens and confirm.",
+  "login.qrAlt": "Or open link.stremio.com and enter the code",
+  "login.qrFail": "Could not create a sign-in code.",
 
   "tg.title": "Watch together",
   "tg.inRoom": "You are in room {code}.",

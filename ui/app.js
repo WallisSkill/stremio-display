@@ -4108,6 +4108,57 @@ async function loginUpdate(...fields) {
   offerUpdate();
 }
 
+const LINK_API = "https://link.stremio.com/api/v2/";
+const LINK_POLL_MS = 3000;
+const LINK_RENEW_MS = 5 * 60 * 1000;
+
+function qrLogin(onKey) {
+  const img = h("img", { class: "qr-img", alt: "", width: "180", height: "180" });
+  const code = h("b", { class: "qr-code" });
+  const note = h("p", { class: "qr-note" });
+  const box = h("div", { class: "qr-login", hidden: true }, h("h3", {}, tr("login.qrTitle")), img, h("p", {}, tr("login.qrStep")), h("p", { class: "qr-alt" }, tr("login.qrAlt"), " ", code), note);
+  let made = 0;
+  let current = null;
+  let busy = false;
+  const linkApi = async (path) => {
+    const r = await fetch(`${LINK_API}${path}`);
+    return r.json();
+  };
+  const renew = async () => {
+    const res = await linkApi("create?type=Create");
+    const c = res?.result;
+    if (!c?.code) throw new Error(tr("login.qrFail"));
+    current = c.code;
+    made = Date.now();
+    img.src = c.qrcode || `https://link.stremio.com/qr?data=${encodeURIComponent(c.link)}`;
+    code.textContent = c.code;
+    note.textContent = "";
+    box.hidden = false;
+  };
+  const tick = async () => {
+    if (!box.isConnected && made) return;
+    if (busy) { setTimeout(tick, LINK_POLL_MS); return; }
+    busy = true;
+    try {
+      if (!current || Date.now() - made > LINK_RENEW_MS) await renew();
+      else {
+        const res = await linkApi(`read?type=Read&code=${encodeURIComponent(current)}`);
+        const key = res?.result?.authKey;
+        if (key) {
+          note.textContent = tr("login.busy");
+          try { await onKey(key); busy = false; return; } catch (e) { note.textContent = String(e); current = null; }
+        }
+      }
+    } catch (e) {
+      if (!current) { box.hidden = true; }
+    }
+    busy = false;
+    setTimeout(tick, LINK_POLL_MS);
+  };
+  tick();
+  return box;
+}
+
 async function renderLogin(view) {
   $("#topbar").hidden = true;
   document.body.classList.remove("dim");
@@ -4134,13 +4185,18 @@ async function renderLogin(view) {
   });
   const guest = h("button", { class: "link focusable", onclick: async () => { app.guest = true; loadPrefs(); await boot(); } }, tr("login.guest"));
   const together = h("button", { class: "link focusable", onclick: async () => { app.guest = true; loadPrefs(); await boot(); joinRoom(""); } }, tr("login.room"));
-  view.append(h("div", { class: "login page" }, wall,
-    h("div", { class: "login-card" },
-      h("div", { class: "brand" }, h("span", { class: "brand-w" }, "WiS"), h("span", { class: "brand-tv" }, "TV")),
-      h("p", {}, tr("login.intro")),
-      form, guest, together,
-      h("div", { class: "login-langs" }, ...LANGS.map(([code, label]) => h("button", { class: `link focusable${getLang() === code ? " on" : ""}`, lang: code, onclick: () => chooseLang(code) }, label))))));
-  email.focus({ preventScroll: true });
+  const qr = TOUCH ? null : qrLogin(async (key) => {
+    app.user = await call("login_key", { authKey: key });
+    app.guest = false;
+    await startSignedIn();
+  });
+  const card = h("div", { class: "login-card" },
+    h("div", { class: "brand" }, h("span", { class: "brand-w" }, "WiS"), h("span", { class: "brand-tv" }, "TV")),
+    h("p", {}, tr("login.intro")),
+    form, guest, together,
+    h("div", { class: "login-langs" }, ...LANGS.map(([code, label]) => h("button", { class: `link focusable${getLang() === code ? " on" : ""}`, lang: code, onclick: () => chooseLang(code) }, label))));
+  view.append(h("div", { class: "login page" }, wall, qr ? h("div", { class: "login-pair" }, card, qr) : card));
+  if (!TV_APP) email.focus({ preventScroll: true });
   loginUpdate(email, pass);
   startAutoUpdate();
   try {

@@ -98,6 +98,10 @@ pub async fn login(http: &reqwest::Client, email: &str, password: &str) -> Resul
     .await
 }
 
+pub async fn get_user(http: &reqwest::Client, auth_key: &str) -> Result<Value, String> {
+    call(http, "getUser", json!({ "type": "GetUser", "authKey": auth_key })).await
+}
+
 pub async fn logout(http: &reqwest::Client, auth_key: &str) -> Result<Value, String> {
     call(http, "logout", json!({ "type": "Logout", "authKey": auth_key })).await
 }
