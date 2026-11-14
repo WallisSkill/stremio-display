@@ -426,7 +426,13 @@ pub struct Player {
     live: Arc<Mutex<Option<Live>>>,
     generation: AtomicU64,
     crop: Arc<AtomicBool>,
+    starting: Mutex<()>,
+    switching: AtomicBool,
+    hidden: AtomicBool,
+    ended: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
 }
+
+const OLD_PLAYER_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
 
 fn checked(lib: &Mpv, rc: c_int) -> Result<(), String> {
     if rc < 0 {
@@ -442,6 +448,10 @@ impl Player {
             live: Arc::new(Mutex::new(None)),
             generation: AtomicU64::new(0),
             crop: Arc::new(AtomicBool::new(false)),
+            starting: Mutex::new(()),
+            switching: AtomicBool::new(false),
+            hidden: AtomicBool::new(false),
+            ended: Mutex::new(None),
         }
     }
 
@@ -466,7 +476,14 @@ impl Player {
     }
 
     pub fn active(&self) -> bool {
-        self.live.lock().unwrap().is_some()
+        self.switching.load(Ordering::SeqCst) || self.live.lock().unwrap().is_some()
+    }
+
+    pub fn paused(&self) -> bool {
+        let Ok(lib) = mpv() else { return false };
+        let live = self.live.lock().unwrap();
+        let Some(live) = live.as_ref() else { return false };
+        unsafe { lib.prop(live.ctx as Handle, "pause") }.as_deref() == Some("yes")
     }
 
     pub fn set_crop(&self, on: bool) {
@@ -489,6 +506,7 @@ impl Player {
 
     #[cfg(target_os = "ios")]
     pub fn background(&self, hidden: bool) -> Result<(), String> {
+        self.hidden.store(hidden, Ordering::SeqCst);
         let vo = PLATFORM_OPTIONS.iter().find(|(k, _)| *k == "vo").map_or("gpu-next", |(_, v)| *v);
         self.with(|m, ctx| unsafe {
             if hidden {
@@ -503,8 +521,9 @@ impl Player {
     }
 
     #[cfg(not(target_os = "ios"))]
-    pub fn background(&self, _hidden: bool) -> Result<(), String> {
-        Ok(())
+    pub fn background(&self, hidden: bool) -> Result<(), String> {
+        self.hidden.store(hidden, Ordering::SeqCst);
+        self.with(|m, ctx| unsafe { m.set_property(ctx, "vid", if hidden { "no" } else { "auto" }) })
     }
 
     pub fn start(
@@ -513,7 +532,24 @@ impl Player {
         state: impl Fn(Value) + Send + 'static,
         done: impl FnOnce(Outcome) + Send + 'static,
     ) -> Result<(), String> {
+        let _start = self.starting.lock().unwrap_or_else(|e| e.into_inner());
+        self.switching.store(true, Ordering::SeqCst);
+        let out = self.launch(req, state, done);
+        self.switching.store(false, Ordering::SeqCst);
+        out
+    }
+
+    fn launch(
+        &self,
+        req: Request,
+        state: impl Fn(Value) + Send + 'static,
+        done: impl FnOnce(Outcome) + Send + 'static,
+    ) -> Result<(), String> {
         self.stop();
+        let old = self.ended.lock().unwrap().take();
+        if let Some(old) = old {
+            let _ = old.recv_timeout(OLD_PLAYER_WAIT);
+        }
         let lib = mpv()?;
         let ctx = unsafe { (lib.create)() };
         if ctx.is_null() {
@@ -556,6 +592,11 @@ impl Player {
             for (k, v) in &req.extra {
                 lib.set_option(ctx, k, v);
             }
+            if self.hidden.load(Ordering::SeqCst) {
+                lib.set_option(ctx, "vid", "no");
+                #[cfg(target_os = "ios")]
+                lib.set_option(ctx, "vo", "null");
+            }
             lib.set_option(ctx, "title", &req.title);
             if req.start_ms > 0 {
                 lib.set_option(ctx, "start", &format!("{:.3}", req.start_ms as f64 / 1000.0));
@@ -586,6 +627,8 @@ impl Player {
         let wid = req.wid;
         let shared = self.live.clone();
         let crop_on = self.crop.clone();
+        let (finished, ended) = std::sync::mpsc::channel();
+        *self.ended.lock().unwrap() = Some(ended);
         std::thread::spawn(move || {
             let ctx = ctx_addr as Handle;
             let out = unsafe { run(lib, ctx, start_ms, wid, &crop_on, &state) };
@@ -597,6 +640,7 @@ impl Player {
             }
             unsafe { (lib.terminate_destroy)(ctx) };
             done(out);
+            let _ = finished.send(());
         });
         Ok(())
     }

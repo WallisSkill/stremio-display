@@ -4550,9 +4550,8 @@ if (TAURI) document.addEventListener("visibilitychange", async () => {
   if (await syncAddons(120000) && (route === "home" || route === "movie" || route === "series")) render();
 });
 
-if (TAURI && TOUCH && !ANDROID) document.addEventListener("visibilitychange", () => {
-  if (!pl.open) return;
-  if (document.hidden) { pl.bgVideo = true; call("player_background", { hidden: true }).catch(() => {}); }
+if (PHONE_APP) document.addEventListener("visibilitychange", () => {
+  if (document.hidden) { if (!pl.open) return; pl.bgVideo = true; call("player_background", { hidden: true }).catch(() => {}); }
   else if (pl.bgVideo) { pl.bgVideo = false; call("player_background", { hidden: false }).catch(() => {}); }
 });
 

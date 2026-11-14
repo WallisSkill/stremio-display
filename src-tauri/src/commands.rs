@@ -508,6 +508,10 @@ pub async fn play(
         extra.push(("cache-on-disk".to_string(), "yes".to_string()));
         extra.push(("demuxer-cache-dir".to_string(), spill.to_string_lossy().into_owned()));
     }
+    let shaders = st.cache_dir.join("mpv-shaders");
+    if std::fs::create_dir_all(&shaders).is_ok() {
+        extra.push(("gpu-shader-cache-dir".to_string(), shaders.to_string_lossy().into_owned()));
+    }
     let req = player::Request {
         url,
         title: ctx.title.clone().unwrap_or_else(|| ctx.name.clone()),
@@ -640,7 +644,15 @@ pub async fn player_fill(app: AppHandle, on: bool) -> R<Value> {
 
 #[tauri::command]
 pub async fn player_background(app: AppHandle, hidden: bool) -> R<()> {
-    off_main(app, move |st| st.player.background(hidden)).await
+    off_main(app, move |st| {
+        if hidden && st.player.paused() {
+            crate::torrent::hold(true);
+        } else if !hidden && st.player.active() {
+            crate::torrent::hold(false);
+        }
+        st.player.background(hidden)
+    })
+    .await
 }
 
 #[tauri::command]

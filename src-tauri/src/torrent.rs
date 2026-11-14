@@ -85,6 +85,20 @@ pub async fn engine(cache: PathBuf) -> Result<Arc<Engine>, String> {
         .cloned()
 }
 
+pub fn hold(on: bool) {
+    let Some(e) = ENGINE.get().cloned() else { return };
+    tauri::async_runtime::spawn(async move {
+        let _guard = e.opening.lock().await;
+        let handle = e.current.lock().unwrap().as_ref().map(|c| c.handle.clone());
+        let Some(h) = handle else { return };
+        if on && !h.is_paused() {
+            let _ = e.session.pause(&h).await;
+        } else if !on && h.is_paused() {
+            let _ = e.session.unpause(&h).await;
+        }
+    });
+}
+
 pub fn release() {
     let Some(e) = ENGINE.get().cloned() else { return };
     let ticket = e.ticket.fetch_add(1, Ordering::SeqCst) + 1;
