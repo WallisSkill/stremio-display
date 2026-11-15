@@ -1952,6 +1952,10 @@ function applyMini(on) {
   pl.mini = on;
   if (MINI_CLASS) document.body.classList.toggle(MINI_CLASS, on);
   if (PHONE_APP && !ANDROID && pl.miniAuto) { document.body.classList.toggle("pip", on); document.body.classList.toggle("pip-dark", on); }
+  if (ANDROID && pl.open) {
+    if (on && pl.bgVideo) { pl.bgVideo = false; call("player_background", { hidden: false }).catch(() => {}); }
+    else if (!on && document.hidden && !pl.bgVideo) { pl.bgVideo = true; call("player_background", { hidden: true }).catch(() => {}); }
+  }
   if (on && pl.menu) toggleMenu(null);
   if (pl.open) wake();
 }
@@ -5302,8 +5306,14 @@ if (TAURI) document.addEventListener("visibilitychange", async () => {
   if (await syncAddons(120000) && (route === "home" || route === "movie" || route === "series")) render();
 });
 
-if (PHONE_APP) document.addEventListener("visibilitychange", () => {
-  if (document.hidden) { if (!pl.open) return; pl.bgVideo = true; call("player_background", { hidden: true }).catch(() => {}); }
+if (PHONE_APP) document.addEventListener("visibilitychange", async () => {
+  if (document.hidden) {
+    if (!pl.open) return;
+    if (ANDROID && pl.miniOk && await call("player_mini_state").then((st) => !!st?.on, () => false)) return;
+    if (!document.hidden || !pl.open || pl.bgVideo) return;
+    pl.bgVideo = true;
+    call("player_background", { hidden: true }).catch(() => {});
+  }
   else {
     if (pl.mini && !ANDROID && pl.miniAuto) setMini(false);
     if (pl.bgVideo) { pl.bgVideo = false; call("player_background", { hidden: false }).catch(() => {}); }
