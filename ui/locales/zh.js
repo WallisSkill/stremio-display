@@ -82,6 +82,7 @@ export default {
   "cast.short": "投屏",
   "cast.title": "投屏到屏幕",
   "cast.hint": "选择用同一账号打开 WiS TV 的电视或电脑。",
+  "cast.none": "尚未找到电视或电脑。请在登录同一账户的电视或电脑上打开 WiS TV，稍等几秒。",
   "cast.on": "正在投屏到 {name}",
   "cast.stop": "停止投屏",
   "cast.hide": "隐藏",

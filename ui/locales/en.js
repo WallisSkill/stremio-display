@@ -82,6 +82,7 @@ export default {
   "cast.short": "Cast",
   "cast.title": "Cast to a screen",
   "cast.hint": "Pick a TV or computer that has WiS TV open with the same account.",
+  "cast.none": "No TV or computer found yet. Open WiS TV on a TV or computer signed in to the same account and wait a few seconds.",
   "cast.on": "Casting to {name}",
   "cast.stop": "Stop casting",
   "cast.hide": "Hide",

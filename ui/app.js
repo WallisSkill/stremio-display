@@ -3597,7 +3597,7 @@ const CAST_SCREEN = !!TAURI && !TOUCH;
 const CAST_REMOTE = TOUCH;
 const CAST_BEAT_MS = 5000;
 const CAST_PING_MS = 30000;
-const cast = { ws: null, role: null, tries: 0, ticketFails: 0, timer: 0, beat: 0, ping: 0, screens: [], target: null, targetName: "", state: null, at: 0, from: null, sig: "", last: null, sentAt: 0, panel: null, chip: null };
+const cast = { ws: null, role: null, tries: 0, ticketFails: 0, timer: 0, beat: 0, ping: 0, screens: [], target: null, targetName: "", state: null, at: 0, from: null, sig: "", last: null, sentAt: 0, panel: null, chip: null, pick: null };
 
 function castStore(key, value) {
   try {
@@ -3783,22 +3783,38 @@ function castReport(force) {
   castSend({ t: "state", state: st });
 }
 
+function castOk() {
+  return CAST_REMOTE && pl.open && !!pl.ctx && !String(pl.ctx.vid).startsWith("local:");
+}
+
 function castable() {
-  return CAST_REMOTE && pl.open && !!pl.ctx && !String(pl.ctx.vid).startsWith("local:") && cast.screens.length > 0;
+  return castOk() && cast.screens.length > 0;
+}
+
+function castPickList() {
+  if (!cast.pick?.isConnected) { cast.pick = null; return; }
+  const sig = JSON.stringify(cast.screens.map((s) => [s.id, s.name, s.state?.title]));
+  if (cast.pick._sig === sig) return;
+  cast.pick._sig = sig;
+  const list = cast.pick.querySelector(".cast-list");
+  const had = list.contains(document.activeElement);
+  put(list, ...(cast.screens.length ? cast.screens.map((s) => h("button", { class: "cast-screen focusable", onclick: () => { cast.pick?.remove(); castTo(s); } },
+    h("span", { class: "cast-ico", html: ICON.tv }),
+    h("span", { class: "cast-name" }, s.name || tr("cast.tv"), s.state?.title ? h("small", {}, tr("cast.playing", { title: s.state.title })) : null)))
+    : [h("p", { class: "cast-none" }, tr("cast.none"))]));
+  if (had || !cast.pick.contains(document.activeElement)) ($(".cast-screen", list) || $(".btn", cast.pick))?.focus({ preventScroll: true });
 }
 
 function castPick() {
-  if (!castable()) return;
+  if (!castOk()) return;
   const box = layer("edit cast-layer", () => box.remove());
-  const list = cast.screens.map((s) => h("button", { class: "cast-screen focusable", onclick: () => { box.remove(); castTo(s); } },
-    h("span", { class: "cast-ico", html: ICON.tv }),
-    h("span", { class: "cast-name" }, s.name || tr("cast.tv"), s.state?.title ? h("small", {}, tr("cast.playing", { title: s.state.title })) : null)));
+  cast.pick = box;
   put(box, h("div", { class: "room-card cast-card" },
     h("h2", {}, tr("cast.title")),
     h("p", { class: "hint" }, tr("cast.hint")),
-    h("div", { class: "cast-list" }, ...list),
+    h("div", { class: "cast-list" }),
     h("div", { class: "pf-row end" }, h("button", { class: "btn focusable", onclick: () => box.remove() }, tr("common.cancel")))));
-  $(".cast-screen", box)?.focus({ preventScroll: true });
+  castPickList();
 }
 
 function castTo(s) {
@@ -3892,7 +3908,8 @@ function paintCastPanel() {
 }
 
 function paintCast() {
-  if (pl.ui?.cast) pl.ui.cast.hidden = !castable();
+  if (pl.ui?.cast) pl.ui.cast.hidden = !castOk();
+  castPickList();
   if (pl.ui?.actions && TOUCH) fitActions();
   paintCastPanel();
   const want = !!cast.target && !cast.panel && !pl.open;
