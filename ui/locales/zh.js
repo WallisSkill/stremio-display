@@ -244,6 +244,8 @@ export default {
   "pl.fwd10": "前进 10 秒（→）",
   "pl.src": "片源",
   "pl.next": "下一集",
+  "pl.skipIntro": "跳过片头",
+  "pl.skipRecap": "跳过前情提要",
   "pl.fitShort": "适应",
   "pl.fillShort": "铺满",
   "pl.unlock": "解锁",

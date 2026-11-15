@@ -234,6 +234,11 @@ pub async fn cast_token(st: State<'_, AppState>) -> R<Value> {
 }
 
 #[tauri::command]
+pub async fn intro_times(st: State<'_, AppState>, imdb: String, season: Option<u32>, episode: Option<u32>) -> R<Value> {
+    api::intro_times(&st.http, imdb.trim(), season.zip(episode)).await
+}
+
+#[tauri::command]
 pub async fn prefs_get(st: State<'_, AppState>) -> R<Value> {
     let Some(key) = st.auth_key() else {
         return Ok(Value::Null);

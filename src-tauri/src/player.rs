@@ -422,6 +422,19 @@ struct Live {
     generation: u64,
 }
 
+static INTERRUPTED: AtomicBool = AtomicBool::new(false);
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub fn interrupt() {
+    INTERRUPTED.store(true, Ordering::SeqCst);
+}
+
+#[cfg(target_os = "ios")]
+#[no_mangle]
+pub extern "C" fn wistv_audio_interrupted() {
+    interrupt();
+}
+
 pub struct Player {
     live: Arc<Mutex<Option<Live>>>,
     generation: AtomicU64,
@@ -546,6 +559,7 @@ impl Player {
         done: impl FnOnce(Outcome) + Send + 'static,
     ) -> Result<(), String> {
         self.stop();
+        INTERRUPTED.store(false, Ordering::SeqCst);
         let old = self.ended.lock().unwrap().take();
         if let Some(old) = old {
             let _ = old.recv_timeout(OLD_PLAYER_WAIT);
@@ -666,6 +680,18 @@ unsafe fn tracks(lib: &Mpv, ctx: Handle) -> Vec<Value> {
         .collect()
 }
 
+unsafe fn chapters(lib: &Mpv, ctx: Handle) -> Vec<Value> {
+    let n = lib.prop(ctx, "chapter-list/count").and_then(|s| s.parse::<usize>().ok()).unwrap_or(0);
+    (0..n.min(200))
+        .map(|i| {
+            json!({
+                "title": lib.prop(ctx, &format!("chapter-list/{i}/title")),
+                "time": lib.prop_f64(ctx, &format!("chapter-list/{i}/time")),
+            })
+        })
+        .collect()
+}
+
 #[cfg(target_os = "android")]
 unsafe fn follow_surface(lib: &Mpv, ctx: Handle, seen: &mut (u64, i64)) {
     let (generation, current) = crate::android::state();
@@ -699,12 +725,16 @@ unsafe fn run(lib: &Mpv, ctx: Handle, start_ms: u64, wid: i64, crop_on: &AtomicB
     let mut ended = false;
     let mut last_emit = Instant::now() - Duration::from_secs(1);
     let mut last_tracks = String::new();
+    let mut last_chapters = String::new();
     let mut loaded = false;
     #[cfg(target_os = "android")]
     let mut surface = (u64::MAX, wid);
     let mut crop = crate::autocrop::AutoCrop::new();
     loop {
         let ev = (lib.wait_event)(ctx, 0.2);
+        if INTERRUPTED.swap(false, Ordering::SeqCst) {
+            lib.set_property(ctx, "pause", "yes");
+        }
         #[cfg(windows)]
         win::video_below_ui(wid as isize);
         #[cfg(target_os = "android")]
@@ -780,6 +810,11 @@ unsafe fn run(lib: &Mpv, ctx: Handle, start_ms: u64, wid: i64, crop_on: &AtomicB
             if sig != last_tracks {
                 last_tracks = sig;
                 s["tracks"] = Value::Array(tracks(lib, ctx));
+            }
+            let marks = format!("{}|{}", lib.prop(ctx, "chapter-list/count").unwrap_or_default(), loaded);
+            if marks != last_chapters {
+                last_chapters = marks;
+                s["chapters"] = Value::Array(chapters(lib, ctx));
             }
             state(s);
         }

@@ -112,6 +112,9 @@ struct OpenArgs: Decodable {
     let url: String
 }
 
+@_silgen_name("wistv_audio_interrupted")
+func wistvAudioInterrupted()
+
 final class VideoPlugin: Plugin {
     private let video = VideoView(frame: .zero)
     private var pointer = 0
@@ -134,6 +137,15 @@ final class VideoPlugin: Plugin {
         try? AVAudioSession.sharedInstance().setActive(true)
         NotificationCenter.default.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
             self?.restoreBrightness()
+        }
+        NotificationCenter.default.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { note in
+            guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+                  let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+            if type == .began {
+                wistvAudioInterrupted()
+            } else {
+                try? AVAudioSession.sharedInstance().setActive(true)
+            }
         }
         place(webview, tries: 0)
     }

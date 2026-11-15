@@ -9,6 +9,9 @@ import android.os.BatteryManager
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.graphics.Color
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.net.Uri
 import android.provider.Settings
 import android.view.Surface
@@ -32,6 +35,7 @@ import app.tauri.plugin.Plugin
 
 class Native {
     external fun surface(surface: Surface?, width: Int, height: Int)
+    external fun interrupted()
 }
 
 @InvokeArg
@@ -53,6 +57,27 @@ class OpenArgs {
 class VideoPlugin(private val activity: Activity) : Plugin(activity), SurfaceHolder.Callback {
     private val native = Native()
     private var video: SurfaceView? = null
+    private val audio: AudioManager? by lazy { activity.getSystemService(Context.AUDIO_SERVICE) as? AudioManager }
+    private val focus: AudioFocusRequest by lazy {
+        AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE)
+                    .build()
+            )
+            .setOnAudioFocusChangeListener { change ->
+                if (change == AudioManager.AUDIOFOCUS_LOSS || change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
+                    native.interrupted()
+                }
+            }
+            .build()
+    }
+
+    private fun holdAudio(on: Boolean) {
+        val manager = audio ?: return
+        if (on) manager.requestAudioFocus(focus) else manager.abandonAudioFocusRequest(focus)
+    }
 
     private val television: Boolean
         get() = (activity.getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager)?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
@@ -133,6 +158,7 @@ class VideoPlugin(private val activity: Activity) : Plugin(activity), SurfaceHol
             } else {
                 activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             }
+            holdAudio(args.on)
         }
         invoke.resolve()
     }

@@ -244,6 +244,8 @@ export default {
   "pl.fwd10": "Tới 10 giây (→)",
   "pl.src": "Nguồn",
   "pl.next": "Tập tiếp",
+  "pl.skipIntro": "Bỏ qua giới thiệu",
+  "pl.skipRecap": "Bỏ qua tóm tắt",
   "pl.fitShort": "Vừa hình",
   "pl.fillShort": "Dãn hình",
   "pl.unlock": "Mở khoá",

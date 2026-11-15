@@ -55,6 +55,7 @@ pub fn run() {
             commands::prefs_set,
             commands::room_create,
             commands::cast_token,
+            commands::intro_times,
             commands::play,
             commands::player_command,
             commands::player_set,

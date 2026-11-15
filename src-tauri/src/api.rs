@@ -5,6 +5,7 @@ const API: &str = "https://api.strem.io/api/";
 const PROFILE_API: &str = "https://film.wis237.online/api/profile/";
 const ROOM_API: &str = "https://film.wis237.online/api/room/";
 const CAST_API: &str = "https://film.wis237.online/api/cast/";
+const INTRO_API: &str = "https://api.introdb.app/segments";
 pub const MAIN_PROFILE: &str = "main";
 
 #[derive(Clone, Default)]
@@ -82,6 +83,25 @@ pub async fn prefs_set(http: &reqwest::Client, auth_key: &str, profile: &Profile
 
 pub async fn room_create(http: &reqwest::Client, auth_key: &str) -> Result<Value, String> {
     call_at(http, ROOM_API, "who.rooms", "create", json!({ "authKey": auth_key })).await
+}
+
+pub async fn intro_times(http: &reqwest::Client, imdb: &str, episode: Option<(u32, u32)>) -> Result<Value, String> {
+    let ok = imdb.len() <= 12 && imdb.strip_prefix("tt").is_some_and(|n| n.len() >= 5 && n.bytes().all(|b| b.is_ascii_digit()));
+    if !ok {
+        return Ok(Value::Null);
+    }
+    let url = match episode {
+        Some((s, e)) => format!("{INTRO_API}?imdb_id={imdb}&season={s}&episode={e}"),
+        None => format!("{INTRO_API}?imdb_id={imdb}"),
+    };
+    let resp = http.get(url).timeout(std::time::Duration::from_secs(8)).send().await.map_err(|e| e.to_string())?;
+    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(Value::Null);
+    }
+    if !resp.status().is_success() {
+        return Err(format!("IntroDB {}", resp.status()));
+    }
+    resp.json().await.map_err(|e| e.to_string())
 }
 
 pub async fn cast_token(http: &reqwest::Client, auth_key: &str) -> Result<Value, String> {

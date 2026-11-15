@@ -244,6 +244,8 @@ export default {
   "pl.fwd10": "Forward 10 seconds (→)",
   "pl.src": "Sources",
   "pl.next": "Next episode",
+  "pl.skipIntro": "Skip intro",
+  "pl.skipRecap": "Skip recap",
   "pl.fitShort": "Fit",
   "pl.fillShort": "Fill",
   "pl.unlock": "Unlock",

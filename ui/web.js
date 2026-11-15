@@ -897,6 +897,9 @@ export const web = {
     const key = needKey(tr("room.needLogin"));
     return workerApi(ROOM_API, tr("who.rooms"), "create", { authKey: key });
   },
+  async intro_times() {
+    return null;
+  },
   async cast_token() {
     const key = needKey(tr("room.needLogin"));
     return workerApi(CAST_API, tr("who.rooms"), "token", { authKey: key });

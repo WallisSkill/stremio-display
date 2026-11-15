@@ -21,6 +21,11 @@ static GENERATION: AtomicU64 = AtomicU64::new(0);
 static VM: AtomicUsize = AtomicUsize::new(0);
 
 #[no_mangle]
+pub extern "system" fn Java_tv_wis_video_Native_interrupted(_env: JNIEnv, _this: JObject) {
+    crate::player::interrupt();
+}
+
+#[no_mangle]
 pub extern "system" fn Java_tv_wis_video_Native_surface(
     env: JNIEnv,
     _this: JObject,

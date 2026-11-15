@@ -1197,6 +1197,7 @@ function buildPlayer() {
   ui.roomCount = h("span", { class: "room-count", hidden: true });
   ui.room.append(ui.roomCount);
   ui.nextUp = h("button", { class: "pl-nextup", tabindex: "-1", hidden: true, onclick: (e) => { e.stopPropagation(); playNext(false); } });
+  ui.skip = h("button", { class: "pl-nextup pl-skip", tabindex: "-1", hidden: true, onclick: (e) => { e.stopPropagation(); skipNow(); } });
   ui.speedVal = h("span", {}, "1×");
   ui.speed = h("button", { class: "pl-btn pl-speed", tabindex: "-1", title: tr("pl.speed"), onclick: (e) => { e.stopPropagation(); toggleMenu("speed"); } }, ...(TOUCH ? [h("span", { html: ICON.speed }), h("span", { class: "pl-label" }, tr("pl.speed") + " (", ui.speedVal, ")")] : [ui.speedVal]));
   ui.fs = iconBtn("full", tr("pl.fullscreen"), toggleFullscreen);
@@ -1230,9 +1231,7 @@ function buildPlayer() {
     ui.lockRoom = h("button", { class: "pl-unlock pl-lockroom", tabindex: "-1", "aria-label": tr("nav.together"), onclick: (e) => { e.stopPropagation(); showUnlock(); roomMenu(); } }, h("span", { html: ICON.people }), h("span", {}, tr("nav.togetherShort")), ui.lockRoomCount);
     ui.lockbar = h("div", { class: "pl-lockbar" }, ui.lockRoom, ui.unlock);
     ui.play.classList.add("huge");
-    back10.classList.add("big");
-    fwd10.classList.add("big");
-    center = h("div", { class: "pl-center" }, back10, ui.play, fwd10);
+    center = h("div", { class: "pl-center" }, ui.play);
     ui.actions = h("div", { class: "pl-actions" }, ui.stretch, ui.speed, ui.cast, ui.room, ui.eps, ui.src, ui.cc, ui.next);
     bottom = h("div", { class: "pl-bottom" }, seekRow, ui.actions);
     window.addEventListener("resize", () => { ui.fitSig = ""; fitActions(); });
@@ -1252,7 +1251,7 @@ function buildPlayer() {
   ui.levelFill = h("i");
   ui.levelText = h("b");
   ui.level = h("div", { class: "pl-level", hidden: true }, ui.levelIcon, h("div", { class: "pl-level-bar" }, ui.levelFill), ui.levelText);
-  ui.root = h("div", { id: "player", class: TOUCH ? "touch" : "", hidden: true }, ui.bg, ui.dim, ui.hit, ui.ripple.left, ui.ripple.right, ui.level, h("div", { class: "pl-shade" }), ui.spin, ui.flash, ui.fast, top, ...(center ? [center] : []), bottom, ui.nextUp, ui.menu, ...(ui.lockbar ? [ui.lockbar] : []));
+  ui.root = h("div", { id: "player", class: TOUCH ? "touch" : "", hidden: true }, ui.bg, ui.dim, ui.hit, ui.ripple.left, ui.ripple.right, ui.level, h("div", { class: "pl-shade" }), ui.spin, ui.flash, ui.fast, top, ...(center ? [center] : []), bottom, ui.nextUp, ui.skip, ui.menu, ...(ui.lockbar ? [ui.lockbar] : []));
   let lastTap = 0;
   let tapTimer = null;
   let swipe = null;
@@ -1974,7 +1973,15 @@ function paintState() {
   ui.eps.hidden = guest || !((pl.ctx?.m?.videos || []).length > 1);
   ui.speed.hidden = guest;
   const left = (s.duration || 0) - (s.time || 0);
-  const showUp = !!nx && s.loaded && s.duration > 300 && left > 0 && left <= 90;
+  const seg = s.loaded && !guest ? skipSegment() : null;
+  const showUp = !!nx && s.loaded && s.duration > 300 && left > 0 && (left <= 90 || seg?.kind === "outro");
+  const skip = seg && seg.kind !== "outro" ? seg : null;
+  const skipKey = skip ? `${skip.kind}|${skip.start}` : "";
+  if (skipKey !== ui.skip.dataset.seg) {
+    ui.skip.dataset.seg = skipKey;
+    ui.skip.innerHTML = skip ? `${ICON.next}<span>${tr(skip.kind === "recap" ? "pl.skipRecap" : "pl.skipIntro")}</span>` : "";
+  }
+  ui.skip.hidden = !skip || showUp;
   if (showUp && ui.nextUp.hidden) ui.nextUp.innerHTML = `${ICON.next}<span>${tr("pl.next")} · ${epShort(nx)}</span>`;
   ui.nextUp.hidden = !showUp;
   ui.root.classList.toggle("paused", !!s.paused);
@@ -1998,6 +2005,7 @@ function fitActions() {
 function onPlayerState(s) {
   if (!pl.open || s.session !== pl.session) return;
   if (s.tracks) pl.tracks = s.tracks;
+  if (s.chapters) pl.chapters = s.chapters;
   const wasLoaded = pl.s.loaded;
   pl.s = { ...pl.s, ...s };
   if (Date.now() < pl.seekUntil && Math.abs((s.time || 0) - pl.seekTarget) < 1.5 && !s.buffering) pl.seekUntil = 0;
@@ -2077,6 +2085,67 @@ function srcTimeText(vid, stream, addon) {
   const len = tr("src.length", { time: secs(v.d) });
   if (v.p >= v.d - Math.max(30, v.d * 0.04)) return `${len} · ${tr("src.watchedAll")}`;
   return v.p >= 20 ? `${len} · ${tr("src.watched", { time: secs(v.p) })}` : len;
+}
+
+const INTRO_MARKS = [
+  ["recap", /^(recap|previously|last time|tóm tắt|前情)/i],
+  ["intro", /^(intro|opening|op(\s*\d+)?$|title sequence|theme song|main title|mở đầu|片头)/i],
+  ["outro", /^(credits|end credits|ending|ed(\s*\d+)?$|outro|closing|nhạc kết|kết thúc|片尾)/i],
+];
+const introCache = new Map();
+
+function introLookup(c) {
+  pl.intro = null;
+  const m = /^(tt\d{5,10})(?::(\d+):(\d+))?$/.exec(String(c?.vid || ""));
+  if (!m) return;
+  const key = m[0];
+  if (introCache.has(key)) { pl.intro = introCache.get(key); return; }
+  const session = () => pl.ctx === c;
+  const args = m[2] ? { imdb: m[1], season: +m[2], episode: +m[3] } : { imdb: m[1] };
+  call("intro_times", args).then((v) => {
+    const r = v && typeof v === "object" ? v : null;
+    introCache.set(key, r);
+    if (session()) { pl.intro = r; paintState(); }
+  }, () => {});
+}
+
+function introSegments() {
+  const d = pl.s.duration || 0;
+  const out = [];
+  const ch = (pl.chapters || []).filter((c) => Number.isFinite(c.time)).sort((a, b) => a.time - b.time);
+  ch.forEach((c, i) => {
+    const kind = INTRO_MARKS.find(([, re]) => re.test(String(c.title || "").trim()))?.[0];
+    const end = i + 1 < ch.length ? ch[i + 1].time : d;
+    if (kind && end > c.time) out.push({ kind, start: c.time, end, from: "file" });
+  });
+  const db = pl.intro;
+  if (db) for (const kind of ["recap", "intro", "outro"]) {
+    const s = db[kind];
+    if (!s || out.some((o) => o.kind === kind)) continue;
+    const start = Number(s.start_ms) / 1000;
+    const end = Number(s.end_ms) / 1000;
+    if (Number.isFinite(start) && Number.isFinite(end) && end > start) out.push({ kind, start, end, from: "db" });
+  }
+  return out.filter((o) => {
+    const len = o.end - o.start;
+    if (len < 5) return false;
+    if (o.kind === "outro") return !d || o.start < d;
+    return len <= 600 && (!d || o.end < d - 5);
+  });
+}
+
+function skipSegment() {
+  const t = curTime();
+  return introSegments().find((o) => t >= o.start && t < o.end - 1 && !pl.skipped.has(`${o.kind}|${o.start}`)) || null;
+}
+
+function skipNow() {
+  const seg = skipSegment();
+  if (!seg || seg.kind === "outro") return;
+  pl.skipped.add(`${seg.kind}|${seg.start}`);
+  seekTo(seg.end);
+  paintState();
+  wake();
 }
 
 function nextEpisode() {
@@ -2414,6 +2483,9 @@ function openPlayer(c) {
   setTimeout(paintCast, 0);
   pl.s = { loaded: false, volume: pl.s.volume ?? 100 };
   pl.tracks = [];
+  pl.chapters = [];
+  pl.skipped = new Set();
+  introLookup(c);
   pl.subs = null;
   pl.subsJob = null;
   pl.added = new Set();
