@@ -130,6 +130,9 @@ func wistvPipPlay(_ on: Bool)
 @_silgen_name("wistv_pip_skip")
 func wistvPipSkip(_ seconds: Double)
 
+@_silgen_name("wistv_pip_auto")
+func wistvPipAuto()
+
 final class PipView: UIView {
     override class var layerClass: AnyClass { AVSampleBufferDisplayLayer.self }
 }
@@ -177,6 +180,36 @@ final class PipFrames {
         return CVPixelBufferGetBaseAddress(buffer)
     }
 
+    func placeholder() {
+        let attrs: [String: Any] = [kCVPixelBufferIOSurfacePropertiesKey as String: [String: Any]()]
+        var made: CVPixelBuffer?
+        guard CVPixelBufferCreate(nil, 16, 9, kCVPixelFormatType_32BGRA, attrs as CFDictionary, &made) == kCVReturnSuccess, let buffer = made else { return }
+        CVPixelBufferLockBaseAddress(buffer, [])
+        if let base = CVPixelBufferGetBaseAddress(buffer) {
+            memset(base, 0, CVPixelBufferGetDataSize(buffer))
+        }
+        CVPixelBufferUnlockBaseAddress(buffer, [])
+        var described: CMVideoFormatDescription?
+        CMVideoFormatDescriptionCreateForImageBuffer(allocator: nil, imageBuffer: buffer, formatDescriptionOut: &described)
+        guard let described else { return }
+        var timing = CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: CMClockGetTime(CMClockGetHostTimeClock()), decodeTimeStamp: .invalid)
+        var sample: CMSampleBuffer?
+        CMSampleBufferCreateReadyWithImageBuffer(allocator: nil, imageBuffer: buffer, formatDescription: described, sampleTiming: &timing, sampleBufferOut: &sample)
+        guard let sample else { return }
+        show(sample)
+    }
+
+    private func show(_ sample: CMSampleBuffer) {
+        if let list = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: true), CFArrayGetCount(list) > 0 {
+            let dict = unsafeBitCast(CFArrayGetValueAtIndex(list, 0), to: CFMutableDictionary.self)
+            CFDictionarySetValue(dict, Unmanaged.passUnretained(kCMSampleAttachmentKey_DisplayImmediately).toOpaque(), Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
+        }
+        if display.status == .failed {
+            display.flush()
+        }
+        display.enqueue(sample)
+    }
+
     func end(_ ok: Bool) {
         guard let buffer = current else { return }
         current = nil
@@ -190,14 +223,7 @@ final class PipFrames {
         var sample: CMSampleBuffer?
         CMSampleBufferCreateReadyWithImageBuffer(allocator: nil, imageBuffer: buffer, formatDescription: format, sampleTiming: &timing, sampleBufferOut: &sample)
         guard let sample else { return }
-        if let list = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: true), CFArrayGetCount(list) > 0 {
-            let dict = unsafeBitCast(CFArrayGetValueAtIndex(list, 0), to: CFMutableDictionary.self)
-            CFDictionarySetValue(dict, Unmanaged.passUnretained(kCMSampleAttachmentKey_DisplayImmediately).toOpaque(), Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
-        }
-        if display.status == .failed {
-            display.flush()
-        }
-        display.enqueue(sample)
+        show(sample)
     }
 }
 
@@ -205,16 +231,34 @@ final class PipControl: NSObject, AVPictureInPictureControllerDelegate, AVPictur
     static let shared = PipControl()
     private var controller: AVPictureInPictureController?
     private var restored = false
+    private var armed = false
+
+    private func make() {
+        guard controller == nil else { return }
+        let source = AVPictureInPictureController.ContentSource(sampleBufferDisplayLayer: PipFrames.shared.display, playbackDelegate: self)
+        let made = AVPictureInPictureController(contentSource: source)
+        made.delegate = self
+        made.requiresLinearPlayback = false
+        controller = made
+    }
 
     func start() {
-        if controller == nil {
-            let source = AVPictureInPictureController.ContentSource(sampleBufferDisplayLayer: PipFrames.shared.display, playbackDelegate: self)
-            let made = AVPictureInPictureController(contentSource: source)
-            made.delegate = self
-            made.requiresLinearPlayback = false
-            controller = made
-        }
+        make()
         attempt(0)
+    }
+
+    func arm(_ on: Bool) {
+        armed = on
+        guard AVPictureInPictureController.isPictureInPictureSupported() else { return }
+        if on {
+            make()
+            if controller?.isPictureInPictureActive != true {
+                PipFrames.shared.paused = false
+                PipFrames.shared.placeholder()
+            }
+            refresh()
+        }
+        controller?.canStartPictureInPictureAutomaticallyFromInline = on
     }
 
     private func attempt(_ tries: Int) {
@@ -234,6 +278,7 @@ final class PipControl: NSObject, AVPictureInPictureControllerDelegate, AVPictur
     }
 
     func stop() {
+        restored = true
         controller?.stopPictureInPicture()
     }
 
@@ -243,6 +288,7 @@ final class PipControl: NSObject, AVPictureInPictureControllerDelegate, AVPictur
 
     func pictureInPictureControllerWillStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
         restored = false
+        DispatchQueue.global(qos: .userInitiated).async { wistvPipAuto() }
     }
 
     func pictureInPictureControllerDidStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
@@ -261,6 +307,9 @@ final class PipControl: NSObject, AVPictureInPictureControllerDelegate, AVPictur
     func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
         let back = restored
         PipFrames.shared.display.flushAndRemoveImage()
+        if armed {
+            PipFrames.shared.placeholder()
+        }
         DispatchQueue.global(qos: .userInitiated).async { wistvPipStopped(back) }
     }
 
@@ -428,6 +477,7 @@ final class VideoPlugin: Plugin {
         let args = try invoke.parseArgs(AwakeArgs.self)
         DispatchQueue.main.async {
             UIApplication.shared.isIdleTimerDisabled = args.on
+            PipControl.shared.arm(args.on)
             invoke.resolve()
         }
     }

@@ -836,6 +836,8 @@ body.mini #player .pl-minibar .pl-btn.big svg { width: 26px; height: 26px; }
 body.mini #player .pl-spin span { font-size: 12px; }
 body.mini #room-pill, body.mini #room-feed { display: none !important; }
 body.pip #player > :not(.pl-loading-bg) { display: none !important; }
+body.pip-dark #player { background: #000; }
+body.pip-dark #player > .pl-loading-bg { display: none !important; }
 body.pip .toast, body.pip #room-pill, body.pip #room-feed, body.pip .room-float, body.pip .layer { display: none !important; }
 #player .pl-top > .pl-sub { max-width: 40vw; margin: 0; font-size: 15px; font-weight: 600; color: rgba(255,255,255,0.88); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 2px 12px rgba(0,0,0,0.6); }
 #player.touch .pl-top .pl-status .pl-btn { margin-left: 0; }

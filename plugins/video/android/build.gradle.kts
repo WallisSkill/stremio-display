@@ -29,6 +29,7 @@ kotlin {
 dependencies {
     implementation("androidx.core:core-ktx:1.9.0")
     implementation("androidx.appcompat:appcompat:1.6.0")
+    implementation("androidx.activity:activity:1.9.3")
     implementation("dev.jdtech.mpv:libmpv:1.0.0")
     implementation(project(":tauri-android"))
 }

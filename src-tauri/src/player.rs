@@ -560,6 +560,24 @@ impl Player {
     }
 
     #[cfg(target_os = "ios")]
+    pub fn mini_auto(&self, app: &tauri::AppHandle) {
+        if pip::active() {
+            return;
+        }
+        let Ok(lib) = mpv() else { return };
+        let ok = {
+            let live = self.live.lock().unwrap();
+            live.as_ref().is_some_and(|live| pip::begin(app, lib, live.ctx).is_ok())
+        };
+        if ok {
+            use tauri::Emitter;
+            let _ = app.emit("player-mini", json!({ "on": true }));
+        } else {
+            unsafe { pip::wistv_pip_close() };
+        }
+    }
+
+    #[cfg(target_os = "ios")]
     pub fn background(&self, hidden: bool) -> Result<(), String> {
         self.hidden.store(hidden, Ordering::SeqCst);
         pip::set_hidden(hidden);
@@ -568,6 +586,10 @@ impl Player {
         }
         let vo = PLATFORM_OPTIONS.iter().find(|(k, _)| *k == "vo").map_or("gpu-next", |(_, v)| *v);
         self.with(|m, ctx| unsafe {
+            let _gate = pip::GATE.lock().unwrap_or_else(|e| e.into_inner());
+            if pip::active() {
+                return 0;
+            }
             if hidden {
                 m.set_property(ctx, "vid", "no");
                 m.set_property(ctx, "vo", "null")
@@ -890,6 +912,18 @@ pub fn pip_active() -> bool {
 }
 
 #[cfg(target_os = "ios")]
+pub fn pip_paused(paused: bool) {
+    if !pip::active() {
+        unsafe { pip::wistv_pip_paused(paused) };
+    }
+}
+
+#[cfg(target_os = "ios")]
+pub fn pip_remember(app: &tauri::AppHandle) {
+    pip::remember(app);
+}
+
+#[cfg(target_os = "ios")]
 mod pip {
     use super::{mpv, Handle, Mpv, PLATFORM_OPTIONS};
     use serde_json::json;
@@ -924,7 +958,7 @@ mod pip {
         pub fn wistv_pip_supported() -> bool;
         pub fn wistv_pip_start();
         pub fn wistv_pip_close();
-        fn wistv_pip_paused(paused: bool);
+        pub fn wistv_pip_paused(paused: bool);
         fn wistv_pip_frame_begin(width: i32, height: i32, stride: *mut usize) -> *mut c_void;
         fn wistv_pip_frame_end(ok: bool);
     }
@@ -943,6 +977,11 @@ mod pip {
     static WAKE_CV: Condvar = Condvar::new();
     static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
     pub static STARTED: Mutex<Option<std::sync::mpsc::Sender<bool>>> = Mutex::new(None);
+    pub static GATE: Mutex<()> = Mutex::new(());
+
+    pub fn remember(app: &tauri::AppHandle) {
+        let _ = APP.set(app.clone());
+    }
 
     fn default_of(key: &str, fallback: &'static str) -> &'static str {
         PLATFORM_OPTIONS.iter().find(|(k, _)| *k == key).map_or(fallback, |(_, v)| *v)
@@ -965,6 +1004,7 @@ mod pip {
 
     pub fn begin(app: &tauri::AppHandle, lib: &'static Mpv, ctx: usize) -> Result<(), String> {
         let _ = APP.set(app.clone());
+        let _gate = GATE.lock().unwrap_or_else(|e| e.into_inner());
         let mut slot = PIP.lock().map_err(|e| e.to_string())?;
         if slot.is_some() {
             return Ok(());
@@ -1125,6 +1165,16 @@ mod pip {
         if let Some(tx) = STARTED.lock().ok().and_then(|mut s| s.take()) {
             let _ = tx.send(ok);
         }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn wistv_pip_auto() {
+        let Some(app) = APP.get() else {
+            unsafe { wistv_pip_close() };
+            return;
+        };
+        use tauri::Manager;
+        app.state::<crate::state::AppState>().player.mini_auto(app);
     }
 
     #[no_mangle]

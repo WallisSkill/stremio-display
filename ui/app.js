@@ -1213,7 +1213,7 @@ function buildPlayer() {
   ui.miniBar.addEventListener("mousedown", (e) => { if (e.button === 0 && !e.target.closest("button")) call("window_drag").catch(() => {}); });
   ui.miniBar.addEventListener("dblclick", (e) => { e.stopPropagation(); if (!e.target.closest("button")) setMini(false); });
   ui.miniBar.addEventListener("click", (e) => e.stopPropagation());
-  call("player_mini_state").then((st) => { pl.miniOk = !!st?.ok; ui.mini.hidden = !pl.miniOk; ui.fitSig = ""; fitActions(); }).catch(() => {});
+  call("player_mini_state").then((st) => { pl.miniOk = !!st?.ok; pl.miniAuto = pl.miniOk && !!st?.auto; ui.mini.hidden = !pl.miniOk || (pl.miniAuto && PHONE_APP && !TV_APP); ui.fitSig = ""; fitActions(); }).catch(() => {});
   if (MINI_CLASS === "pip") window.addEventListener("resize", () => { if (pl.miniOk) call("player_mini_state").then((st) => { if (!!st?.on !== !!pl.mini) applyMini(!!st?.on); }).catch(() => {}); });
   ui.menu = h("div", { class: "pl-menu", hidden: true });
   ui.menu.addEventListener("pointerdown", (e) => e.stopPropagation());
@@ -1951,6 +1951,7 @@ async function setMini(on) {
 function applyMini(on) {
   pl.mini = on;
   if (MINI_CLASS) document.body.classList.toggle(MINI_CLASS, on);
+  if (PHONE_APP && !ANDROID && pl.miniAuto) { document.body.classList.toggle("pip", on); document.body.classList.toggle("pip-dark", on); }
   if (on && pl.menu) toggleMenu(null);
   if (pl.open) wake();
 }
@@ -2049,7 +2050,7 @@ function onPlayerState(s) {
   }
   if (pl.reveal && frameShown()) revealVideo();
   srcTimeSave(false);
-  if (MINI_CLASS === "pip" && pl.miniOk && s.paused != null && !!s.paused !== !!pl.pipPaused) {
+  if ((MINI_CLASS === "pip" || pl.miniAuto) && pl.miniOk && s.paused != null && !!s.paused !== pl.pipPaused) {
     pl.pipPaused = !!s.paused;
     call("player_mini_sync", { paused: pl.pipPaused }).catch(() => {});
   }
@@ -2536,6 +2537,7 @@ function openPlayer(c) {
   else srcTimeSave(true);
   clearTimeout(pl.revealTimer);
   pl.open = true;
+  pl.pipPaused = null;
   navSync();
   pl.ctx = c;
   setTimeout(paintCast, 0);
@@ -5302,7 +5304,10 @@ if (TAURI) document.addEventListener("visibilitychange", async () => {
 
 if (PHONE_APP) document.addEventListener("visibilitychange", () => {
   if (document.hidden) { if (!pl.open) return; pl.bgVideo = true; call("player_background", { hidden: true }).catch(() => {}); }
-  else if (pl.bgVideo) { pl.bgVideo = false; call("player_background", { hidden: false }).catch(() => {}); }
+  else {
+    if (pl.mini && !ANDROID && pl.miniAuto) setMini(false);
+    if (pl.bgVideo) { pl.bgVideo = false; call("player_background", { hidden: false }).catch(() => {}); }
+  }
 });
 
 if (TAURI) listen("update-state", (e) => { if (e.payload?.version) toast(tr("app.updating", { v: e.payload.version })); });

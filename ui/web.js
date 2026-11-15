@@ -363,6 +363,7 @@ function ensureDom() {
   P.video = document.createElement("video");
   P.video.setAttribute("playsinline", "");
   P.video.setAttribute("webkit-playsinline", "");
+  P.video.setAttribute("autopictureinpicture", "");
   P.video.preload = "auto";
   P.subsEl = document.createElement("div");
   P.subsEl.id = "wv-subs";

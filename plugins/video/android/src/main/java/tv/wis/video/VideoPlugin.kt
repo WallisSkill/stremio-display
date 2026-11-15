@@ -156,6 +156,7 @@ class VideoPlugin(private val activity: Activity) : Plugin(activity), SurfaceHol
         val out = JSObject()
         out.put("ok", pipOk)
         out.put("on", activity.isInPictureInPictureMode)
+        out.put("auto", pipOk)
         invoke.resolve(out)
     }
 
@@ -209,6 +210,15 @@ class VideoPlugin(private val activity: Activity) : Plugin(activity), SurfaceHol
         webView.setBackgroundColor(Color.TRANSPARENT)
         attach(webView, 0)
         val owner = activity as? ComponentActivity ?: return
+        owner.addOnUserLeaveHintListener {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S && pipAuto && pipOk && !activity.isInPictureInPictureMode) {
+                try {
+                    activity.enterPictureInPictureMode(pipParams())
+                } catch (e: Exception) {
+                    Log.w("WiSTV", "picture in picture on leave: ${e.message}")
+                }
+            }
+        }
         owner.onBackPressedDispatcher.addCallback(
             owner,
             object : OnBackPressedCallback(true) {

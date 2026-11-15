@@ -468,6 +468,8 @@ static HOLD_LANDSCAPE: std::sync::atomic::AtomicBool = std::sync::atomic::Atomic
 #[cfg(mobile)]
 fn keep_awake(app: &AppHandle, on: bool) {
     use tauri_plugin_wistv_video::VideoExt;
+    #[cfg(target_os = "ios")]
+    crate::player::pip_remember(app);
     let _ = app.video().awake(on);
     let _ = app.video().landscape(on);
 }
@@ -766,7 +768,8 @@ pub async fn player_mini(app: AppHandle, on: bool) -> R<bool> {
 #[cfg(target_os = "ios")]
 #[tauri::command]
 pub fn player_mini_state() -> R<Value> {
-    Ok(json!({ "ok": crate::player::pip_supported(), "on": crate::player::pip_active() }))
+    let ok = crate::player::pip_supported();
+    Ok(json!({ "ok": ok, "on": crate::player::pip_active(), "auto": ok }))
 }
 
 #[cfg(not(any(windows, target_os = "android", target_os = "ios")))]
@@ -782,7 +785,14 @@ pub fn player_mini_state() -> R<Value> {
     Ok(json!({ "ok": false, "on": false }))
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(target_os = "ios")]
+#[tauri::command]
+pub fn player_mini_sync(paused: bool) -> R<()> {
+    crate::player::pip_paused(paused);
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 pub fn player_mini_sync(paused: bool) -> R<()> {
     let _ = paused;
