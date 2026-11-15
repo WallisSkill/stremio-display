@@ -241,6 +241,8 @@ export default {
   "pl.sources": "片源（S）",
   "pl.speed": "倍速",
   "pl.seekSecs": "{n} 秒",
+  "pl.mini": "小窗播放 (I)",
+  "pl.miniBack": "恢复大窗口",
   "pl.fullscreen": "全屏（F）",
   "pl.fit": "保持比例（Z）",
   "pl.fill": "铺满屏幕（Z）",

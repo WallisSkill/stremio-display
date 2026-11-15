@@ -241,6 +241,8 @@ export default {
   "pl.sources": "Nguồn phát (S)",
   "pl.speed": "Tốc độ",
   "pl.seekSecs": "{n} giây",
+  "pl.mini": "Xem thu nhỏ (I)",
+  "pl.miniBack": "Phóng to lại",
   "pl.fullscreen": "Toàn màn hình (F)",
   "pl.fit": "Giữ đúng tỉ lệ (Z)",
   "pl.fill": "Dãn kín màn hình (Z)",

@@ -9,6 +9,7 @@ const TOUCH = window.matchMedia("(hover: none) and (pointer: coarse)").matches;
 const PHONE_APP = !!TAURI && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 const ANDROID = /Android/i.test(navigator.userAgent);
 const SEE_THROUGH = !!TAURI && /Windows/.test(navigator.userAgent);
+const MINI_CLASS = !TAURI ? null : ANDROID ? "pip" : "mini";
 const TV_APP = !!TAURI && ANDROID && !window.matchMedia("(any-pointer: coarse)").matches;
 if (TV_APP) document.documentElement.classList.add("tv");
 const listen = (name, fn) => (TAURI ? TAURI.event.listen(name, fn) : onWebEvent(name, fn));
@@ -87,6 +88,7 @@ const ICON = {
   unlock: '<svg viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="10" rx="2.2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8.5 10.5V7.8a3.5 3.5 0 0 1 6.8-1.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   fill: '<svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M7 10.5V9h2M17 13.5V15h-2M17 10.5V9h-2M7 13.5V15h2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   fit: '<svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><rect x="7.5" y="9.5" width="9" height="5" rx="1" fill="currentColor"/></svg>',
+  pip: '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><rect x="12" y="11.5" width="6.5" height="5" rx="1" fill="currentColor"/></svg>',
   full: '<svg viewBox="0 0 24 24"><path d="M4 9V5.5A1.5 1.5 0 0 1 5.5 4H9M15 4h3.5A1.5 1.5 0 0 1 20 5.5V9M20 15v3.5a1.5 1.5 0 0 1-1.5 1.5H15M9 20H5.5A1.5 1.5 0 0 1 4 18.5V15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   unfull: '<svg viewBox="0 0 24 24"><path d="M9 4v3.5A1.5 1.5 0 0 1 7.5 9H4M20 9h-3.5A1.5 1.5 0 0 1 15 7.5V4M15 20v-3.5a1.5 1.5 0 0 1 1.5-1.5H20M4 15h3.5A1.5 1.5 0 0 1 9 16.5V20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   up: '<svg viewBox="0 0 24 24"><path d="m6 15 6-6 6 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
@@ -1202,6 +1204,17 @@ function buildPlayer() {
   ui.speedVal = h("span", {}, "1×");
   ui.speed = h("button", { class: "pl-btn pl-speed", tabindex: "-1", title: tr("pl.speed"), onclick: (e) => { e.stopPropagation(); toggleMenu("speed"); } }, ...(TOUCH ? [h("span", { html: ICON.speed }), h("span", { class: "pl-label" }, tr("pl.speed") + " (", ui.speedVal, ")")] : [ui.speedVal]));
   ui.fs = iconBtn("full", tr("pl.fullscreen"), toggleFullscreen);
+  ui.mini = iconBtn("pip", tr("pl.mini"), () => setMini(!pl.mini), "mini-btn");
+  ui.mini.hidden = true;
+  ui.miniPlay = iconBtn("pause", tr("pl.pause"), togglePause, "big");
+  ui.miniBar = h("div", { class: "pl-minibar" },
+    h("div", { class: "pl-mini-top" }, iconBtn("full", tr("pl.miniBack"), () => setMini(false)), iconBtn("close", tr("common.close"), () => closePlayer())),
+    ui.miniPlay);
+  ui.miniBar.addEventListener("mousedown", (e) => { if (e.button === 0 && !e.target.closest("button")) call("window_drag").catch(() => {}); });
+  ui.miniBar.addEventListener("dblclick", (e) => { e.stopPropagation(); if (!e.target.closest("button")) setMini(false); });
+  ui.miniBar.addEventListener("click", (e) => e.stopPropagation());
+  call("player_mini_state").then((st) => { pl.miniOk = !!st?.ok; ui.mini.hidden = !pl.miniOk; ui.fitSig = ""; fitActions(); }).catch(() => {});
+  if (MINI_CLASS === "pip") window.addEventListener("resize", () => { if (pl.miniOk) call("player_mini_state").then((st) => { if (!!st?.on !== !!pl.mini) applyMini(!!st?.on); }).catch(() => {}); });
   ui.menu = h("div", { class: "pl-menu", hidden: true });
   ui.menu.addEventListener("pointerdown", (e) => e.stopPropagation());
   ui.menu.addEventListener("click", (e) => e.stopPropagation());
@@ -1209,7 +1222,7 @@ function buildPlayer() {
   ui.clock = h("span", { class: "pl-clock" });
   ui.batt = h("span", { class: "pl-batt", hidden: true });
   if (TOUCH) ui.lock = iconBtn("lock", tr("pl.lockScreen"), () => setLock(true));
-  const top = h("div", { class: "pl-top" }, h("div", { class: "pl-lead" }, iconBtn("left", tr("pl.back"), () => closePlayer()), h("div", { class: "pl-titles" }, ui.title)), ui.sub, h("div", { class: "pl-status" }, ...(TOUCH ? [ui.cast] : []), ui.clock, ui.batt));
+  const top = h("div", { class: "pl-top" }, h("div", { class: "pl-lead" }, iconBtn("left", tr("pl.back"), () => closePlayer()), h("div", { class: "pl-titles" }, ui.title)), ui.sub, h("div", { class: "pl-status" }, ...(TOUCH ? [ui.mini, ui.cast] : []), ui.clock, ui.batt));
   const back10 = iconBtn("back10", tr("pl.back10"), () => seekBy(-10));
   const fwd10 = iconBtn("fwd10", tr("pl.fwd10"), () => seekBy(10));
   const seekRow = h("div", { class: "pl-seekrow" }, ui.seek, ui.time);
@@ -1239,7 +1252,7 @@ function buildPlayer() {
       seekRow,
       h("div", { class: "pl-row" },
         h("div", { class: "pl-group" }, ui.play, back10, fwd10, ui.next, h("div", { class: "pl-volwrap" }, ui.volBtn, ui.vol)),
-        h("div", { class: "pl-group" }, ui.cast, ui.room, ui.stretch, ui.eps, ui.src, ui.cc, ui.speed, ui.fs)));
+        h("div", { class: "pl-group" }, ui.cast, ui.room, ui.stretch, ui.eps, ui.src, ui.cc, ui.speed, ui.mini, ui.fs)));
   }
   for (const el of [bottom, center].filter(Boolean)) {
     el.addEventListener("click", (e) => e.stopPropagation());
@@ -1250,7 +1263,7 @@ function buildPlayer() {
   ui.levelFill = h("i");
   ui.levelText = h("b");
   ui.level = h("div", { class: "pl-level", hidden: true }, ui.levelIcon, h("div", { class: "pl-level-bar" }, ui.levelFill), ui.levelText);
-  ui.root = h("div", { id: "player", class: TOUCH ? "touch" : "", hidden: true }, ui.bg, ui.dim, ui.hit, ui.ripple.left, ui.ripple.right, ui.level, h("div", { class: "pl-shade" }), ui.spin, ui.flash, ui.fast, top, ...(center ? [center] : []), bottom, ui.nextUp, ui.skip, ui.menu, ...(ui.lockbar ? [ui.lockbar] : []));
+  ui.root = h("div", { id: "player", class: TOUCH ? "touch" : "", hidden: true }, ui.bg, ui.dim, ui.hit, ui.ripple.left, ui.ripple.right, ui.level, h("div", { class: "pl-shade" }), ui.spin, ui.flash, ui.fast, top, ...(center ? [center] : []), bottom, ui.nextUp, ui.skip, ui.menu, ...(ui.lockbar ? [ui.lockbar] : []), ui.miniBar);
   let lastTap = 0;
   let tapTimer = null;
   let swipe = null;
@@ -1928,7 +1941,22 @@ const APPS = [
 const IPHONE_FS =!TAURI && !document.documentElement.requestFullscreen && !document.documentElement.webkitRequestFullscreen;
 const STANDALONE = !TAURI && (navigator.standalone === true || window.matchMedia("(display-mode: standalone)").matches);
 
+async function setMini(on) {
+  if (!pl.miniOk || (on && !pl.open)) return;
+  let now = false;
+  try { now = !!(await call("player_mini", { on })); } catch (e) { toast(e, true); return; }
+  applyMini(now);
+}
+
+function applyMini(on) {
+  pl.mini = on;
+  if (MINI_CLASS) document.body.classList.toggle(MINI_CLASS, on);
+  if (on && pl.menu) toggleMenu(null);
+  if (pl.open) wake();
+}
+
 async function toggleFullscreen() {
+  if (pl.mini && MINI_CLASS === "mini") { setMini(false); return; }
   if (IPHONE_FS && !pl.fs) { toggleMenu("fullscreen"); return; }
   try { pl.fs = await call("player_fullscreen", {}); } catch (e) { toast(e, true); }
   pl.ui.fs.innerHTML = pl.fs ? ICON.unfull : ICON.full;
@@ -1959,6 +1987,8 @@ function paintState() {
   const s = pl.s;
   ui.play.innerHTML = s.paused ? ICON.play : ICON.pause;
   ui.play.title = s.paused ? tr("pl.play") : tr("pl.pause");
+  ui.miniPlay.innerHTML = ui.play.innerHTML;
+  ui.miniPlay.title = ui.play.title;
   const showSpin = !s.loaded || s.buffering;
   ui.spin.hidden = !showSpin;
   ui.bufText.textContent = pl.waitHost ? tr("room.waitPick", { name: roomHostName() }) : !s.loaded ? (pl.ctx?.stream?.infoHash ? tr("pl.loadingTorrent") : tr("pl.opening")) : s.cachePercent != null && s.cachePercent < 100 ? tr("pl.buffering", { n: Math.round(s.cachePercent) }) : "";
@@ -2019,6 +2049,10 @@ function onPlayerState(s) {
   }
   if (pl.reveal && frameShown()) revealVideo();
   srcTimeSave(false);
+  if (MINI_CLASS === "pip" && pl.miniOk && s.paused != null && !!s.paused !== !!pl.pipPaused) {
+    pl.pipPaused = !!s.paused;
+    call("player_mini_sync", { paused: pl.pipPaused }).catch(() => {});
+  }
   paintState();
   if (pl.menu === "tracks" && s.tracks) renderMenu();
   else if (pl.ui.delayVal && s.subDelay != null) pl.ui.delayVal.textContent = delayText(s.subDelay);
@@ -2552,6 +2586,7 @@ function closePlayer(stop = true) {
     }
     return false;
   }
+  if (pl.mini && MINI_CLASS === "mini") setMini(false);
   pl.open = false;
   navSync();
   pl.session++;
@@ -3942,6 +3977,7 @@ function playerKey(e) {
   if (k === "ArrowUp") { setVolume(Math.round((pl.s.volume ?? 100) + 5)); return handled(); }
   if (k === "ArrowDown") { setVolume(Math.round((pl.s.volume ?? 100) - 5)); return handled(); }
   if (k === "f" || k === "F") { toggleFullscreen(); return handled(); }
+  if ((k === "i" || k === "I") && pl.miniOk) { setMini(!pl.mini); return handled(); }
   if (k === "z" || k === "Z") { setFill(!fillMode, true); return handled(); }
   if (k === "m" || k === "M") { cmd("cycle", "mute"); return handled(); }
   if (k === "n" || k === "N" || k === "MediaTrackNext") { playNext(false); return handled(); }

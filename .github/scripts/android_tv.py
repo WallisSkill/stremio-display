@@ -13,6 +13,10 @@ if "LEANBACK_LAUNCHER" not in text:
     launcher = '<category android:name="android.intent.category.LAUNCHER" />'
     assert text.count(launcher) == 1
     text = text.replace(launcher, launcher + '\n                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />')
+if "supportsPictureInPicture" not in text:
+    anchor = 'android:name=".MainActivity"'
+    assert text.count(anchor) == 1
+    text = text.replace(anchor, anchor + '\n            android:supportsPictureInPicture="true"', 1)
 if "android:banner" not in text:
     text = text.replace("<application", '<application\n        android:banner="@drawable/tv_banner"', 1)
 manifest.write_text(text, encoding="utf-8")

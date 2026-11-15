@@ -1,10 +1,18 @@
 package tv.wis.video
 
 import android.app.Activity
+import android.app.PendingIntent
+import android.app.PictureInPictureParams
+import android.app.RemoteAction
 import android.app.UiModeManager
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
+import android.graphics.drawable.Icon
+import android.os.Build
+import android.util.Rational
 import android.os.BatteryManager
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
@@ -36,11 +44,17 @@ import app.tauri.plugin.Plugin
 class Native {
     external fun surface(surface: Surface?, width: Int, height: Int)
     external fun interrupted()
+    external fun toggle()
 }
 
 @InvokeArg
 class FlagArgs {
     var on: Boolean = false
+}
+
+@InvokeArg
+class PipArgs {
+    var paused: Boolean = false
 }
 
 @InvokeArg
@@ -72,6 +86,87 @@ class VideoPlugin(private val activity: Activity) : Plugin(activity), SurfaceHol
                 }
             }
             .build()
+    }
+
+    private var pipAuto = false
+    private var pipPaused = false
+    private val pipAction = "tv.wis.video.PIP_TOGGLE"
+    private val pipReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action == pipAction) native.toggle()
+        }
+    }
+
+    private val pipOk: Boolean
+        get() = activity.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
+
+    private fun pipParams(): PictureInPictureParams {
+        val label = if (pipPaused) "Play" else "Pause"
+        val icon = Icon.createWithResource(activity, if (pipPaused) android.R.drawable.ic_media_play else android.R.drawable.ic_media_pause)
+        val tap = PendingIntent.getBroadcast(
+            activity,
+            7,
+            Intent(pipAction).setPackage(activity.packageName),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val builder = PictureInPictureParams.Builder()
+            .setAspectRatio(Rational(16, 9))
+            .setActions(listOf(RemoteAction(icon, label, label, tap)))
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            builder.setAutoEnterEnabled(pipAuto)
+            builder.setSeamlessResizeEnabled(true)
+        }
+        return builder.build()
+    }
+
+    private fun pipUpdate() {
+        if (!pipOk) return
+        try {
+            activity.setPictureInPictureParams(pipParams())
+        } catch (e: Exception) {
+            Log.w("WiSTV", "picture in picture params: ${e.message}")
+        }
+    }
+
+    override fun onStop() {
+        if (activity.isInPictureInPictureMode) native.interrupted()
+    }
+
+    @Command
+    fun pip(invoke: Invoke) {
+        val args = invoke.parseArgs(FlagArgs::class.java)
+        activity.runOnUiThread {
+            var on = activity.isInPictureInPictureMode
+            if (args.on && !on && pipOk) {
+                on = try {
+                    activity.enterPictureInPictureMode(pipParams())
+                } catch (e: Exception) {
+                    Log.w("WiSTV", "picture in picture: ${e.message}")
+                    false
+                }
+            }
+            val out = JSObject()
+            out.put("on", on)
+            invoke.resolve(out)
+        }
+    }
+
+    @Command
+    fun pipState(invoke: Invoke) {
+        val out = JSObject()
+        out.put("ok", pipOk)
+        out.put("on", activity.isInPictureInPictureMode)
+        invoke.resolve(out)
+    }
+
+    @Command
+    fun pipSync(invoke: Invoke) {
+        val args = invoke.parseArgs(PipArgs::class.java)
+        activity.runOnUiThread {
+            pipPaused = args.paused
+            pipUpdate()
+        }
+        invoke.resolve()
     }
 
     private fun holdAudio(on: Boolean) {
@@ -106,6 +201,11 @@ class VideoPlugin(private val activity: Activity) : Plugin(activity), SurfaceHol
 
     override fun load(webView: WebView) {
         activity.runOnUiThread { orient(false) }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            activity.registerReceiver(pipReceiver, IntentFilter(pipAction), Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            activity.registerReceiver(pipReceiver, IntentFilter(pipAction))
+        }
         webView.setBackgroundColor(Color.TRANSPARENT)
         attach(webView, 0)
         val owner = activity as? ComponentActivity ?: return
@@ -159,6 +259,8 @@ class VideoPlugin(private val activity: Activity) : Plugin(activity), SurfaceHol
                 activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             }
             holdAudio(args.on)
+            pipAuto = args.on
+            pipUpdate()
         }
         invoke.resolve()
     }

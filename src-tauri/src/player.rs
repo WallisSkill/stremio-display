@@ -423,6 +423,12 @@ struct Live {
 }
 
 static INTERRUPTED: AtomicBool = AtomicBool::new(false);
+static TOGGLE: AtomicBool = AtomicBool::new(false);
+
+#[cfg(target_os = "android")]
+pub fn toggle_pause() {
+    TOGGLE.store(true, Ordering::SeqCst);
+}
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
 pub fn interrupt() {
@@ -734,6 +740,10 @@ unsafe fn run(lib: &Mpv, ctx: Handle, start_ms: u64, wid: i64, crop_on: &AtomicB
         let ev = (lib.wait_event)(ctx, 0.2);
         if INTERRUPTED.swap(false, Ordering::SeqCst) {
             lib.set_property(ctx, "pause", "yes");
+        }
+        if TOGGLE.swap(false, Ordering::SeqCst) {
+            let paused = lib.prop_flag(ctx, "pause");
+            lib.set_property(ctx, "pause", if paused { "no" } else { "yes" });
         }
         #[cfg(windows)]
         win::video_below_ui(wid as isize);

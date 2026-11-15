@@ -241,6 +241,8 @@ export default {
   "pl.sources": "Sources (S)",
   "pl.speed": "Speed",
   "pl.seekSecs": "{n} seconds",
+  "pl.mini": "Mini player (I)",
+  "pl.miniBack": "Back to the full window",
   "pl.fullscreen": "Full screen (F)",
   "pl.fit": "Keep aspect ratio (Z)",
   "pl.fill": "Fill the screen (Z)",

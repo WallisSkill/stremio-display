@@ -5,6 +5,8 @@ mod api;
 mod autocrop;
 mod commands;
 mod hotui;
+#[cfg(windows)]
+mod mini;
 mod player;
 mod server;
 mod state;
@@ -81,6 +83,10 @@ pub fn run() {
             commands::device_battery,
             commands::player_stop,
             commands::player_fullscreen,
+            commands::player_mini,
+            commands::player_mini_state,
+            commands::player_mini_sync,
+            commands::window_drag,
             commands::screen_brightness,
             commands::startup_open,
             commands::startup_links,

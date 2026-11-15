@@ -723,6 +723,71 @@ pub fn player_fullscreen(window: WebviewWindow, on: Option<bool>) -> R<bool> {
     Ok(next)
 }
 
+#[cfg(target_os = "android")]
+#[tauri::command]
+pub fn player_mini(app: AppHandle, on: bool) -> R<bool> {
+    use tauri_plugin_wistv_video::VideoExt;
+    app.video().pip(on)
+}
+
+#[cfg(target_os = "android")]
+#[tauri::command]
+pub fn player_mini_state(app: AppHandle) -> R<Value> {
+    use tauri_plugin_wistv_video::VideoExt;
+    app.video().pip_state()
+}
+
+#[cfg(target_os = "android")]
+#[tauri::command]
+pub fn player_mini_sync(app: AppHandle, paused: bool) -> R<()> {
+    use tauri_plugin_wistv_video::VideoExt;
+    app.video().pip_sync(paused)
+}
+
+#[cfg(windows)]
+#[tauri::command]
+pub fn player_mini(window: WebviewWindow, on: bool) -> R<bool> {
+    crate::mini::set(&window, on)
+}
+
+#[cfg(windows)]
+#[tauri::command]
+pub fn player_mini_state() -> R<Value> {
+    Ok(json!({ "ok": true, "on": crate::mini::active() }))
+}
+
+#[cfg(not(any(windows, target_os = "android")))]
+#[tauri::command]
+pub fn player_mini(on: bool) -> R<bool> {
+    let _ = on;
+    Ok(false)
+}
+
+#[cfg(not(any(windows, target_os = "android")))]
+#[tauri::command]
+pub fn player_mini_state() -> R<Value> {
+    Ok(json!({ "ok": false, "on": false }))
+}
+
+#[cfg(not(target_os = "android"))]
+#[tauri::command]
+pub fn player_mini_sync(paused: bool) -> R<()> {
+    let _ = paused;
+    Ok(())
+}
+
+#[cfg(desktop)]
+#[tauri::command]
+pub fn window_drag(window: WebviewWindow) -> R<()> {
+    window.start_dragging().map_err(|e| e.to_string())
+}
+
+#[cfg(mobile)]
+#[tauri::command]
+pub fn window_drag() -> R<()> {
+    Ok(())
+}
+
 #[cfg(desktop)]
 #[tauri::command]
 pub async fn app_update(app: AppHandle) -> R<Value> {

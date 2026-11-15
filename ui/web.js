@@ -1002,6 +1002,18 @@ export const web = {
   async player_set(args) { return setProp(args); },
   async player_stop() { if (!P.finished) finish({}); },
   player_fullscreen: fullscreen,
+  async player_mini({ on }) {
+    const v = P.video;
+    if (!v || !document.pictureInPictureEnabled) return false;
+    try {
+      if (on && document.pictureInPictureElement !== v) await v.requestPictureInPicture();
+      else if (!on && document.pictureInPictureElement) await document.exitPictureInPicture();
+    } catch (e) {}
+    return !!document.pictureInPictureElement;
+  },
+  async player_mini_state() { return { ok: !!document.pictureInPictureEnabled, on: !!document.pictureInPictureElement }; },
+  async player_mini_sync() {},
+  async window_drag() {},
   async server_status({ force } = {}) {
     const base = await serverBase(!!force);
     return { linked: !!base, online: await serverAlive(base), manual: !!store.get("wistv.server") };

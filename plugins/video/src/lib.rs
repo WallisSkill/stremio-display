@@ -37,6 +37,25 @@ impl<R: Runtime> Video<R> {
         v["url"].as_str().map(str::to_string)
     }
 
+    #[cfg(target_os = "android")]
+    pub fn pip(&self, on: bool) -> Result<bool, String> {
+        let v: Value = self.0.run_mobile_plugin("pip", json!({ "on": on })).map_err(|e| e.to_string())?;
+        Ok(v["on"].as_bool().unwrap_or(false))
+    }
+
+    #[cfg(target_os = "android")]
+    pub fn pip_state(&self) -> Result<Value, String> {
+        self.0.run_mobile_plugin::<Value>("pipState", json!({})).map_err(|e| e.to_string())
+    }
+
+    #[cfg(target_os = "android")]
+    pub fn pip_sync(&self, paused: bool) -> Result<(), String> {
+        self.0
+            .run_mobile_plugin::<Value>("pipSync", json!({ "paused": paused }))
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+
     pub fn landscape(&self, on: bool) -> Result<(), String> {
         self.0
             .run_mobile_plugin::<Value>("landscape", json!({ "on": on }))

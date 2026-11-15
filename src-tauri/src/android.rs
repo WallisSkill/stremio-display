@@ -26,6 +26,11 @@ pub extern "system" fn Java_tv_wis_video_Native_interrupted(_env: JNIEnv, _this:
 }
 
 #[no_mangle]
+pub extern "system" fn Java_tv_wis_video_Native_toggle(_env: JNIEnv, _this: JObject) {
+    crate::player::toggle_pause();
+}
+
+#[no_mangle]
 pub extern "system" fn Java_tv_wis_video_Native_surface(
     env: JNIEnv,
     _this: JObject,
