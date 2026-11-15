@@ -1164,8 +1164,8 @@ function iconBtn(icon, title, onclick, cls = "") {
 
 function buildPlayer() {
   const ui = {};
-  ui.bgCanvas = h("canvas", { width: "64", height: "36" });
-  ui.bg = h("div", { class: "pl-loading-bg" }, ui.bgCanvas);
+  ui.bgImg = h("img", { alt: "", decoding: "async" });
+  ui.bg = h("div", { class: "pl-loading-bg" }, ui.bgImg);
   ui.hit = h("div", { class: "pl-hit" });
   ui.title = h("b", { class: "pl-title" });
   ui.sub = h("span", { class: "pl-sub" });
@@ -1207,17 +1207,17 @@ function buildPlayer() {
   ui.stretch = iconBtn(fillMode ? "fit" : "fill", fillMode ? tr("pl.fit") : tr("pl.fill"), () => setFill(!fillMode, true));
   ui.clock = h("span", { class: "pl-clock" });
   ui.batt = h("span", { class: "pl-batt", hidden: true });
-  if (TOUCH) {
-    ui.lock = h("button", { class: "pl-lock", tabindex: "-1", title: tr("pl.lockScreen"), "aria-label": tr("pl.lockScreen"), onclick: (e) => { e.stopPropagation(); setLock(true); } }, h("span", { html: ICON.lock }), h("span", { class: "pl-label" }, tr("pl.lock")));
-  }
-  const top = h("div", { class: "pl-top" }, h("div", { class: "pl-lead" }, iconBtn("left", tr("pl.back"), () => closePlayer()), h("div", { class: "pl-titles" }, ui.title, ui.sub)), ...(ui.lock ? [ui.lock] : []), h("div", { class: "pl-status" }, ui.clock, ui.batt));
+  if (TOUCH) ui.lock = iconBtn("lock", tr("pl.lockScreen"), () => setLock(true));
+  const top = TOUCH
+    ? h("div", { class: "pl-top" }, h("div", { class: "pl-lead" }, iconBtn("left", tr("pl.back"), () => closePlayer()), h("div", { class: "pl-titles" }, ui.title)), ui.sub, h("div", { class: "pl-status" }, ui.cast, ui.clock, ui.batt))
+    : h("div", { class: "pl-top" }, h("div", { class: "pl-lead" }, iconBtn("left", tr("pl.back"), () => closePlayer()), h("div", { class: "pl-titles" }, ui.title, ui.sub)), h("div", { class: "pl-status" }, ui.clock, ui.batt));
   const back10 = iconBtn("back10", tr("pl.back10"), () => seekBy(-10));
   const fwd10 = iconBtn("fwd10", tr("pl.fwd10"), () => seekBy(10));
   const seekRow = h("div", { class: "pl-seekrow" }, ui.seek, ui.time);
   let center = null;
   let bottom;
   if (TOUCH) {
-    for (const [btn, text] of [[ui.cast, tr("cast.short")], [ui.room, tr("nav.togetherShort")], [ui.eps, tr("ep.list")], [ui.src, tr("pl.src")], [ui.cc, tr("set.subs")], [ui.next, tr("pl.next")]]) {
+    for (const [btn, text] of [[ui.lock, tr("pl.lock")], [ui.room, tr("nav.togetherShort")], [ui.eps, tr("ep.list")], [ui.src, tr("pl.src")], [ui.cc, tr("set.subs")], [ui.next, tr("pl.next")]]) {
       btn.classList.add("act");
       btn.append(h("span", { class: "pl-label" }, text));
     }
@@ -1232,7 +1232,7 @@ function buildPlayer() {
     ui.lockbar = h("div", { class: "pl-lockbar" }, ui.lockRoom, ui.unlock);
     ui.play.classList.add("huge");
     center = h("div", { class: "pl-center" }, ui.play);
-    ui.actions = h("div", { class: "pl-actions" }, ui.stretch, ui.speed, ui.cast, ui.room, ui.eps, ui.src, ui.cc, ui.next);
+    ui.actions = h("div", { class: "pl-actions" }, ui.lock, ui.stretch, ui.speed, ui.room, ui.eps, ui.src, ui.cc, ui.next);
     bottom = h("div", { class: "pl-bottom" }, seekRow, ui.actions);
     window.addEventListener("resize", () => { ui.fitSig = ""; fitActions(); });
   } else {
@@ -2524,25 +2524,13 @@ function openPlayer(c) {
 }
 
 function paintLoadingBg(url) {
-  const c = pl.ui.bgCanvas;
-  const g = c.getContext("2d");
+  const img = pl.ui.bgImg;
   pl.bgWant = url || null;
   pl.ui.bg.classList.remove("has-img");
-  if (!url || !g) return;
-  const img = new Image();
-  img.decoding = "async";
-  img.onload = () => {
-    if (pl.bgWant !== url || !img.naturalWidth) return;
-    const s = Math.max(c.width / img.naturalWidth, c.height / img.naturalHeight) * 1.15;
-    const w = img.naturalWidth * s;
-    const ht = img.naturalHeight * s;
-    g.clearRect(0, 0, c.width, c.height);
-    g.filter = "blur(2px)";
-    g.drawImage(img, (c.width - w) / 2, (c.height - ht) / 2, w, ht);
-    g.filter = "none";
-    pl.ui.bg.classList.add("has-img");
-  };
+  if (!url) { img.removeAttribute("src"); return; }
+  img.onload = () => { if (pl.bgWant === url && img.naturalWidth) pl.ui.bg.classList.add("has-img"); };
   img.src = url;
+  if (img.complete && img.naturalWidth) pl.ui.bg.classList.add("has-img");
 }
 
 function closePlayer(stop = true) {
