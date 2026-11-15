@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WiS TV</title>
+  <script>
+    (() => {
+      const m = /^(.*\/)join\/([A-Za-z0-9]{6})\/?$/.exec(location.pathname);
+      if (m) location.replace(`${m[1]}?room=${m[2].toUpperCase()}`);
+    })();
+  </script>
+</head>
+<body style="background:#050507;color:#f4f4f6;font:16px sans-serif;text-align:center;padding-top:20vh"><a href="/" style="color:#f4f4f6">WiS TV</a></body>
+</html>

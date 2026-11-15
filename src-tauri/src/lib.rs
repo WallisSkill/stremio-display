@@ -14,7 +14,8 @@ mod torrent;
 mod update;
 mod util;
 
-use tauri::Manager;
+use tauri::{Emitter, Manager};
+use tauri_plugin_deep_link::DeepLinkExt;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -24,11 +25,27 @@ pub fn run() {
     #[cfg(mobile)]
     let builder = builder.plugin(tauri_plugin_wistv_video::init());
     #[cfg(desktop)]
-    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    let builder = builder
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.unminimize();
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+        }))
+        .plugin(tauri_plugin_updater::Builder::new().build());
+    let builder = builder.plugin(tauri_plugin_deep_link::init());
     builder
         .setup(|app| {
             let st = state::AppState::load(app.handle())?;
             app.manage(st);
+            #[cfg(any(windows, target_os = "linux"))]
+            let _ = app.deep_link().register_all();
+            let handle = app.handle().clone();
+            app.deep_link().on_open_url(move |event| {
+                let urls: Vec<String> = event.urls().iter().map(|u| u.to_string()).collect();
+                let _ = handle.emit("deep-link", urls);
+            });
             #[cfg(desktop)]
             update::spawn(app.handle().clone());
             Ok(())
@@ -66,6 +83,7 @@ pub fn run() {
             commands::player_fullscreen,
             commands::screen_brightness,
             commands::startup_open,
+            commands::startup_links,
             commands::open_url,
             commands::subtitles,
             commands::subtitle_info,

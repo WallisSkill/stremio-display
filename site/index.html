@@ -61,6 +61,12 @@
     .older { margin-top: 12px; display: flex; flex-direction: column; gap: 14px; }
     .older h4 { margin: 0 0 6px; font-size: 13.5px; font-weight: 650; color: var(--text); }
     .older h4 span { font-weight: 400; color: var(--faint); margin-left: 6px; }
+    .invite { margin: 0 auto 28px; max-width: 560px; text-align: center; background: var(--card); border: 1px solid var(--line); border-radius: 22px; padding: 26px 22px; }
+    .invite h2 { margin: 0 0 6px; font-size: 22px; }
+    .invite p { margin: 0 0 16px; color: var(--muted); font-size: 14.5px; }
+    .invite .code { display: block; margin: 0 0 18px; font-size: 34px; font-weight: 800; letter-spacing: 6px; font-variant-numeric: tabular-nums; }
+    .invite .row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+    .btn.ghost { background: rgba(255,255,255,0.1); color: var(--text); border: 0; cursor: pointer; font: inherit; font-weight: 650; font-size: 15.5px; }
     footer { margin-top: 36px; text-align: center; font-size: 13px; color: var(--faint); }
     .policy { margin: 8px 0 0; text-align: center; font-size: 13px; }
     .policy a { color: var(--muted); }
@@ -85,6 +91,16 @@
       <h1><b>WiS</b><span>TV</span></h1>
       <p data-i18n="tagline">Xem phim từ tài khoản Stremio của bạn. Phát được mọi định dạng, tự chạy torrent ngay trên máy, giữ kiểu phụ đề bạn chỉnh.</p>
     </header>
+
+    <section class="invite" hidden>
+      <h2 data-i18n="room.title">Bạn được mời xem chung</h2>
+      <p data-i18n="room.desc">Mở WiS TV để vào phòng. Chưa có app thì tải ở bên dưới, cài xong mở lại link này.</p>
+      <b class="code"></b>
+      <div class="row">
+        <a class="btn" id="open-app" data-i18n="room.open">Mở trong app</a>
+        <button class="btn ghost" id="copy-code" type="button" data-i18n="room.copy">Sao chép mã</button>
+      </div>
+    </section>
 
     <section class="grid">
       <article class="card" data-tag="ios" data-ext=".ipa">
@@ -165,6 +181,11 @@
         "kind.new": "Mới",
         "kind.fix": "Sửa",
         "kind.fast": "Nhanh hơn",
+        "room.title": "Bạn được mời xem chung",
+        "room.desc": "Mở WiS TV để vào phòng. Chưa có app thì tải ở bên dưới, cài xong mở lại link này.",
+        "room.open": "Mở trong app",
+        "room.copy": "Sao chép mã",
+        "room.copied": "Đã chép mã",
       },
       en: {
         title: "Download WiS TV",
@@ -199,6 +220,11 @@
         "kind.new": "New",
         "kind.fix": "Fixed",
         "kind.fast": "Faster",
+        "room.title": "You're invited to watch together",
+        "room.desc": "Open WiS TV to join the room. No app yet? Get it below, then open this link again.",
+        "room.open": "Open in the app",
+        "room.copy": "Copy code",
+        "room.copied": "Code copied",
       },
       zh: {
         title: "下载 WiS TV",
@@ -233,6 +259,11 @@
         "kind.new": "新增",
         "kind.fix": "修复",
         "kind.fast": "更快",
+        "room.title": "邀请你一起观看",
+        "room.desc": "打开 WiS TV 加入房间。还没有安装？在下方下载，装好后再打开此链接。",
+        "room.open": "在应用中打开",
+        "room.copy": "复制房间码",
+        "room.copied": "已复制",
       },
     };
     const LOCALE = { vi: "vi-VN", en: "en-US", zh: "zh-CN" };
@@ -331,6 +362,30 @@
       apply(b.dataset.lang);
     });
     apply(lang);
+
+    const ROOM_CODE = /^[A-HJ-NP-Z2-9]{6}$/;
+    const asked = String(new URLSearchParams(location.search).get("room") || "").trim().toUpperCase();
+    if (ROOM_CODE.test(asked)) {
+      const box = document.querySelector(".invite");
+      box.querySelector(".code").textContent = asked;
+      const page = location.origin + location.pathname;
+      document.getElementById("open-app").href = /Android/i.test(navigator.userAgent)
+        ? `intent://room/${asked}#Intent;scheme=wistv;package=tv.wis.app;S.browser_fallback_url=${encodeURIComponent(page)};end`
+        : `wistv://room/${asked}`;
+      const copy = document.getElementById("copy-code");
+      copy.addEventListener("click", async () => {
+        try { await navigator.clipboard.writeText(asked); } catch (e) {
+          const range = document.createRange();
+          range.selectNodeContents(box.querySelector(".code"));
+          getSelection().removeAllRanges();
+          getSelection().addRange(range);
+          document.execCommand("copy");
+        }
+        copy.textContent = t("room.copied");
+        setTimeout(() => { copy.textContent = t("room.copy"); }, 2000);
+      });
+      box.hidden = false;
+    }
 
     const snapshot = fetch(`releases.json?t=${Math.floor(Date.now() / 60000)}`, { cache: "no-store" })
       .then((res) => (res.ok ? res.json() : null))

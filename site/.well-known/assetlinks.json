@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "tv.wis.app",
+      "sha256_cert_fingerprints": [
+        "37:BF:FF:06:EF:98:31:58:D3:55:E7:21:34:AF:E8:3A:32:00:5C:60:C3:90:E6:36:42:A7:3D:BD:63:BF:22:1E"
+      ]
+    }
+  }
+]

@@ -2619,7 +2619,41 @@ const inRoom = () => !!room.code;
 const roomGuest = () => inRoom() && !room.host;
 const serverNow = () => Date.now() + room.offset;
 const roomPos = (p) => (p.paused ? p.pos : p.pos + (Math.max(0, serverNow() - p.at) / 1000) * p.rate);
-const roomInvite = () => `${ROOM_SITE}?room=${room.code}`;
+const roomInvite = () => (TAURI ? `${ROOM_SITE}join/${room.code}` : `${ROOM_SITE}?room=${room.code}`);
+
+function roomCodeFromLink(link) {
+  let u;
+  try { u = new URL(String(link)); } catch (e) { return null; }
+  let code = null;
+  if (u.protocol === "wistv:") {
+    const parts = `${u.host}${u.pathname}`.split("/").filter(Boolean);
+    if (parts[0] === "room") code = parts[1];
+  } else if (u.protocol === "https:" && u.host === "film.wis237.online") {
+    code = /^\/join\/([^/]+)\/?$/.exec(u.pathname)?.[1] ?? u.searchParams.get("room");
+  }
+  code = String(code || "").trim().toUpperCase();
+  return ROOM_CODE_RE.test(code) ? code : null;
+}
+
+const roomFromLinks = (links) => (Array.isArray(links) ? links : []).map(roomCodeFromLink).find(Boolean) || null;
+
+let roomLinkSeen = { code: null, at: 0 };
+
+function roomLinkFresh(code) {
+  if (!code) return false;
+  const now = Date.now();
+  if (roomLinkSeen.code === code && now - roomLinkSeen.at < 5000) return false;
+  roomLinkSeen = { code, at: now };
+  return true;
+}
+
+async function openRoomLinks(links) {
+  const code = roomFromLinks(links);
+  if (!roomLinkFresh(code)) return;
+  if (!app.user && !app.guest) { app.guest = true; loadPrefs(); await boot(); }
+  for (const d of $$(".layer.room-dialog")) d._back?.();
+  joinRoom(code);
+}
 const roomHostName = () => room.members.find((m) => m.host)?.name || tr("room.host");
 const roomColor = (id) => PROFILE_COLORS[[...String(id)].reduce((a, c) => a + c.charCodeAt(0), 0) % PROFILE_COLORS.length];
 const sameMedia = (c, md) => !!c && !!md && c.m.id === md.id && c.vid === md.vid;
@@ -5541,7 +5575,13 @@ function playIntro() {
 (async () => {
   if (TAURI || STANDALONE) playIntro();
   try { app.user = await call("session"); } catch (e) { app.user = null; }
-  const invite = roomFromUrl();
+  let linked = null;
+  if (TAURI) {
+    listen("deep-link", ({ payload }) => openRoomLinks(payload));
+    try { linked = roomFromLinks(await call("startup_links")); } catch (e) { linked = null; }
+    roomLinkFresh(linked);
+  }
+  const invite = roomFromUrl() ?? linked;
   if (app.user) await startSignedIn();
   else if (invite != null || roomSaved()) { app.guest = true; loadPrefs(); await boot(); }
   else go("login");

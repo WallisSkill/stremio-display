@@ -742,6 +742,19 @@ pub async fn open_url(app: AppHandle, url: String) -> R<()> {
         .map_err(|e| e.to_string())?
 }
 
+#[tauri::command]
+pub fn startup_links(app: AppHandle) -> Vec<String> {
+    use tauri_plugin_deep_link::DeepLinkExt;
+    app.deep_link()
+        .get_current()
+        .ok()
+        .flatten()
+        .unwrap_or_default()
+        .iter()
+        .map(|u| u.to_string())
+        .collect()
+}
+
 #[cfg(not(target_os = "android"))]
 #[tauri::command]
 pub fn startup_open() -> Option<String> {

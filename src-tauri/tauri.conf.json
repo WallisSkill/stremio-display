@@ -46,6 +46,31 @@
       "windows": {
         "installMode": "passive"
       }
+    },
+    "deep-link": {
+      "mobile": [
+        {
+          "scheme": [
+            "https"
+          ],
+          "host": "film.wis237.online",
+          "pathPrefix": [
+            "/join"
+          ],
+          "appLink": true
+        },
+        {
+          "scheme": [
+            "wistv"
+          ],
+          "appLink": false
+        }
+      ],
+      "desktop": {
+        "schemes": [
+          "wistv"
+        ]
+      }
     }
   }
 }

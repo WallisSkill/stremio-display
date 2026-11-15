@@ -22,6 +22,7 @@ urlencoding = "2"
 base64 = "0.22"
 minisign-verify = "0.3"
 librqbit = { version = "9.1", default-features = false, features = ["rust-tls"] }
+tauri-plugin-deep-link = "2"
 
 [target.'cfg(any(windows, target_os = "android", target_os = "linux"))'.dependencies]
 libloading = "0.8"
@@ -34,6 +35,7 @@ jni = "0.21"
 
 [target.'cfg(any(windows, target_os = "macos", target_os = "linux"))'.dependencies]
 tauri-plugin-updater = "2"
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 
 [profile.dev]
 debug = 0
