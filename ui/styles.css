@@ -934,6 +934,9 @@ body.web-playing #wv { display: block; }
 .room-person .pf-face { width: 26px; height: 26px; border-radius: 50%; font-size: 13px; }
 .room-person em { font-style: normal; font-size: 11px; font-weight: 600; color: var(--faint); }
 .room-person em.busy { color: #f59e0b; }
+.room-person.hand { border: 0; color: inherit; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; outline: none; transition: background 160ms; }
+.room-person.hand:hover, .room-person.hand:focus-visible { background: rgba(255,255,255,0.2); }
+.room-person em.act { color: var(--text); opacity: 0.8; }
 .room-reacts { display: flex; gap: 6px; flex-wrap: wrap; }
 .room-react-btn { width: 46px; height: 40px; border-radius: 12px; font-size: 21px; background: rgba(255,255,255,0.08); outline: none; transition: transform 160ms, background 160ms; }
 .room-react-btn:hover, .room-react-btn:focus-visible { background: rgba(255,255,255,0.2); transform: scale(1.1); }

@@ -89,6 +89,7 @@ const SAID = {
   "wk.badRoomCode": "Mã phòng không hợp lệ",
   "wk.roomPwFormat": "Mật khẩu phòng cần từ 4 đến 32 ký tự",
   "wk.roomPwTries": "Nhập sai mật khẩu quá nhiều lần, hãy thử lại sau",
+  "wk.noMember": "Người này không còn trong phòng",
 };
 const said = (key, params) => (SAID[key] || key).replace(/\{(\w+)\}/g, (m, k) => (params && params[k] != null ? String(params[k]) : m));
 const coded = (key, params) => (SAID[key] ? { message: said(key, params), key, ...(params ? { params } : {}) } : { message: key });
@@ -477,7 +478,7 @@ export class WatchRoom extends DurableObject {
       await this.schedule();
     }
     const roster = this.roster();
-    this.send(ws, { t: "welcome", you: id, host, now: Date.now(), media: room.media, play: this.play, tracks: this.tracks, reactions: REACTIONS, locked: !!room.pw, ...roster });
+    this.send(ws, { t: "welcome", you: id, host, now: Date.now(), media: room.media, play: this.play, tracks: this.tracks, reactions: REACTIONS, locked: !!room.pw, handover: true, ...roster });
     const data = JSON.stringify({ t: "members", ...roster });
     for (const s of this.sockets()) if (s !== ws) try { s.send(data); } catch (e) {}
   }
@@ -566,6 +567,22 @@ export class WatchRoom extends DurableObject {
       }
       await this.save();
       this.broadcast({ t: "secret", on: !!room.pw });
+    } else if (msg.t === "handover") {
+      const target = this.sockets(ws).find((s) => { const w = this.who(s); return w.id === msg.to && !w.host; });
+      if (!target) {
+        this.send(ws, { t: "handover", ok: false, ...coded("wk.noMember") });
+        return;
+      }
+      const them = this.who(target);
+      room.hostKey = hex(crypto.getRandomValues(new Uint8Array(32)));
+      room.hostGone = null;
+      await this.save();
+      await this.schedule();
+      ws.serializeAttachment({ ...me, host: false, waiting: false });
+      target.serializeAttachment({ ...them, host: true, waiting: false });
+      this.send(target, { t: "host", key: room.hostKey, by: me.name });
+      this.send(ws, { t: "host", key: null, to: them.name, media: room.media, play: this.play, tracks: this.tracks });
+      this.shareRoster();
     } else if (msg.t === "close") {
       await this.closeRoom("wk.hostClosed");
     }

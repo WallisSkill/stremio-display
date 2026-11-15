@@ -1026,6 +1026,7 @@ function closeSheet() {
 }
 
 async function openStreams(m, vid, label) {
+  if (roomGuest() && !sameMedia({ m, vid }, room.media)) { roomLocked(); return; }
   app.sheetReturn = document.activeElement;
   const sheet = $("#sheet");
   const body = h("div", { class: "sheet-body" }, h("div", { class: "spinner" }));
@@ -1960,7 +1961,7 @@ function paintState() {
   ui.play.title = s.paused ? tr("pl.play") : tr("pl.pause");
   const showSpin = !s.loaded || s.buffering;
   ui.spin.hidden = !showSpin;
-  ui.bufText.textContent = !s.loaded ? (pl.ctx?.stream?.infoHash ? tr("pl.loadingTorrent") : tr("pl.opening")) : s.cachePercent != null && s.cachePercent < 100 ? tr("pl.buffering", { n: Math.round(s.cachePercent) }) : "";
+  ui.bufText.textContent = pl.waitHost ? tr("room.waitPick", { name: roomHostName() }) : !s.loaded ? (pl.ctx?.stream?.infoHash ? tr("pl.loadingTorrent") : tr("pl.opening")) : s.cachePercent != null && s.cachePercent < 100 ? tr("pl.buffering", { n: Math.round(s.cachePercent) }) : "";
   if (document.activeElement !== ui.vol && s.volume != null) ui.vol.value = String(Math.round(s.volume));
   ui.volBtn.innerHTML = s.mute || s.volume === 0 ? ICON.mute : ICON.vol;
   ui.vol.style.setProperty("--v", `${((s.mute ? 0 : s.volume ?? 100) / 150) * 100}%`);
@@ -2486,6 +2487,8 @@ function openPlayer(c) {
   pl.tracks = [];
   pl.chapters = [];
   pl.skipped = new Set();
+  pl.waitHost = false;
+  pl.waitDur = 0;
   introLookup(c);
   pl.subs = null;
   pl.subsJob = null;
@@ -2571,6 +2574,7 @@ function closePlayer(stop = true) {
 }
 
 async function startPlayback(m, vid, label, stream, start, addon) {
+  if (roomGuest() && (!sameMedia({ m, vid }, room.media) || (pl.open && !pl.waitHost && sameMedia(pl.ctx, room.media)))) { roomLocked(); return; }
   const ctx = (session) => ({ id: m.id, kind: m.type, name: m.name, title: m.type === "series" && label ? `${m.name} · ${label}` : m.name, poster: m.poster || null, video: vid, start: Math.floor(start || 0), session });
   const yt = !stream.url && !stream.infoHash ? (YT_ID.test(stream.ytId || "") ? stream.ytId : ytFromUrl(stream.externalUrl)) : "";
   if (yt) {
@@ -2585,7 +2589,7 @@ async function startPlayback(m, vid, label, stream, start, addon) {
   closeSheet();
   const session = ++pl.session;
   openPlayer({ m, vid, label, stream, addon });
-  if (room.host) roomShareMedia((start || 0) / 1000);
+  if (room.host) { room.hostPos = (start || 0) / 1000; roomShareMedia(room.hostPos); }
   if (TOUCH && !pl.fs) {
     call("player_fullscreen", { on: true }).then((on) => { pl.fs = on; pl.ui.fs.innerHTML = on ? ICON.unfull : ICON.full; }).catch(() => {});
   }
@@ -2782,6 +2786,7 @@ function roomMessage(m) {
     room.online = true;
     room.pwAsk?._close?.();
     room.locked = !!m.locked;
+    room.canHand = !!m.handover;
     room.reactions = roomReactList(m.reactions);
     if (room.host && room.secretWanted) {
       room.pwNext = room.secretWanted;
@@ -2807,6 +2812,11 @@ function roomMessage(m) {
     room.members = Array.isArray(m.members) ? m.members : [];
     room.hostOnline = !!m.hostOnline;
     if (room.host) roomHoldCheck();
+  } else if (m.t === "host") {
+    roomBecome(m);
+  } else if (m.t === "handover") {
+    if (!m.ok) toast(serverText(m) || tr("room.reconnecting"), true);
+    return;
   } else if (m.t === "media" && !room.host) {
     room.media = m.media || null;
     room.play = m.play || null;
@@ -2823,6 +2833,43 @@ function roomMessage(m) {
     roomSync();
   } else return;
   paintRoom();
+}
+
+function roomBecome(m) {
+  const key = typeof m.key === "string" && m.key ? m.key : null;
+  if (key) {
+    Object.assign(room, { key, host: true, hold: null, skip: new Set(), sent: null, tracksSent: null, waiting: false, waitSince: null, joining: null, pwNext: null, secretWanted: null });
+    if (pl.open && room.rateSet != null && room.rateSet !== 1) setProp("speed", 1);
+    room.rateSet = null;
+    roomSave();
+    toast(tr("room.nowHost", { name: m.by || roomHostName() }));
+    if (pl.open && pl.waitHost) closePlayer(false);
+    else if (pl.open && sameMedia(pl.ctx, room.media)) { paintState(); roomBeat(false); }
+    else if (room.media) roomFollowMedia(true);
+    return;
+  }
+  Object.assign(room, { key: null, host: false, hold: null, pwNext: null, secretWanted: null, sent: null, tracksSent: null, joining: null, cool: { seek: 0, pause: 0, track: 0 } });
+  room.media = m.media || null;
+  room.play = m.play || null;
+  room.tracks = m.tracks || null;
+  roomSave();
+  toast(tr("room.handed", { name: m.to || roomHostName() }));
+  if (pl.open) { if (pl.menu === "sources" || pl.menu === "episodes") toggleMenu(null); paintState(); }
+  roomFollowMedia();
+}
+
+function roomHandover(m) {
+  if (!room.host) return;
+  const done = () => box.remove();
+  const box = layer("edit room-dialog", done);
+  box._back = done;
+  put(box, h("div", { class: "pf-card" },
+    h("h2", {}, tr("room.handAsk", { name: m.name })),
+    h("p", { class: "hint" }, tr("room.handHint", { name: m.name })),
+    h("div", { class: "pf-row end" },
+      h("button", { class: "btn focusable", onclick: done }, tr("common.cancel")),
+      h("button", { class: "btn primary focusable", onclick: () => { done(); if (!room.host || !roomSend({ t: "handover", to: m.id })) toast(tr("room.reconnecting"), true); } }, tr("room.handOk")))));
+  $(".btn.primary", box).focus({ preventScroll: true });
 }
 
 async function roomAuth(m) {
@@ -3096,7 +3143,7 @@ function roomReport() {
   const wants = !!p && (!p.paused || !!p.hold);
   const mine = pl.open && sameMedia(pl.ctx, room.media);
   let ready = true;
-  if (mine) {
+  if (mine && !pl.waitHost) {
     const left = s.duration > 0 ? s.duration - (s.time || 0) : 99;
     const ahead = s.cache != null ? s.cache - (s.time || 0) : 99;
     ready = !!s.loaded && !s.buffering && (left < 5 || ahead >= (room.waiting ? 4 : 2));
@@ -3119,6 +3166,11 @@ function roomSync() {
   roomReport();
   const p = room.play;
   const s = pl.s;
+  if (pl.waitHost) {
+    const c = pl.ctx;
+    if (pl.open && p && !p.paused && sameMedia(c, room.media) && pl.waitDur > 0 && roomPos(p) < pl.waitDur - 5) startPlayback(c.m, c.vid, c.label, c.stream, Math.floor(roomPos(p) * 1000), c.addon);
+    return;
+  }
   if (pl.open && sameMedia(pl.ctx, room.media)) guestTracks();
   if (!p || !pl.open || !sameMedia(pl.ctx, room.media) || !s.loaded || (p.vid && p.vid !== room.media.vid)) return;
   const t = Date.now();
@@ -3138,6 +3190,20 @@ function roomSync() {
     return;
   }
   roomRate(p.paused || Math.abs(drift) < 0.5 ? p.rate : p.rate * (drift > 0 ? 0.95 : 1.05));
+}
+
+function roomEndWait() {
+  pl.session++;
+  pl.waitHost = true;
+  pl.waitDur = pl.s.duration || 0;
+  pl.s = { ...pl.s, loaded: false, buffering: false };
+  pl.reveal = null;
+  pl.menu = null;
+  renderMenu();
+  pl.ui.root.classList.add("loading");
+  document.body.classList.remove("see-through", "ext-video");
+  paintState();
+  roomFollowMedia();
 }
 
 function roomTick() {
@@ -3180,9 +3246,9 @@ function roomFindStream(md) {
   });
 }
 
-async function roomFollowMedia() {
+async function roomFollowMedia(asHost = false) {
   const md = room.media;
-  if (!md || room.host) return;
+  if (!md || (room.host && !asHost)) return;
   if (pl.open && sameMedia(pl.ctx, md)) { roomSync(); return; }
   const token = `${md.id}|${md.vid}`;
   if (room.joining === token) return;
@@ -3384,9 +3450,15 @@ function paintRoomPanel() {
         room.locked ? h("button", { class: "btn focusable", onclick: roomDropSecret }, tr("room.pwRemove")) : null),
     ]
     : room.locked ? h("span", { class: "room-lock-text" }, h("i", { html: ICON.lock }), tr("room.pwGuest")) : null);
-  paintPart(p.people, JSON.stringify(room.members), () => room.members.map((m) => h("span", { class: `room-person ${m.waiting ? "wait" : ""}` },
-    h("i", { class: "pf-face", style: `background:${roomColor(m.id)}` }, firstLetter(m.name)), m.name,
-    m.host ? h("em", {}, tr("room.hostTag")) : null, m.id === room.me ? h("em", {}, tr("room.you")) : null, m.waiting ? h("em", { class: "busy" }, tr("src.loading")) : null)));
+  const canHand = room.host && room.canHand;
+  paintPart(p.people, `${canHand}|${JSON.stringify(room.members)}`, () => room.members.map((m) => {
+    const bits = [
+      h("i", { class: "pf-face", style: `background:${roomColor(m.id)}` }, firstLetter(m.name)), m.name,
+      m.host ? h("em", {}, tr("room.hostTag")) : null, m.id === room.me ? h("em", {}, tr("room.you")) : null, m.waiting ? h("em", { class: "busy" }, tr("src.loading")) : null,
+    ];
+    if (!canHand || m.host || m.id === room.me) return h("span", { class: `room-person ${m.waiting ? "wait" : ""}` }, ...bits);
+    return h("button", { class: `room-person hand focusable ${m.waiting ? "wait" : ""}`, title: tr("room.handAsk", { name: m.name }), onclick: () => roomHandover(m) }, ...bits, h("em", { class: "act" }, tr("room.hand")));
+  }));
   paintPart(p.reacts, room.reactions.join(" "), () => room.reactions.map((e) => h("button", { class: "room-react-btn focusable", "aria-label": tr("room.react", { e }), onclick: () => roomSend({ t: "react", e }) }, e)));
   const last = room.chat[room.chat.length - 1];
   paintPart(p.log, `${room.chat.length}|${last?.at || 0}`, () => room.chat.length
@@ -3625,13 +3697,25 @@ function castMessage(m) {
   }
 }
 
+function castParty(r) {
+  if (!r || typeof r !== "object" || !ROOM_CODE_RE.test(String(r.code || ""))) return null;
+  const key = typeof r.key === "string" && r.key ? r.key : null;
+  const name = String(r.name || "").trim().slice(0, 32) || roomName() || tr("cast.tv");
+  return { code: r.code, key, name, pw: typeof r.pw === "string" ? r.pw : null };
+}
+
 async function castPlay(m) {
   const md = m.media;
   if (!md?.id || !md?.vid) return;
-  if (inRoom()) roomStop(room.host);
+  const party = castParty(md.room);
+  if (inRoom() && (!party || party.code !== room.code || (party.key && !room.host))) roomStop(room.host);
   if (!$("#sheet").hidden) closeSheet();
   toast(tr("cast.incoming", { name: m.by || tr("cast.phone") }));
   cast.from = m.from || null;
+  if (party) {
+    if (!inRoom()) roomStart(party);
+    if (!room.host) { roomFollowMedia(); return; }
+  }
   const hit = await roomFindStream(md);
   const meta = { id: md.id, type: md.type, name: md.name || "", poster: md.poster, background: md.background };
   if (!hit) { toast(tr("cast.noSource"), true); openStreams(meta, md.vid, md.label); return; }
@@ -3644,7 +3728,7 @@ function castCmd(m) {
   else if (m.cmd === "play" && pl.s.paused) togglePause();
   else if (m.cmd === "seek" && Number.isFinite(m.value)) { seekTo(m.value); wake(); }
   else if (m.cmd === "volume" && Number.isFinite(m.value)) setVolume(m.value);
-  else if (m.cmd === "stop") closePlayer();
+  else if (m.cmd === "stop") { if (roomGuest()) roomStop(false); closePlayer(); }
   setTimeout(() => castReport(true), 300);
 }
 
@@ -3665,7 +3749,7 @@ function castReport(force) {
 }
 
 function castable() {
-  return CAST_REMOTE && pl.open && !!pl.ctx && !String(pl.ctx.vid).startsWith("local:") && !inRoom() && cast.screens.length > 0;
+  return CAST_REMOTE && pl.open && !!pl.ctx && !String(pl.ctx.vid).startsWith("local:") && cast.screens.length > 0;
 }
 
 function castPick() {
@@ -3685,10 +3769,12 @@ function castPick() {
 function castTo(s) {
   if (!castable()) return;
   const media = roomMediaOf(pl.ctx, curTime());
+  if (inRoom()) media.room = { code: room.code, key: room.host ? room.key : null, pw: room.pw, name: room.name };
   if (!castSend({ t: "cast", to: s.id, media })) { toast(tr("cast.offline"), true); return; }
   cast.target = s.id;
   cast.targetName = s.name || tr("cast.tv");
   cast.state = null;
+  if (inRoom()) { roomStop(false); toast(tr("room.toTv", { name: cast.targetName })); }
   closePlayer();
   castPanel();
 }
@@ -5105,7 +5191,8 @@ document.addEventListener("mouseup", (e) => { if (e.button === 3) back(); });
   listen("player-ended", ({ payload }) => {
     if (!pl.open || payload.session !== pl.session) return;
     if (payload.error) toast(tr("pl.error", { e: errText(payload.error) }), true);
-    if (payload.ended && nextEpisode() && !roomGuest()) { playNext(true); return; }
+    if (payload.ended && roomGuest()) { roomEndWait(); return; }
+    if (payload.ended && nextEpisode()) { playNext(true); return; }
     closePlayer(false);
   });
   listen("library-changed", async ({ payload }) => {
