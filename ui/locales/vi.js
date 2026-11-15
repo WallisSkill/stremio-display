@@ -83,6 +83,7 @@ export default {
   "cast.title": "Chiếu lên màn hình",
   "cast.hint": "Chọn TV hoặc máy tính đang mở WiS TV với cùng tài khoản.",
   "cast.none": "Chưa thấy TV hoặc máy tính nào. Mở WiS TV trên TV hoặc máy tính, đăng nhập cùng tài khoản rồi đợi vài giây.",
+  "cast.locked": "TV đang ở phòng xem chung, chủ phòng chọn phụ đề, nguồn và tập.",
   "cast.on": "Đang chiếu trên {name}",
   "cast.stop": "Ngắt chiếu",
   "cast.hide": "Ẩn",

@@ -363,6 +363,25 @@ a.btn { text-decoration: none; }
 .cast-ctl .icon-btn { width: 52px; height: 52px; }
 .cast-ctl .icon-btn svg { width: 28px; height: 28px; }
 .cast-ctl .cast-play { width: 64px; height: 64px; background: #fff; color: #000; }
+.cast-more { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.cast-more-btn { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 8px 14px; border-radius: 999px; background: rgba(255,255,255,0.08); border: 1px solid var(--line); color: var(--text); font-size: 15px; font-weight: 600; }
+.cast-more-btn svg { width: 20px; height: 20px; display: block; }
+.cast-more-btn:focus-visible, .cast-more-btn:hover { background: #fff; color: #000; }
+.cast-layer.under { visibility: hidden; }
+.cast-view .room-card.cast-card { overflow: hidden; max-height: min(640px, calc(var(--vvh, 100dvh) - 32px)); }
+.cast-opts { display: flex; flex-direction: column; gap: 6px; min-height: 0; flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; text-align: left; margin: 0 -4px; padding: 0 4px; }
+.cast-opts-h { margin: 10px 0 2px; font-size: 13px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.cast-opts-h:first-child { margin-top: 0; }
+.cast-opt { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; padding: 12px 14px; border-radius: 12px; background: rgba(255,255,255,0.05); border: 1px solid transparent; color: var(--text); font-size: 15px; text-align: left; }
+.cast-opt small { font-size: 12.5px; color: var(--muted); }
+.cast-opt.on { background: rgba(255,255,255,0.16); border-color: rgba(255,255,255,0.5); font-weight: 600; }
+.cast-opt:disabled { opacity: 0.45; }
+.cast-opt:not(:disabled):focus-visible, .cast-opt:not(:disabled):hover { background: #fff; color: #000; }
+.cast-opt:not(:disabled):focus-visible small, .cast-opt:not(:disabled):hover small { color: rgba(0,0,0,0.6); }
+.cast-delay { display: flex; align-items: center; gap: 10px; padding: 6px 2px; }
+.cast-delay span { flex: 1; color: var(--muted); }
+.cast-delay b { min-width: 48px; text-align: center; font-variant-numeric: tabular-nums; }
+.cast-delay .btn { min-height: 40px; padding: 6px 12px; }
 .cast-chip { position: fixed; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 40; display: flex; align-items: center; gap: 10px; max-width: calc(100vw - 32px); padding: 10px 18px; border-radius: 999px; background: #fff; color: #000; font-weight: 600; box-shadow: 0 12px 32px rgba(0,0,0,0.5); }
 .cast-chip-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .login-pair { position: relative; z-index: 1; display: flex; align-items: center; gap: 28px; }

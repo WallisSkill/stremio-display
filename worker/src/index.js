@@ -630,7 +630,7 @@ export class WatchRoom extends DurableObject {
 const CAST_TOKEN_LIFE_MS = 30 * 24 * 3600e3;
 const CAST_TOKENS = 24;
 const CAST_SOCKETS = 16;
-const CAST_CMDS = new Set(["pause", "play", "seek", "stop", "volume"]);
+const CAST_CMDS = new Set(["pause", "play", "seek", "stop", "volume", "opts", "sub", "addsub", "audio", "speed", "delay", "source", "ep", "next"]);
 const CAST_ROLES = new Set(["screen", "remote"]);
 const CAST_NAME = 40;
 
@@ -724,6 +724,12 @@ export class CastHub extends DurableObject {
       for (const r of this.live("remote")) try { r.send(out); } catch (e) {}
       return;
     }
+    if (me.role === "screen" && msg.t === "opts") {
+      const opts = msg.opts && typeof msg.opts === "object" && !Array.isArray(msg.opts) ? msg.opts : null;
+      const out = JSON.stringify({ t: "opts", id: me.id, opts });
+      for (const r of this.live("remote")) try { r.send(out); } catch (e) {}
+      return;
+    }
     if (me.role !== "remote") return;
     const target = this.live("screen").find((s) => this.who(s).id === msg.to);
     if (!target) {
@@ -733,7 +739,7 @@ export class CastHub extends DurableObject {
     if (msg.t === "cast" && msg.media && typeof msg.media === "object") {
       this.send(target, { t: "cast", media: msg.media, from: me.id, by: me.name });
     } else if (msg.t === "cmd" && CAST_CMDS.has(msg.cmd)) {
-      this.send(target, { t: "cmd", cmd: msg.cmd, value: Number.isFinite(msg.value) ? msg.value : null, from: me.id });
+      this.send(target, { t: "cmd", cmd: msg.cmd, value: Number.isFinite(msg.value) ? msg.value : null, rev: Number.isInteger(msg.rev) ? msg.rev : null, from: me.id });
     }
   }
 

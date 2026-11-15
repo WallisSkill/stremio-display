@@ -2379,6 +2379,35 @@ function pickSub(id) {
   renderMenu();
 }
 
+const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+
+function setSpeed(v) {
+  pl.s.speed = v;
+  setProp("speed", v);
+  renderMenu();
+  paintState();
+}
+
+function chooseSub(t) {
+  if (!t) { rememberSub({ off: true }); pickSub("no"); return; }
+  rememberSub(t.external ? { lang: t.lang, url: t.file || undefined } : { lang: t.lang, title: t.title });
+  pickSub(t.id);
+}
+
+function addonSubList() {
+  if (!Array.isArray(pl.subs)) return [];
+  const seen = new Set();
+  return pl.subs.filter((s) => !seen.has(s.url) && seen.add(s.url)).sort((a, b) => langRank(a.lang) - langRank(b.lang) || String(a.lang).localeCompare(String(b.lang))).slice(0, 60);
+}
+
+function chooseAddonSub(s) {
+  rememberSub({ lang: s.lang, url: s.url });
+  const track = pl.added.has(s.url) && pl.tracks.find((t) => t.type === "sub" && t.file === s.url);
+  if (track) { pickSub(track.id); return; }
+  addAddonSub(s, false);
+  renderMenu();
+}
+
 function renderMenu() {
   const box = pl.ui.menu;
   box.hidden = !pl.menu;
@@ -2454,7 +2483,7 @@ function fillMenu(box) {
     const cur = pl.s.speed || 1;
     box.className = "pl-menu narrow";
     put(box, h("h4", {}, tr("pl.speedTitle")),
-      ...[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map((v) => menuItem(v === 1 ? tr("pl.normal") : `${v}×`, Math.abs(cur - v) < 0.01, () => { pl.s.speed = v; setProp("speed", v); renderMenu(); paintState(); })));
+      ...SPEEDS.map((v) => menuItem(v === 1 ? tr("pl.normal") : `${v}×`, Math.abs(cur - v) < 0.01, () => setSpeed(v))));
     return;
   }
   box.className = "pl-menu";
@@ -2477,8 +2506,8 @@ function fillMenu(box) {
     audio.length ? audio.map((t) => menuItem(trackLabel(t), t.selected, () => { setProp("aid", t.id); })) : h("p", { class: "pl-none" }, tr("common.noInfo")));
   pl.ui.delayVal = h("b", {}, delayText(pl.s.subDelay));
   const subCol = h("div", { class: "pl-col" }, h("h4", {}, tr("set.subs")),
-    menuItem(tr("set.subsOff"), !sid || sid === "no" || sid === "false", () => { rememberSub({ off: true }); pickSub("no"); }),
-    subs.map((t) => menuItem(trackLabel(t), t.selected, () => { rememberSub(t.external ? { lang: t.lang, url: t.file || undefined } : { lang: t.lang, title: t.title }); pickSub(t.id); })),
+    menuItem(tr("set.subsOff"), !sid || sid === "no" || sid === "false", () => chooseSub(null)),
+    subs.map((t) => menuItem(trackLabel(t), t.selected, () => chooseSub(t))),
     h("div", { class: "pl-delay" }, h("span", {}, tr("sub.delay")),
       h("button", { class: "pl-mini", tabindex: "-1", onclick: () => nudgeDelay(-0.1) }, "−0.1s"),
       pl.ui.delayVal,
@@ -2488,21 +2517,14 @@ function fillMenu(box) {
   if (pl.subs === "loading") addonCol.append(h("div", { class: "spinner small" }));
   else if (!pl.subs || !pl.subs.length) addonCol.append(h("p", { class: "pl-none" }, tr("sub.none")));
   else {
-    const seen = new Set();
-    const list = pl.subs.filter((s) => !seen.has(s.url) && seen.add(s.url)).sort((a, b) => langRank(a.lang) - langRank(b.lang) || String(a.lang).localeCompare(String(b.lang))).slice(0, 60);
+    const list = addonSubList();
     list.slice(0, 12).forEach((s) => wantSubInfo(s.url));
     addonCol.append(...list.map((s) => {
       const done = pl.added.has(s.url);
       const credit = subCredit(s.url);
       const creditEl = h("small", { class: "pl-credit", "data-url": s.url, hidden: !credit }, credit ? tr("sub.credit", { name: credit }) : "");
       const file = subFileName(s);
-      return menuItem(langName(s.lang) || tr("common.unknown"), done, () => {
-        rememberSub({ lang: s.lang, url: s.url });
-        const track = done && pl.tracks.find((t) => t.type === "sub" && t.file === s.url);
-        if (track) { pickSub(track.id); return; }
-        addAddonSub(s, false);
-        renderMenu();
-      }, [creditEl, subLabel(s) ? h("small", { class: "pl-label-note" }, subLabel(s)) : null, [releaseSummary(s), s.addon].filter(Boolean).join(" · "), file ? h("small", { class: "pl-file" }, file) : null]);
+      return menuItem(langName(s.lang) || tr("common.unknown"), done, () => chooseAddonSub(s), [creditEl, subLabel(s) ? h("small", { class: "pl-label-note" }, subLabel(s)) : null, [releaseSummary(s), s.addon].filter(Boolean).join(" · "), file ? h("small", { class: "pl-file" }, file) : null]);
     }));
   }
   put(box, audioCol, subCol, addonCol);
@@ -3597,7 +3619,9 @@ const CAST_SCREEN = !!TAURI && !TOUCH;
 const CAST_REMOTE = TOUCH;
 const CAST_BEAT_MS = 5000;
 const CAST_PING_MS = 30000;
-const cast = { ws: null, role: null, tries: 0, ticketFails: 0, timer: 0, beat: 0, ping: 0, screens: [], target: null, targetName: "", state: null, at: 0, from: null, sig: "", last: null, sentAt: 0, panel: null, chip: null, pick: null };
+const cast = { ws: null, role: null, tries: 0, ticketFails: 0, timer: 0, beat: 0, ping: 0, screens: [], target: null, targetName: "", state: null, at: 0, from: null, sig: "", last: null, sentAt: 0, panel: null, chip: null, pick: null, opts: null, optsWant: false, optsSig: "", optsRev: 0, optsRef: null, view: null };
+const CAST_PICK_CMDS = new Set(["sub", "addsub", "audio", "source", "ep"]);
+const CAST_ROOM_CMDS = new Set([...CAST_PICK_CMDS, "next", "delay", "speed"]);
 
 function castStore(key, value) {
   try {
@@ -3723,6 +3747,8 @@ function castMessage(m) {
     const s = cast.screens.find((x) => x.id === m.id);
     if (s) s.state = m.state;
     if (m.id === cast.target) { cast.state = m.state; cast.at = Date.now(); paintCast(); }
+  } else if (m.t === "opts") {
+    if (m.id === cast.target) { cast.opts = m.opts && typeof m.opts === "object" ? m.opts : null; paintCastPanel(); paintCastView(); }
   } else if (m.t === "gone") {
     if (m.id === cast.target) { toast(tr("cast.gone"), true); castEnd(); }
   } else if (m.t === "cast" && cast.role === "screen") {
@@ -3751,24 +3777,100 @@ async function castPlay(m) {
     if (!inRoom()) roomStart(party);
     if (!room.host) { roomFollowMedia(); return; }
   }
-  const hit = await roomFindStream(md);
+  const [hit, full] = await Promise.all([roomFindStream(md), md.type === "series" ? call("meta", { kind: md.type, id: md.id }).catch(() => null) : null]);
   const meta = { id: md.id, type: md.type, name: md.name || "", poster: md.poster, background: md.background };
+  if (Array.isArray(full?.videos)) meta.videos = full.videos;
   if (!hit) { toast(tr("cast.noSource"), true); openStreams(meta, md.vid, md.label); return; }
   startPlayback(meta, md.vid, md.label, hit.stream, Math.floor((md.start || 0) * 1000), hit.addon);
 }
 
+function castClip(v, n = 90) {
+  const t = [...String(v || "").replace(/\s+/g, " ").trim()];
+  return t.length > n ? t.slice(0, n - 1).join("") + "…" : t.join("");
+}
+
+function castOptsOf() {
+  const c = pl.ctx;
+  if (!pl.open || !c) return null;
+  const ref = { audio: pl.tracks.filter((t) => t.type === "audio"), subs: pl.tracks.filter((t) => t.type === "sub"), extra: addonSubList(), srcs: [], eps: [] };
+  const sid = pl.s.sid;
+  const o = {
+    guest: roomGuest(),
+    audio: ref.audio.map((t) => ({ l: castClip(trackLabel(t)), on: !!t.selected })),
+    subs: ref.subs.map((t) => ({ l: castClip(trackLabel(t)), on: !!t.selected })),
+    off: !sid || sid === "no" || sid === "false",
+    extra: Array.isArray(pl.subs) ? ref.extra.map((x) => ({ l: castClip(langName(x.lang) || tr("common.unknown"), 40), n: castClip([subCredit(x.url) || subLabel(x), x.addon].filter(Boolean).join(" · ")), on: ref.subs.some((t) => t.selected && t.file === x.url) })) : null,
+    srcs: null,
+    eps: null,
+    speed: pl.s.speed || 1,
+    delay: Math.round((pl.s.subDelay || 0) * 10) / 10,
+    next: !!pl.ui && !pl.ui.next.hidden,
+  };
+  if (!isTvCtx(c) && pl.sources?.vid === c.vid) {
+    o.srcs = [];
+    for (const g of pl.sources.groups || []) {
+      for (const st of g.streams) {
+        if (ref.srcs.length >= 60) break;
+        if (st.externalUrl && !st.url && !st.infoHash) continue;
+        const q = quality(st);
+        ref.srcs.push({ stream: st, addon: g.addon });
+        o.srcs.push({ g: castClip(g.addon, 40), l: castClip([...q.tags.map(([t]) => t), (st.name || g.addon)].join(" ")), n: castClip([q.size, q.seeds ? `${q.seeds} seed` : "", st.infoHash ? "Torrent" : ""].filter(Boolean).join(" · ") || (st.title || st.description || "").split(/\r?\n/)[0]), on: sameStream(st, c.stream) });
+      }
+    }
+    o.srcWait = !!pl.sources.pending;
+  }
+  if (c.m.type === "series" && Array.isArray(c.m.videos)) {
+    const now = new Date();
+    ref.eps = c.m.videos.filter((v) => v.id).sort(epSort).slice(0, 300);
+    o.eps = ref.eps.map((v) => ({ s: v.season ?? 0, e: v.episode ?? v.number ?? null, l: castClip(v.title || v.name || "", 60), on: v.id === c.vid, off: !!(v.released && new Date(v.released) > now) }));
+  }
+  return { o, ref };
+}
+
+function castOptsPush(force) {
+  if (cast.role !== "screen" || cast.ws?.readyState !== 1) return;
+  if (!pl.open) {
+    if (cast.optsSig !== "none") { cast.optsSig = "none"; cast.optsRef = null; castSend({ t: "opts", opts: null }); }
+    return;
+  }
+  if (!cast.optsWant && !force) return;
+  const got = castOptsOf();
+  if (!got) return;
+  let body = JSON.stringify(got.o);
+  while (body.length > 28000 && got.o.eps?.length > 1) { const keep = Math.ceil(got.o.eps.length / 2); const at = Math.max(0, Math.min(got.o.eps.findIndex((e) => e.on) - (keep >> 1), got.o.eps.length - keep)); got.o.eps = got.o.eps.slice(at, at + keep); got.ref.eps = got.ref.eps.slice(at, at + keep); body = JSON.stringify(got.o); }
+  if (body === cast.optsSig && !force) return;
+  if (body !== cast.optsSig) cast.optsRev++;
+  cast.optsSig = body;
+  cast.optsRef = got.ref;
+  castSend({ t: "opts", opts: { ...got.o, rev: cast.optsRev } });
+}
+
 function castCmd(m) {
   if (!pl.open) return;
+  if (m.cmd === "opts") { cast.optsWant = true; loadAddonSubs(); loadSources(); castOptsPush(true); return; }
+  if ((CAST_PICK_CMDS.has(m.cmd) && (m.rev !== cast.optsRev || !cast.optsRef)) || (CAST_ROOM_CMDS.has(m.cmd) && roomGuest())) { castOptsPush(true); return; }
+  const ref = cast.optsRef;
+  const at = (list) => (Number.isInteger(m.value) ? list?.[m.value] : null) || null;
   if (m.cmd === "pause" && !pl.s.paused) togglePause();
   else if (m.cmd === "play" && pl.s.paused) togglePause();
   else if (m.cmd === "seek" && Number.isFinite(m.value)) { seekTo(m.value); wake(); }
   else if (m.cmd === "volume" && Number.isFinite(m.value)) setVolume(m.value);
   else if (m.cmd === "stop") { if (roomGuest()) roomStop(false); closePlayer(); }
-  setTimeout(() => castReport(true), 300);
+  else if (m.cmd === "sub") { if (m.value === -1) chooseSub(null); else if (at(ref.subs)) chooseSub(at(ref.subs)); }
+  else if (m.cmd === "addsub" && at(ref.extra)) chooseAddonSub(at(ref.extra));
+  else if (m.cmd === "audio" && at(ref.audio)) setProp("aid", at(ref.audio).id);
+  else if (m.cmd === "speed" && SPEEDS.includes(m.value)) setSpeed(m.value);
+  else if (m.cmd === "delay" && Number.isFinite(m.value) && Math.abs(m.value) <= 1) nudgeDelay(m.value);
+  else if (m.cmd === "source" && at(ref.srcs)) switchSource(at(ref.srcs).stream, at(ref.srcs).addon);
+  else if (m.cmd === "ep" && at(ref.eps) && at(ref.eps).id !== pl.ctx?.vid) playEpisode(at(ref.eps), false);
+  else if (m.cmd === "next" && !pl.ui.next.hidden) playNext(false);
+  setTimeout(() => { castReport(true); castOptsPush(false); }, 400);
 }
 
 function castReport(force) {
   if (cast.role !== "screen" || cast.ws?.readyState !== 1) return;
+  if (!pl.open) cast.optsWant = false;
+  castOptsPush(false);
   const c = pl.open ? pl.ctx : null;
   const st = c ? { title: [c.m?.name, c.label && c.label !== c.m?.name ? c.label : ""].filter(Boolean).join(" · "), poster: c.m?.poster || null, time: Math.round(curTime() * 10) / 10, duration: pl.s.duration || 0, paused: !!pl.s.paused, volume: pl.s.volume ?? null, from: cast.from } : null;
   const sig = st ? `${st.title}|${st.paused}|${Math.round(st.duration)}` : "none";
@@ -3825,6 +3927,7 @@ function castTo(s) {
   cast.target = s.id;
   cast.targetName = s.name || tr("cast.tv");
   cast.state = null;
+  cast.opts = null;
   if (inRoom()) { roomStop(false); toast(tr("room.toTv", { name: cast.targetName })); }
   closePlayer();
   castPanel();
@@ -3833,6 +3936,9 @@ function castTo(s) {
 function castEnd() {
   cast.target = null;
   cast.state = null;
+  cast.opts = null;
+  cast.view?.box.remove();
+  cast.view = null;
   cast.panel?.remove();
   cast.panel = null;
   paintCast();
@@ -3845,9 +3951,9 @@ function castTime() {
   return s.duration ? Math.min(s.duration, t) : t;
 }
 
-function castCommand(cmd, value) {
+function castCommand(cmd, value, rev) {
   if (!cast.target) return;
-  if (!castSend({ t: "cmd", to: cast.target, cmd, value })) { toast(tr("cast.offline"), true); return; }
+  if (!castSend({ t: "cmd", to: cast.target, cmd, value, rev })) { toast(tr("cast.offline"), true); return; }
   if (cast.state && (cmd === "pause" || cmd === "play")) { cast.state = { ...cast.state, time: castTime(), paused: cmd === "pause" }; cast.at = Date.now(); }
   if (cast.state && cmd === "seek") { cast.state = { ...cast.state, time: value }; cast.at = Date.now(); }
   paintCast();
@@ -3866,6 +3972,7 @@ function castPanel() {
     seek: h("input", { type: "range", class: "cast-seek focusable", min: "0", max: "1", step: "1", value: "0" }),
     time: h("span", { class: "cast-time" }),
     play: h("button", { class: "icon-btn cast-play focusable", onclick: () => castCommand(cast.state?.paused ? "play" : "pause") }),
+    more: h("div", { class: "cast-more" }),
   };
   ui.seek.addEventListener("change", () => castCommand("seek", Number(ui.seek.value)));
   ui.seek.addEventListener("input", () => { box._dragging = true; ui.time.textContent = `${secs(Number(ui.seek.value))} / ${secs(cast.state?.duration)}`; });
@@ -3879,11 +3986,110 @@ function castPanel() {
       h("button", { class: "icon-btn focusable", "aria-label": tr("pl.back10"), html: ICON.back10, onclick: () => castCommand("seek", Math.max(0, castTime() - 10)) }),
       ui.play,
       h("button", { class: "icon-btn focusable", "aria-label": tr("pl.fwd10"), html: ICON.fwd10, onclick: () => castCommand("seek", castTime() + 10) })),
+    ui.more,
     h("div", { class: "pf-row end" },
       h("button", { class: "btn focusable", onclick: () => { castCommand("stop"); castEnd(); } }, tr("cast.stop")),
       h("button", { class: "btn primary focusable", onclick: close }, tr("cast.hide")))));
   const timer = setInterval(() => { if (!box.isConnected) { clearInterval(timer); return; } paintCastPanel(); }, 1000);
+  castCommand("opts");
   paintCast();
+}
+
+function castMoreBtn(icon, label, onclick) {
+  return h("button", { class: "cast-more-btn focusable", onclick }, h("span", { html: ICON[icon] }), h("span", {}, label));
+}
+
+function paintCastMore(ui) {
+  const o = cast.state ? cast.opts : null;
+  const speed = o?.speed || 1;
+  const sig = o ? [!!o.srcs, !!o.eps?.length, !!o.next, speed].join("|") : "";
+  if (ui.more._sig === sig) return;
+  ui.more._sig = sig;
+  const had = ui.more.contains(document.activeElement) ? [...ui.more.children].indexOf(document.activeElement) : -1;
+  put(ui.more, ...(!o ? [] : [
+    castMoreBtn("cc", tr("set.subs"), () => castView("tracks")),
+    o.srcs ? castMoreBtn("source", tr("pl.src"), () => castView("sources")) : null,
+    o.eps?.length ? castMoreBtn("list", tr("ep.list"), () => castView("eps")) : null,
+    castMoreBtn("speed", speed === 1 ? tr("pl.speed") : `${speed}×`, () => castView("speed")),
+    o.next ? castMoreBtn("next", tr("pl.next"), () => castCommand("next")) : null,
+  ]));
+  ui.more.hidden = !o;
+  if (had >= 0) (ui.more.children[had] || ui.more.lastElementChild)?.focus({ preventScroll: true });
+}
+
+function castView(kind) {
+  if (!cast.target) return;
+  cast.view?.box.remove();
+  const close = () => { box.remove(); if (cast.view?.box === box) cast.view = null; cast.panel?.classList.remove("under"); };
+  cast.panel?.classList.add("under");
+  const box = layer("edit cast-layer cast-view", close);
+  const titles = { tracks: tr("pl.subsAudio"), sources: tr("src.title"), eps: tr("ep.list"), speed: tr("pl.speedTitle") };
+  const list = h("div", { class: "cast-opts" });
+  put(box, h("div", { class: "room-card cast-card" },
+    h("h2", {}, titles[kind]),
+    list,
+    h("div", { class: "pf-row end" }, h("button", { class: "btn primary focusable", onclick: close }, tr("common.close")))));
+  cast.view = { box, kind, list };
+  paintCastView();
+}
+
+function castOpt(label, note, on, onclick, off) {
+  return h("button", { class: `cast-opt focusable ${on ? "on" : ""}`, disabled: off || null, "aria-pressed": on ? "true" : "false", onclick },
+    h("span", { class: "cast-opt-l" }, label), note ? h("small", {}, note) : null);
+}
+
+function paintCastView() {
+  const v = cast.view;
+  if (!v?.box.isConnected) { cast.view = null; return; }
+  const o = cast.opts;
+  const sig = JSON.stringify([v.kind, o]);
+  if (v.sig === sig) return;
+  v.sig = sig;
+  const keep = v.list.scrollTop;
+  const focus = v.list.contains(document.activeElement) ? [...v.list.querySelectorAll("button")].indexOf(document.activeElement) : -1;
+  const rev = o?.rev;
+  const locked = !!o?.guest;
+  const head = (text) => h("h3", { class: "cast-opts-h" }, text);
+  const wait = () => h("div", { class: "spinner small" });
+  const none = (text) => h("p", { class: "cast-none" }, text);
+  const out = [];
+  if (!o) out.push(wait());
+  else if (locked) out.push(h("p", { class: "hint" }, tr("cast.locked")));
+  if (o && v.kind === "tracks") {
+    out.push(head(tr("set.subs")),
+      castOpt(tr("set.subsOff"), "", o.off, () => castCommand("sub", -1, rev), locked),
+      ...(o.subs || []).map((t, i) => castOpt(t.l, "", t.on, () => castCommand("sub", i, rev), locked)),
+      h("div", { class: "cast-delay" }, h("span", {}, tr("sub.delay")),
+        h("button", { class: "btn focusable", disabled: locked || null, onclick: () => castCommand("delay", -0.1) }, "−0.1s"),
+        h("b", {}, `${(o.delay || 0).toFixed(1)}s`),
+        h("button", { class: "btn focusable", disabled: locked || null, onclick: () => castCommand("delay", 0.1) }, "+0.1s")),
+      head(tr("sub.fromAddons")),
+      ...(o.extra === null ? [wait()] : o.extra?.length ? o.extra.map((x, i) => castOpt(x.l, x.n, x.on, () => castCommand("addsub", i, rev), locked)) : [none(tr("sub.none"))]),
+      head(tr("trk.audio")),
+      ...(o.audio?.length ? o.audio.map((t, i) => castOpt(t.l, "", t.on, () => castCommand("audio", i, rev), locked)) : [none(tr("common.noInfo"))]));
+  } else if (o && v.kind === "sources") {
+    let group = null;
+    (o.srcs || []).forEach((x, i) => {
+      if (x.g !== group) { group = x.g; out.push(head(x.g)); }
+      out.push(castOpt(x.l, x.on ? [tr("src.playing"), x.n].filter(Boolean).join(" · ") : x.n, x.on, () => { if (!x.on) castCommand("source", i, rev); }, locked));
+    });
+    if (o.srcWait) out.push(wait());
+    else if (!o.srcs?.length) out.push(none(tr("src.noneShort")));
+  } else if (o && v.kind === "eps") {
+    let season = null;
+    (o.eps || []).forEach((x, i) => {
+      if (x.s !== season) { season = x.s; out.push(head(x.s === 0 ? tr("ep.special") : tr("ep.season", { n: x.s }))); }
+      out.push(castOpt(`${x.e ?? "?"}. ${x.l || tr("ep.n", { n: x.e ?? "" })}`, x.on ? tr("ep.watching") : "", x.on, () => { if (!x.on) castCommand("ep", i, rev); }, locked || x.off));
+    });
+  } else if (o && v.kind === "speed") {
+    out.push(...SPEEDS.map((n) => castOpt(n === 1 ? tr("pl.normal") : `${n}×`, "", Math.abs((o.speed || 1) - n) < 0.01, () => castCommand("speed", n), locked)));
+  }
+  put(v.list, ...out);
+  if (keep) v.list.scrollTop = keep;
+  else requestAnimationFrame(() => v.list.querySelector(".cast-opt.on")?.scrollIntoView({ block: "center" }));
+  const btns = [...v.list.querySelectorAll("button:not([disabled])")];
+  if (focus >= 0) (v.list.querySelectorAll("button")[focus] || btns[0])?.focus({ preventScroll: true });
+  else if (!TOUCH && !v.box.contains(document.activeElement)) (v.list.querySelector(".cast-opt.on:not([disabled])") || btns[0] || $(".btn.primary", v.box))?.focus({ preventScroll: true });
 }
 
 function paintCastPanel() {
@@ -3899,6 +4105,7 @@ function paintCastPanel() {
   ui.play.setAttribute("aria-label", s?.paused ? tr("pl.play") : tr("pl.pause"));
   ui.play.disabled = !s;
   ui.seek.disabled = !s;
+  paintCastMore(ui);
   if (!box._dragging) {
     const t = castTime();
     ui.seek.max = String(Math.max(1, Math.round(s?.duration || 0)));
