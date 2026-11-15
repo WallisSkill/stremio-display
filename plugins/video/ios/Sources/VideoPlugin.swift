@@ -1,4 +1,7 @@
 import AVFoundation
+import AVKit
+import CoreMedia
+import CoreVideo
 import ObjectiveC
 import Tauri
 import UIKit
@@ -115,6 +118,205 @@ struct OpenArgs: Decodable {
 @_silgen_name("wistv_audio_interrupted")
 func wistvAudioInterrupted()
 
+@_silgen_name("wistv_pip_started")
+func wistvPipStarted(_ ok: Bool)
+
+@_silgen_name("wistv_pip_stopped")
+func wistvPipStopped(_ restored: Bool)
+
+@_silgen_name("wistv_pip_play")
+func wistvPipPlay(_ on: Bool)
+
+@_silgen_name("wistv_pip_skip")
+func wistvPipSkip(_ seconds: Double)
+
+final class PipView: UIView {
+    override class var layerClass: AnyClass { AVSampleBufferDisplayLayer.self }
+}
+
+final class PipFrames {
+    static let shared = PipFrames()
+    let view = PipView(frame: .zero)
+    let display: AVSampleBufferDisplayLayer
+    var paused = false
+    private var pool: CVPixelBufferPool?
+    private var width = 0
+    private var height = 0
+    private var format: CMVideoFormatDescription?
+    private var current: CVPixelBuffer?
+
+    private init() {
+        display = view.layer as! AVSampleBufferDisplayLayer
+        display.videoGravity = .resizeAspect
+        display.backgroundColor = UIColor.black.cgColor
+        view.isUserInteractionEnabled = false
+        view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    }
+
+    func begin(_ w: Int, _ h: Int, _ stride: UnsafeMutablePointer<Int>) -> UnsafeMutableRawPointer? {
+        if pool == nil || width != w || height != h {
+            let attrs: [String: Any] = [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+                kCVPixelBufferWidthKey as String: w,
+                kCVPixelBufferHeightKey as String: h,
+                kCVPixelBufferIOSurfacePropertiesKey as String: [String: Any](),
+            ]
+            var made: CVPixelBufferPool?
+            CVPixelBufferPoolCreate(nil, nil, attrs as CFDictionary, &made)
+            pool = made
+            width = w
+            height = h
+            format = nil
+        }
+        guard let pool else { return nil }
+        var buffer: CVPixelBuffer?
+        guard CVPixelBufferPoolCreatePixelBuffer(nil, pool, &buffer) == kCVReturnSuccess, let buffer else { return nil }
+        CVPixelBufferLockBaseAddress(buffer, [])
+        stride.pointee = CVPixelBufferGetBytesPerRow(buffer)
+        current = buffer
+        return CVPixelBufferGetBaseAddress(buffer)
+    }
+
+    func end(_ ok: Bool) {
+        guard let buffer = current else { return }
+        current = nil
+        CVPixelBufferUnlockBaseAddress(buffer, [])
+        guard ok else { return }
+        if format == nil {
+            CMVideoFormatDescriptionCreateForImageBuffer(allocator: nil, imageBuffer: buffer, formatDescriptionOut: &format)
+        }
+        guard let format else { return }
+        var timing = CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: CMClockGetTime(CMClockGetHostTimeClock()), decodeTimeStamp: .invalid)
+        var sample: CMSampleBuffer?
+        CMSampleBufferCreateReadyWithImageBuffer(allocator: nil, imageBuffer: buffer, formatDescription: format, sampleTiming: &timing, sampleBufferOut: &sample)
+        guard let sample else { return }
+        if let list = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: true), CFArrayGetCount(list) > 0 {
+            let dict = unsafeBitCast(CFArrayGetValueAtIndex(list, 0), to: CFMutableDictionary.self)
+            CFDictionarySetValue(dict, Unmanaged.passUnretained(kCMSampleAttachmentKey_DisplayImmediately).toOpaque(), Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
+        }
+        if display.status == .failed {
+            display.flush()
+        }
+        display.enqueue(sample)
+    }
+}
+
+final class PipControl: NSObject, AVPictureInPictureControllerDelegate, AVPictureInPictureSampleBufferPlaybackDelegate {
+    static let shared = PipControl()
+    private var controller: AVPictureInPictureController?
+    private var restored = false
+
+    func start() {
+        if controller == nil {
+            let source = AVPictureInPictureController.ContentSource(sampleBufferDisplayLayer: PipFrames.shared.display, playbackDelegate: self)
+            let made = AVPictureInPictureController(contentSource: source)
+            made.delegate = self
+            made.requiresLinearPlayback = false
+            controller = made
+        }
+        attempt(0)
+    }
+
+    private func attempt(_ tries: Int) {
+        guard let controller else {
+            wistvPipStarted(false)
+            return
+        }
+        if controller.isPictureInPictureActive {
+            wistvPipStarted(true)
+        } else if controller.isPictureInPicturePossible {
+            controller.startPictureInPicture()
+        } else if tries >= 30 {
+            wistvPipStarted(false)
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { self.attempt(tries + 1) }
+        }
+    }
+
+    func stop() {
+        controller?.stopPictureInPicture()
+    }
+
+    func refresh() {
+        controller?.invalidatePlaybackState()
+    }
+
+    func pictureInPictureControllerWillStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+        restored = false
+    }
+
+    func pictureInPictureControllerDidStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+        wistvPipStarted(true)
+    }
+
+    func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, failedToStartPictureInPictureWithError error: Error) {
+        wistvPipStarted(false)
+    }
+
+    func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void) {
+        restored = true
+        completionHandler(true)
+    }
+
+    func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+        let back = restored
+        PipFrames.shared.display.flushAndRemoveImage()
+        DispatchQueue.global(qos: .userInitiated).async { wistvPipStopped(back) }
+    }
+
+    func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, setPlaying playing: Bool) {
+        PipFrames.shared.paused = !playing
+        DispatchQueue.global(qos: .userInitiated).async { wistvPipPlay(playing) }
+    }
+
+    func pictureInPictureControllerTimeRangeForPlayback(_ pictureInPictureController: AVPictureInPictureController) -> CMTimeRange {
+        CMTimeRange(start: .negativeInfinity, duration: .positiveInfinity)
+    }
+
+    func pictureInPictureControllerIsPlaybackPaused(_ pictureInPictureController: AVPictureInPictureController) -> Bool {
+        PipFrames.shared.paused
+    }
+
+    func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, didTransitionToRenderSize newRenderSize: CMVideoDimensions) {}
+
+    func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, skipByInterval skipInterval: CMTime, completion completionHandler: @escaping () -> Void) {
+        let seconds = CMTimeGetSeconds(skipInterval)
+        DispatchQueue.global(qos: .userInitiated).async { wistvPipSkip(seconds) }
+        completionHandler()
+    }
+}
+
+@_cdecl("wistv_pip_supported")
+public func wistvPipSupported() -> Bool {
+    AVPictureInPictureController.isPictureInPictureSupported()
+}
+
+@_cdecl("wistv_pip_start")
+public func wistvPipStart() {
+    DispatchQueue.main.async { PipControl.shared.start() }
+}
+
+@_cdecl("wistv_pip_close")
+public func wistvPipClose() {
+    DispatchQueue.main.async { PipControl.shared.stop() }
+}
+
+@_cdecl("wistv_pip_paused")
+public func wistvPipPaused(_ paused: Bool) {
+    PipFrames.shared.paused = paused
+    DispatchQueue.main.async { PipControl.shared.refresh() }
+}
+
+@_cdecl("wistv_pip_frame_begin")
+public func wistvPipFrameBegin(_ width: Int32, _ height: Int32, _ stride: UnsafeMutablePointer<Int>) -> UnsafeMutableRawPointer? {
+    PipFrames.shared.begin(Int(width), Int(height), stride)
+}
+
+@_cdecl("wistv_pip_frame_end")
+public func wistvPipFrameEnd(_ ok: Bool) {
+    PipFrames.shared.end(ok)
+}
+
 final class VideoPlugin: Plugin {
     private let video = VideoView(frame: .zero)
     private var pointer = 0
@@ -159,6 +361,9 @@ final class VideoPlugin: Plugin {
         }
         video.frame = host.bounds
         host.insertSubview(video, belowSubview: webview)
+        let pip = PipFrames.shared.view
+        pip.frame = host.bounds
+        host.insertSubview(pip, belowSubview: video)
         Orientation.install(from: host)
         Orientation.apply(Orientation.mask)
     }

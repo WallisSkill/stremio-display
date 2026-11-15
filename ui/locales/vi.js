@@ -468,6 +468,7 @@ export default {
   "err.libSymbol": "{lib} thiếu {name}: {e}",
   "err.noLibmpv": "Không tìm thấy libmpv, hãy cài gói libmpv2 (hoặc libmpv1) rồi mở lại WiS TV: {e}",
   "err.mpvCode": "mpv lỗi {code}",
+  "err.pipFail": "Không bật được xem thu nhỏ",
   "err.playerIdle": "Trình phát chưa chạy",
   "err.mpvCreate": "Không tạo được trình phát mpv",
   "err.mpvInit": "mpv không khởi động được: {e}",

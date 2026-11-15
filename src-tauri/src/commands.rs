@@ -756,14 +756,27 @@ pub fn player_mini_state() -> R<Value> {
     Ok(json!({ "ok": true, "on": crate::mini::active() }))
 }
 
-#[cfg(not(any(windows, target_os = "android")))]
+#[cfg(target_os = "ios")]
+#[tauri::command]
+pub async fn player_mini(app: AppHandle, on: bool) -> R<bool> {
+    let handle = app.clone();
+    off_main(app, move |st| st.player.mini(&handle, on)).await
+}
+
+#[cfg(target_os = "ios")]
+#[tauri::command]
+pub fn player_mini_state() -> R<Value> {
+    Ok(json!({ "ok": crate::player::pip_supported(), "on": crate::player::pip_active() }))
+}
+
+#[cfg(not(any(windows, target_os = "android", target_os = "ios")))]
 #[tauri::command]
 pub fn player_mini(on: bool) -> R<bool> {
     let _ = on;
     Ok(false)
 }
 
-#[cfg(not(any(windows, target_os = "android")))]
+#[cfg(not(any(windows, target_os = "android", target_os = "ios")))]
 #[tauri::command]
 pub fn player_mini_state() -> R<Value> {
     Ok(json!({ "ok": false, "on": false }))

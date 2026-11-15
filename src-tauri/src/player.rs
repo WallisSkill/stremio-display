@@ -524,8 +524,48 @@ impl Player {
     }
 
     #[cfg(target_os = "ios")]
+    pub fn mini(&self, app: &tauri::AppHandle, on: bool) -> Result<bool, String> {
+        if !on {
+            if pip::active() {
+                unsafe { pip::wistv_pip_close() };
+            }
+            return Ok(false);
+        }
+        if pip::active() {
+            return Ok(true);
+        }
+        if !unsafe { pip::wistv_pip_supported() } {
+            return Err(crate::util::msg("err.pipFail"));
+        }
+        let lib = mpv()?;
+        {
+            let live = self.live.lock().unwrap();
+            let live = live.as_ref().ok_or_else(|| crate::util::msg("err.playerIdle"))?;
+            pip::begin(app, lib, live.ctx)?;
+        }
+        if !pip::wait_frame(Duration::from_secs(4)) {
+            pip::stop(true);
+            return Err(crate::util::msg("err.pipFail"));
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        *pip::STARTED.lock().unwrap() = Some(tx);
+        unsafe { pip::wistv_pip_start() };
+        if rx.recv_timeout(Duration::from_secs(6)).unwrap_or(false) {
+            return Ok(true);
+        }
+        pip::STARTED.lock().unwrap().take();
+        unsafe { pip::wistv_pip_close() };
+        pip::stop(true);
+        Err(crate::util::msg("err.pipFail"))
+    }
+
+    #[cfg(target_os = "ios")]
     pub fn background(&self, hidden: bool) -> Result<(), String> {
         self.hidden.store(hidden, Ordering::SeqCst);
+        pip::set_hidden(hidden);
+        if pip::active() {
+            return Ok(());
+        }
         let vo = PLATFORM_OPTIONS.iter().find(|(k, _)| *k == "vo").map_or("gpu-next", |(_, v)| *v);
         self.with(|m, ctx| unsafe {
             if hidden {
@@ -658,6 +698,8 @@ impl Player {
                     *live = None;
                 }
             }
+            #[cfg(target_os = "ios")]
+            pip::release(ctx_addr);
             unsafe { (lib.terminate_destroy)(ctx) };
             done(out);
             let _ = finished.send(());
@@ -834,5 +876,283 @@ unsafe fn run(lib: &Mpv, ctx: Handle, start_ms: u64, wid: i64, crop_on: &AtomicB
         duration_ms: (dur.max(0.0) * 1000.0) as u64,
         error,
         ended,
+    }
+}
+
+#[cfg(target_os = "ios")]
+pub fn pip_supported() -> bool {
+    unsafe { pip::wistv_pip_supported() }
+}
+
+#[cfg(target_os = "ios")]
+pub fn pip_active() -> bool {
+    pip::active()
+}
+
+#[cfg(target_os = "ios")]
+mod pip {
+    use super::{mpv, Handle, Mpv, PLATFORM_OPTIONS};
+    use serde_json::json;
+    use std::ffi::{c_int, c_void, CString};
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    use std::sync::{Condvar, Mutex, OnceLock};
+    use std::time::{Duration, Instant};
+    use tauri::Emitter;
+
+    const PARAM_END: c_int = 0;
+    const PARAM_API_TYPE: c_int = 1;
+    const PARAM_BLOCK_FOR_TARGET_TIME: c_int = 12;
+    const PARAM_SW_SIZE: c_int = 17;
+    const PARAM_SW_FORMAT: c_int = 18;
+    const PARAM_SW_STRIDE: c_int = 19;
+    const PARAM_SW_POINTER: c_int = 20;
+    const UPDATE_FRAME: u64 = 1;
+    const LONG_SIDE: i64 = 640;
+
+    #[repr(C)]
+    struct Param {
+        kind: c_int,
+        data: *mut c_void,
+    }
+
+    extern "C" {
+        fn mpv_render_context_create(res: *mut *mut c_void, mpv: Handle, params: *mut Param) -> c_int;
+        fn mpv_render_context_set_update_callback(ctx: *mut c_void, cb: Option<unsafe extern "C" fn(*mut c_void)>, data: *mut c_void);
+        fn mpv_render_context_update(ctx: *mut c_void) -> u64;
+        fn mpv_render_context_render(ctx: *mut c_void, params: *mut Param) -> c_int;
+        fn mpv_render_context_free(ctx: *mut c_void);
+        pub fn wistv_pip_supported() -> bool;
+        pub fn wistv_pip_start();
+        pub fn wistv_pip_close();
+        fn wistv_pip_paused(paused: bool);
+        fn wistv_pip_frame_begin(width: i32, height: i32, stride: *mut usize) -> *mut c_void;
+        fn wistv_pip_frame_end(ok: bool);
+    }
+
+    struct Pip {
+        mpv: usize,
+        render: usize,
+        worker: Option<std::thread::JoinHandle<()>>,
+    }
+
+    static PIP: Mutex<Option<Pip>> = Mutex::new(None);
+    static RUN: AtomicBool = AtomicBool::new(false);
+    static FRAMES: AtomicU64 = AtomicU64::new(0);
+    static HIDDEN: AtomicBool = AtomicBool::new(false);
+    static WAKE: Mutex<bool> = Mutex::new(false);
+    static WAKE_CV: Condvar = Condvar::new();
+    static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
+    pub static STARTED: Mutex<Option<std::sync::mpsc::Sender<bool>>> = Mutex::new(None);
+
+    fn default_of(key: &str, fallback: &'static str) -> &'static str {
+        PLATFORM_OPTIONS.iter().find(|(k, _)| *k == key).map_or(fallback, |(_, v)| *v)
+    }
+
+    pub fn active() -> bool {
+        PIP.lock().map(|p| p.is_some()).unwrap_or(false)
+    }
+
+    pub fn set_hidden(hidden: bool) {
+        HIDDEN.store(hidden, Ordering::SeqCst);
+    }
+
+    unsafe extern "C" fn on_update(_: *mut c_void) {
+        if let Ok(mut w) = WAKE.lock() {
+            *w = true;
+        }
+        WAKE_CV.notify_one();
+    }
+
+    pub fn begin(app: &tauri::AppHandle, lib: &'static Mpv, ctx: usize) -> Result<(), String> {
+        let _ = APP.set(app.clone());
+        let mut slot = PIP.lock().map_err(|e| e.to_string())?;
+        if slot.is_some() {
+            return Ok(());
+        }
+        let api = CString::new("sw").unwrap();
+        let mut params = [
+            Param { kind: PARAM_API_TYPE, data: api.as_ptr() as *mut c_void },
+            Param { kind: PARAM_END, data: std::ptr::null_mut() },
+        ];
+        let mut render: *mut c_void = std::ptr::null_mut();
+        let rc = unsafe { mpv_render_context_create(&mut render, ctx as Handle, params.as_mut_ptr()) };
+        if rc < 0 || render.is_null() {
+            return Err(unsafe { lib.err(rc) });
+        }
+        unsafe { mpv_render_context_set_update_callback(render, Some(on_update), std::ptr::null_mut()) };
+        let rc = unsafe {
+            lib.set_property(ctx as Handle, "hwdec", "videotoolbox-copy");
+            lib.set_property(ctx as Handle, "vid", "auto");
+            lib.set_property(ctx as Handle, "vo", "libmpv")
+        };
+        if rc < 0 {
+            unsafe {
+                lib.set_property(ctx as Handle, "vo", default_of("vo", "gpu-next"));
+                lib.set_property(ctx as Handle, "hwdec", default_of("hwdec", "videotoolbox"));
+                mpv_render_context_free(render);
+                return Err(lib.err(rc));
+            }
+        }
+        FRAMES.store(0, Ordering::SeqCst);
+        RUN.store(true, Ordering::SeqCst);
+        let (mpv_addr, render_addr) = (ctx, render as usize);
+        let worker = std::thread::spawn(move || unsafe { work(lib, mpv_addr, render_addr) });
+        *slot = Some(Pip { mpv: ctx, render: render as usize, worker: Some(worker) });
+        Ok(())
+    }
+
+    pub fn wait_frame(limit: Duration) -> bool {
+        let end = Instant::now() + limit;
+        while Instant::now() < end {
+            if FRAMES.load(Ordering::SeqCst) > 0 {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        false
+    }
+
+    unsafe fn size_of(lib: &Mpv, ctx: Handle) -> (i32, i32) {
+        let dw = lib.prop(ctx, "video-params/dw").and_then(|s| s.parse::<i64>().ok()).unwrap_or(16);
+        let dh = lib.prop(ctx, "video-params/dh").and_then(|s| s.parse::<i64>().ok()).unwrap_or(9);
+        let (dw, dh) = (dw.max(1), dh.max(1));
+        let (w, h) = if dw >= dh { (LONG_SIDE, LONG_SIDE * dh / dw) } else { (LONG_SIDE * dw / dh, LONG_SIDE) };
+        ((w.max(2) & !1) as i32, (h.max(2) & !1) as i32)
+    }
+
+    unsafe fn work(lib: &Mpv, mpv_addr: usize, render_addr: usize) {
+        let ctx = mpv_addr as Handle;
+        let render = render_addr as *mut c_void;
+        let format = CString::new("bgr0").unwrap();
+        let mut size = size_of(lib, ctx);
+        let mut checked = Instant::now();
+        let mut paused: Option<bool> = None;
+        while RUN.load(Ordering::SeqCst) {
+            {
+                let mut w = WAKE.lock().unwrap();
+                if !*w {
+                    w = WAKE_CV.wait_timeout(w, Duration::from_millis(250)).unwrap().0;
+                }
+                *w = false;
+            }
+            if !RUN.load(Ordering::SeqCst) {
+                break;
+            }
+            if checked.elapsed() >= Duration::from_millis(500) || paused.is_none() {
+                checked = Instant::now();
+                size = size_of(lib, ctx);
+                let now = lib.prop_flag(ctx, "pause");
+                if paused != Some(now) {
+                    paused = Some(now);
+                    wistv_pip_paused(now);
+                }
+            }
+            if mpv_render_context_update(render) & UPDATE_FRAME == 0 {
+                continue;
+            }
+            let mut stride: usize = 0;
+            let target = wistv_pip_frame_begin(size.0, size.1, &mut stride);
+            if target.is_null() {
+                continue;
+            }
+            let mut dims = [size.0 as c_int, size.1 as c_int];
+            let mut block: c_int = 0;
+            let mut params = [
+                Param { kind: PARAM_SW_SIZE, data: dims.as_mut_ptr() as *mut c_void },
+                Param { kind: PARAM_SW_FORMAT, data: format.as_ptr() as *mut c_void },
+                Param { kind: PARAM_SW_STRIDE, data: &mut stride as *mut usize as *mut c_void },
+                Param { kind: PARAM_SW_POINTER, data: target },
+                Param { kind: PARAM_BLOCK_FOR_TARGET_TIME, data: &mut block as *mut c_int as *mut c_void },
+                Param { kind: PARAM_END, data: std::ptr::null_mut() },
+            ];
+            let rc = mpv_render_context_render(render, params.as_mut_ptr());
+            wistv_pip_frame_end(rc >= 0);
+            if rc >= 0 {
+                FRAMES.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+    }
+
+    pub fn stop(restore: bool) {
+        let Some(mut pip) = PIP.lock().ok().and_then(|mut p| p.take()) else { return };
+        RUN.store(false, Ordering::SeqCst);
+        unsafe { on_update(std::ptr::null_mut()) };
+        if let Some(worker) = pip.worker.take() {
+            let _ = worker.join();
+        }
+        let ctx = pip.mpv as Handle;
+        let hidden = HIDDEN.load(Ordering::SeqCst);
+        if let Ok(lib) = mpv() {
+            unsafe {
+                if restore {
+                    if hidden {
+                        lib.set_property(ctx, "vid", "no");
+                        lib.set_property(ctx, "vo", "null");
+                    } else {
+                        lib.set_property(ctx, "vo", default_of("vo", "gpu-next"));
+                    }
+                    lib.set_property(ctx, "hwdec", default_of("hwdec", "videotoolbox"));
+                }
+                mpv_render_context_free(pip.render as *mut c_void);
+                if restore && !hidden {
+                    lib.set_property(ctx, "vid", "auto");
+                }
+            }
+        }
+        if let Some(app) = APP.get() {
+            let _ = app.emit("player-mini", json!({ "on": false }));
+        }
+    }
+
+    pub fn release(ctx: usize) {
+        let mine = PIP.lock().map(|p| p.as_ref().map(|p| p.mpv) == Some(ctx)).unwrap_or(false);
+        if mine {
+            stop(false);
+            unsafe { wistv_pip_close() };
+        }
+    }
+
+    fn with_ctx(f: impl FnOnce(&Mpv, Handle)) {
+        let Ok(lib) = mpv() else { return };
+        let Ok(slot) = PIP.lock() else { return };
+        if let Some(p) = slot.as_ref() {
+            f(lib, p.mpv as Handle);
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn wistv_pip_started(ok: bool) {
+        if let Some(tx) = STARTED.lock().ok().and_then(|mut s| s.take()) {
+            let _ = tx.send(ok);
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn wistv_pip_play(on: bool) {
+        with_ctx(|lib, ctx| unsafe {
+            lib.set_property(ctx, "pause", if on { "no" } else { "yes" });
+        });
+    }
+
+    #[no_mangle]
+    pub extern "C" fn wistv_pip_skip(seconds: f64) {
+        if !seconds.is_finite() {
+            return;
+        }
+        with_ctx(|lib, ctx| unsafe {
+            lib.cmd(ctx, &["seek", &format!("{seconds:.3}"), "relative"]);
+        });
+    }
+
+    #[no_mangle]
+    pub extern "C" fn wistv_pip_stopped(restored: bool) {
+        std::thread::spawn(move || {
+            if !restored {
+                with_ctx(|lib, ctx| unsafe {
+                    lib.set_property(ctx, "pause", "yes");
+                });
+            }
+            stop(true);
+        });
     }
 }

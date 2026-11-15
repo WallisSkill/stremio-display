@@ -9,7 +9,7 @@ const TOUCH = window.matchMedia("(hover: none) and (pointer: coarse)").matches;
 const PHONE_APP = !!TAURI && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 const ANDROID = /Android/i.test(navigator.userAgent);
 const SEE_THROUGH = !!TAURI && /Windows/.test(navigator.userAgent);
-const MINI_CLASS = !TAURI ? null : ANDROID ? "pip" : "mini";
+const MINI_CLASS = !TAURI ? null : ANDROID ? "pip" : PHONE_APP ? null : "mini";
 const TV_APP = !!TAURI && ANDROID && !window.matchMedia("(any-pointer: coarse)").matches;
 if (TV_APP) document.documentElement.classList.add("tv");
 const listen = (name, fn) => (TAURI ? TAURI.event.listen(name, fn) : onWebEvent(name, fn));
@@ -5224,6 +5224,7 @@ document.addEventListener("mouseup", (e) => { if (e.button === 3) back(); });
     if (pl.ui) pl.ui.fs.innerHTML = pl.fs ? ICON.unfull : ICON.full;
     if (pl.open) wake();
   });
+  listen("player-mini", ({ payload }) => applyMini(!!payload?.on));
   listen("player-ended", ({ payload }) => {
     if (!pl.open || payload.session !== pl.session) return;
     if (payload.error) toast(tr("pl.error", { e: errText(payload.error) }), true);
