@@ -1208,9 +1208,7 @@ function buildPlayer() {
   ui.clock = h("span", { class: "pl-clock" });
   ui.batt = h("span", { class: "pl-batt", hidden: true });
   if (TOUCH) ui.lock = iconBtn("lock", tr("pl.lockScreen"), () => setLock(true));
-  const top = TOUCH
-    ? h("div", { class: "pl-top" }, h("div", { class: "pl-lead" }, iconBtn("left", tr("pl.back"), () => closePlayer()), h("div", { class: "pl-titles" }, ui.title)), ui.sub, h("div", { class: "pl-status" }, ui.cast, ui.clock, ui.batt))
-    : h("div", { class: "pl-top" }, h("div", { class: "pl-lead" }, iconBtn("left", tr("pl.back"), () => closePlayer()), h("div", { class: "pl-titles" }, ui.title, ui.sub)), h("div", { class: "pl-status" }, ui.clock, ui.batt));
+  const top = h("div", { class: "pl-top" }, h("div", { class: "pl-lead" }, iconBtn("left", tr("pl.back"), () => closePlayer()), h("div", { class: "pl-titles" }, ui.title)), ui.sub, h("div", { class: "pl-status" }, ...(TOUCH ? [ui.cast] : []), ui.clock, ui.batt));
   const back10 = iconBtn("back10", tr("pl.back10"), () => seekBy(-10));
   const fwd10 = iconBtn("fwd10", tr("pl.fwd10"), () => seekBy(10));
   const seekRow = h("div", { class: "pl-seekrow" }, ui.seek, ui.time);

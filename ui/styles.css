@@ -802,8 +802,9 @@ body.web-playing #wv { display: block; }
 .pl-lead { flex: 1; min-width: 0; display: flex; align-items: center; gap: inherit; }
 #player.touch .pl-top { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; }
 #player.touch .pl-status { justify-self: end; margin-left: 0; gap: 6px; }
-#player.touch .pl-top { grid-template-columns: minmax(0, 1fr) minmax(0, auto) minmax(0, 1fr); }
-#player.touch .pl-top > .pl-sub { max-width: 40vw; font-size: 15px; font-weight: 600; color: rgba(255,255,255,0.88); text-align: center; text-shadow: 0 2px 12px rgba(0,0,0,0.6); }
+#player .pl-top { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, auto) minmax(0, 1fr); align-items: center; }
+#player .pl-status { justify-self: end; margin-left: 0; }
+#player .pl-top > .pl-sub { max-width: 40vw; margin: 0; font-size: 15px; font-weight: 600; color: rgba(255,255,255,0.88); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 2px 12px rgba(0,0,0,0.6); }
 #player.touch .pl-top .pl-status .pl-btn { margin-left: 0; }
 #player.touch .pl-top .pl-status .pl-btn[hidden] { display: none; }
 #player.locked .pl-top .cast-btn { visibility: hidden; }
