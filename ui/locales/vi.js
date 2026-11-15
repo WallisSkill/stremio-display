@@ -153,7 +153,7 @@ export default {
   "room.trackSub": "Phụ đề: {name}",
   "room.trackAudio": "Âm thanh: {name}",
   "room.trackDelay": "Độ trễ {v}",
-  "room.locked": "{name} đang điều khiển phát, dừng, tua và chọn tập",
+  "room.locked": "{name} đang điều khiển phát, dừng, tua, chọn tập và nguồn phim",
   "room.subFallback": "Không tải được phụ đề của chủ phòng, đang dùng phụ đề {lang} khác",
   "room.noSource": "Không tìm được đúng nguồn {name} đang xem, hãy chọn một nguồn",
   "room.joining": "Đang vào phòng {code}…",

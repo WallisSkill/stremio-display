@@ -153,7 +153,7 @@ export default {
   "room.trackSub": "字幕：{name}",
   "room.trackAudio": "音轨：{name}",
   "room.trackDelay": "延迟 {v}",
-  "room.locked": "{name} 正在控制播放、暂停、快进和选集",
+  "room.locked": "{name} 正在控制播放、暂停、快进、选集和片源",
   "room.subFallback": "无法加载房主的字幕，改用另一份{lang}字幕",
   "room.noSource": "找不到 {name} 正在使用的片源，请选择一个片源",
   "room.joining": "正在加入房间 {code}…",

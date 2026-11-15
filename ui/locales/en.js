@@ -153,7 +153,7 @@ export default {
   "room.trackSub": "Subtitles: {name}",
   "room.trackAudio": "Audio: {name}",
   "room.trackDelay": "Delay {v}",
-  "room.locked": "{name} controls play, pause, seeking and episodes",
+  "room.locked": "{name} controls play, pause, seeking, episodes and the source",
   "room.subFallback": "Couldn't load the host's subtitle, using another {lang} subtitle",
   "room.noSource": "Couldn't find the source {name} is watching; choose one",
   "room.joining": "Joining room {code}…",

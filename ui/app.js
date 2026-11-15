@@ -1969,6 +1969,7 @@ function paintState() {
   const nx = guest ? null : nextEpisode();
   ui.next.hidden = !nx && (guest || !tvNeighbour(1));
   ui.eps.hidden = guest || !((pl.ctx?.m?.videos || []).length > 1);
+  ui.src.hidden = guest;
   ui.speed.hidden = guest;
   const left = (s.duration || 0) - (s.time || 0);
   const seg = s.loaded && !guest ? skipSegment() : null;
@@ -2244,6 +2245,7 @@ function renderEpisodes(box) {
 }
 
 function toggleMenu(kind) {
+  if (kind === "sources" && pl.menu !== "sources" && roomLocked()) return;
   pl.menu = kind && pl.menu !== kind ? kind : null;
   if (pl.menu === "tracks" && pl.subs === null) loadAddonSubs();
   if (pl.menu === "sources") loadSources();
@@ -2402,6 +2404,7 @@ function renderSources(box) {
 
 function fillMenu(box) {
   if (pl.menu === "episodes") { renderEpisodes(box); return; }
+  if (pl.menu === "sources" && roomGuest()) { toggleMenu(null); return; }
   if (pl.menu === "sources") { if (isTvCtx() && tvState.list.length > 1) renderChannels(box); else renderSources(box); return; }
   if (pl.menu === "fullscreen") {
     box.className = "pl-menu narrow";
@@ -2420,7 +2423,7 @@ function fillMenu(box) {
     return;
   }
   box.className = "pl-menu";
-  if (roomGuest() && room.tracks && sameMedia(pl.ctx, room.media)) {
+  if (roomGuest()) {
     const found = (type) => pl.tracks.find((t) => t.type === type && t.selected);
     const on = (type) => { const t = found(type); return t && (t.title || langName(t.lang)) ? { ...t, label: t.title || langName(t.lang) } : t; };
     const sub = on("sub");
@@ -2428,7 +2431,7 @@ function fillMenu(box) {
     box.className = "pl-menu narrow";
     put(box, h("div", { class: "pl-col" }, h("h4", {}, tr("pl.subsAudio")),
       h("p", { class: "pl-note" }, tr("room.tracksFollow", { name: roomHostName() })),
-      h("p", { class: "pl-note" }, tr("room.trackSub", { name: sub ? sub.label || trackLabel(sub) : tr("set.subsOff") }) + (audio ? " · " + tr("room.trackAudio", { name: audio.label || trackLabel(audio) }) : "") + (room.tracks.delay ? " · " + tr("room.trackDelay", { v: delayText(room.tracks.delay) }) : "")),
+      h("p", { class: "pl-note" }, tr("room.trackSub", { name: sub ? sub.label || trackLabel(sub) : tr("set.subsOff") }) + (audio ? " · " + tr("room.trackAudio", { name: audio.label || trackLabel(audio) }) : "") + (room.tracks?.delay ? " · " + tr("room.trackDelay", { v: delayText(room.tracks.delay) }) : "")),
       subStylePanel()));
     return;
   }
