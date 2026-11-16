@@ -277,19 +277,22 @@ impl Mpv {
         out
     }
 
-    unsafe fn apply_crop(&self, ctx: Handle, change: crate::autocrop::Change) {
+    unsafe fn apply_crop(&self, ctx: Handle, change: crate::autocrop::Change) -> bool {
         use crate::autocrop::Change;
         match change {
             Change::Crop(r) => {
                 if self.set_property(ctx, "video-crop", &format!("{}x{}+{}+{}", r.w, r.h, r.x, r.y)) < 0 {
                     self.cmd(ctx, &["vf", "remove", "@wistvcrop"]);
                     self.cmd(ctx, &["vf", "add", &format!("@wistvcrop:lavfi-crop=w={}:h={}:x={}:y={}", r.w, r.h, r.x, r.y)]);
+                    return true;
                 }
+                false
             }
             Change::Clear => {
                 if self.set_property(ctx, "video-crop", "") < 0 {
                     self.cmd(ctx, &["vf", "remove", "@wistvcrop"]);
                 }
+                false
             }
         }
     }
@@ -444,7 +447,7 @@ pub extern "C" fn wistv_audio_interrupted() {
 pub struct Player {
     live: Arc<Mutex<Option<Live>>>,
     generation: AtomicU64,
-    crop: Arc<AtomicBool>,
+    crop: Arc<FillFlags>,
     starting: Mutex<()>,
     switching: AtomicBool,
     hidden: AtomicBool,
@@ -466,7 +469,7 @@ impl Player {
         Self {
             live: Arc::new(Mutex::new(None)),
             generation: AtomicU64::new(0),
-            crop: Arc::new(AtomicBool::new(false)),
+            crop: Arc::new(FillFlags { on: AtomicBool::new(false), animate: AtomicBool::new(false) }),
             starting: Mutex::new(()),
             switching: AtomicBool::new(false),
             hidden: AtomicBool::new(false),
@@ -505,8 +508,9 @@ impl Player {
         unsafe { lib.prop(live.ctx as Handle, "pause") }.as_deref() == Some("yes")
     }
 
-    pub fn set_crop(&self, on: bool) {
-        self.crop.store(on, Ordering::Relaxed);
+    pub fn set_fill(&self, on: bool, animate: bool) {
+        self.crop.animate.store(animate, Ordering::Relaxed);
+        self.crop.on.store(on, Ordering::Relaxed);
     }
 
     pub fn layout(&self) -> Value {
@@ -709,6 +713,7 @@ impl Player {
         let wid = req.wid;
         let shared = self.live.clone();
         let crop_on = self.crop.clone();
+        crop_on.animate.store(false, Ordering::Relaxed);
         let (finished, ended) = std::sync::mpsc::channel();
         *self.ended.lock().unwrap() = Some(ended);
         std::thread::spawn(move || {
@@ -788,7 +793,136 @@ unsafe fn follow_surface(lib: &Mpv, ctx: Handle, seen: &mut (u64, i64)) {
     }
 }
 
-unsafe fn run(lib: &Mpv, ctx: Handle, start_ms: u64, wid: i64, crop_on: &AtomicBool, state: &dyn Fn(Value)) -> Outcome {
+pub struct FillFlags {
+    on: AtomicBool,
+    animate: AtomicBool,
+}
+
+const FILL_ANIM: Duration = Duration::from_millis(280);
+
+fn fit(aspect: f64, w: f64, h: f64) -> (f64, f64) {
+    if aspect > w / h {
+        (w, w / aspect)
+    } else {
+        (h * aspect, h)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Geo {
+    w: f64,
+    h: f64,
+    aspect: f64,
+}
+
+impl Geo {
+    unsafe fn read(lib: &Mpv, ctx: Handle) -> Option<Geo> {
+        let w = lib.prop_f64(ctx, "osd-dimensions/w")?;
+        let h = lib.prop_f64(ctx, "osd-dimensions/h")?;
+        let aspect = lib.prop_f64(ctx, "video-params/aspect")?;
+        (w > 0.0 && h > 0.0 && aspect > 0.0).then_some(Geo { w, h, aspect })
+    }
+
+    fn size(&self, frac: (f64, f64)) -> (f64, f64) {
+        fit(self.aspect * frac.0 / frac.1, self.w, self.h)
+    }
+
+    fn target(&self, want: bool, frac: (f64, f64)) -> (f64, f64) {
+        let c = self.size(frac);
+        if want {
+            return (self.w / c.0, self.h / c.1);
+        }
+        let full = self.size((1.0, 1.0));
+        (full.0 * frac.0 / c.0, full.1 * frac.1 / c.1)
+    }
+
+    fn carry(&self, s: (f64, f64), before: (f64, f64), after: (f64, f64)) -> (f64, f64) {
+        let (b, a) = (self.size(before), self.size(after));
+        (s.0 * (b.0 / before.0) / (a.0 / after.0), s.1 * (b.1 / before.1) / (a.1 / after.1))
+    }
+}
+
+struct Fill {
+    want: bool,
+    scale: (f64, f64),
+    sent: (f64, f64),
+    target: (f64, f64),
+    anim: Option<(Instant, (f64, f64))>,
+    scale_ok: bool,
+}
+
+impl Fill {
+    fn new() -> Self {
+        Self { want: false, scale: (1.0, 1.0), sent: (1.0, 1.0), target: (1.0, 1.0), anim: None, scale_ok: true }
+    }
+
+    fn settled(&self, want: bool) -> bool {
+        !self.scale_ok || (self.want == want && self.anim.is_none())
+    }
+
+    fn recrop(&mut self, geo: Option<Geo>, before: (f64, f64), after: (f64, f64)) {
+        let Some(g) = geo else { return };
+        self.scale = g.carry(self.scale, before, after);
+        if let Some((t0, from)) = self.anim {
+            self.anim = Some((t0, g.carry(from, before, after)));
+        }
+    }
+
+    unsafe fn step(&mut self, lib: &Mpv, ctx: Handle, want: bool, animate: bool, geo: Option<Geo>, frac: (f64, f64)) -> bool {
+        if !self.scale_ok {
+            if want != self.want {
+                self.want = want;
+                lib.set_property(ctx, "keepaspect", if want { "no" } else { "yes" });
+            }
+            return false;
+        }
+        let Some(g) = geo else { return self.anim.is_some() };
+        let target = g.target(want, frac);
+        let now = Instant::now();
+        if want != self.want {
+            self.want = want;
+            if animate {
+                self.anim = Some((now, self.scale));
+            } else {
+                self.anim = None;
+                self.scale = target;
+            }
+        } else if (target.0 - self.target.0).abs() > 1e-3 || (target.1 - self.target.1).abs() > 1e-3 {
+            if self.anim.is_some() {
+                self.anim = Some((now, self.scale));
+            } else {
+                self.scale = target;
+            }
+        }
+        self.target = target;
+        if let Some((t0, from)) = self.anim {
+            let t = (now - t0).as_secs_f64() / FILL_ANIM.as_secs_f64();
+            if t >= 1.0 {
+                self.anim = None;
+                self.scale = target;
+            } else {
+                let e = 1.0 - (1.0 - t).powi(3);
+                self.scale = (from.0 + (target.0 - from.0) * e, from.1 + (target.1 - from.1) * e);
+            }
+        }
+        if (self.scale.0 - self.sent.0).abs() > 1e-4 || (self.scale.1 - self.sent.1).abs() > 1e-4 {
+            let x = lib.set_property(ctx, "video-scale-x", &format!("{:.5}", self.scale.0));
+            let y = lib.set_property(ctx, "video-scale-y", &format!("{:.5}", self.scale.1));
+            if x < 0 || y < 0 {
+                lib.set_property(ctx, "video-scale-x", "1");
+                lib.set_property(ctx, "video-scale-y", "1");
+                self.scale_ok = false;
+                self.anim = None;
+                self.want = !want;
+                return self.step(lib, ctx, want, animate, geo, frac);
+            }
+            self.sent = self.scale;
+        }
+        self.anim.is_some()
+    }
+}
+
+unsafe fn run(lib: &Mpv, ctx: Handle, start_ms: u64, wid: i64, crop_on: &FillFlags, state: &dyn Fn(Value)) -> Outcome {
     let mut pos = start_ms as f64 / 1000.0;
     let mut dur = 0.0f64;
     let mut error = None;
@@ -800,8 +934,11 @@ unsafe fn run(lib: &Mpv, ctx: Handle, start_ms: u64, wid: i64, crop_on: &AtomicB
     #[cfg(target_os = "android")]
     let mut surface = (u64::MAX, wid);
     let mut crop = crate::autocrop::AutoCrop::new();
+    let mut fill = Fill::new();
+    let mut crop_vf = false;
+    let mut wait = 0.2;
     loop {
-        let ev = (lib.wait_event)(ctx, 0.2);
+        let ev = (lib.wait_event)(ctx, wait);
         if INTERRUPTED.swap(false, Ordering::SeqCst) {
             lib.set_property(ctx, "pause", "yes");
         }
@@ -821,18 +958,31 @@ unsafe fn run(lib: &Mpv, ctx: Handle, start_ms: u64, wid: i64, crop_on: &AtomicB
         if let Some(d) = lib.prop_f64(ctx, "duration") {
             dur = d;
         }
-        if !crop_on.load(Ordering::Relaxed) {
-            if let Some(change) = crop.disable() {
-                lib.apply_crop(ctx, change);
+        let want = crop_on.on.load(Ordering::Relaxed);
+        let geo = if loaded { Geo::read(lib, ctx) } else { None };
+        let frac = |c: &crate::autocrop::AutoCrop, vf: bool| if vf { (1.0, 1.0) } else { c.fraction() };
+        let before = frac(&crop, crop_vf);
+        if !want {
+            if fill.settled(false) {
+                if let Some(change) = crop.disable() {
+                    lib.apply_crop(ctx, change);
+                    crop_vf = false;
+                    fill.recrop(geo, before, frac(&crop, crop_vf));
+                }
             }
         } else if loaded && crop.due() {
             let ready = !lib.prop_flag(ctx, "paused-for-cache") && lib.prop(ctx, "video-params/w").is_some() && lib.prop(ctx, "vo-configured").as_deref() == Some("yes");
             match ready.then(|| lib.with_frame(ctx, |f| crop.observe(f))).flatten() {
-                Some(Some(change)) => lib.apply_crop(ctx, change),
+                Some(Some(change)) => {
+                    crop_vf = lib.apply_crop(ctx, change);
+                    fill.recrop(geo, before, frac(&crop, crop_vf));
+                }
                 Some(None) => {}
                 None => crop.skip(),
             }
         }
+        let animating = fill.step(lib, ctx, want, crop_on.animate.load(Ordering::Relaxed), geo, frac(&crop, crop_vf));
+        wait = if animating { 0.016 } else if want && loaded && !crop.finished() { 0.05 } else { 0.2 };
         let mut stop = false;
         if !ev.is_null() {
             match (*ev).event_id {
@@ -959,6 +1109,7 @@ mod pip {
         pub fn wistv_pip_start();
         pub fn wistv_pip_close();
         pub fn wistv_pip_paused(paused: bool);
+        fn wistv_pip_time(position: f64, length: f64, rate: f64);
         fn wistv_pip_frame_begin(width: i32, height: i32, stride: *mut usize) -> *mut c_void;
         fn wistv_pip_frame_end(ok: bool);
     }
@@ -1086,6 +1237,9 @@ mod pip {
                     paused = Some(now);
                     wistv_pip_paused(now);
                 }
+                let num = |key: &str| lib.prop(ctx, key).and_then(|s| s.parse::<f64>().ok());
+                let speed = num("speed").unwrap_or(1.0);
+                wistv_pip_time(num("time-pos").unwrap_or(0.0), num("duration").unwrap_or(0.0), if now { 0.0 } else { speed });
             }
             if mpv_render_context_update(render) & UPDATE_FRAME == 0 {
                 continue;
@@ -1204,5 +1358,43 @@ mod pip {
             }
             stop(true);
         });
+    }
+}
+
+#[cfg(test)]
+mod fill_tests {
+    use super::Geo;
+
+    fn close(a: (f64, f64), b: (f64, f64)) -> bool {
+        (a.0 - b.0).abs() < 1e-6 && (a.1 - b.1).abs() < 1e-6
+    }
+
+    #[test]
+    fn fill_covers_the_screen() {
+        let g = Geo { w: 2340.0, h: 1080.0, aspect: 16.0 / 9.0 };
+        for frac in [(1.0, 1.0), (1.0, 800.0 / 1080.0), (0.9, 0.8)] {
+            let c = g.size(frac);
+            let t = g.target(true, frac);
+            assert!(close((c.0 * t.0, c.1 * t.1), (2340.0, 1080.0)));
+        }
+    }
+
+    #[test]
+    fn unfilled_crop_matches_the_plain_picture() {
+        let g = Geo { w: 2340.0, h: 1080.0, aspect: 16.0 / 9.0 };
+        let frac = (1.0, 800.0 / 1080.0);
+        let off = g.target(false, frac);
+        assert!(close(g.carry(off, frac, (1.0, 1.0)), (1.0, 1.0)));
+        assert!(close(g.target(false, (1.0, 1.0)), (1.0, 1.0)));
+    }
+
+    #[test]
+    fn cropping_keeps_the_picture_in_place() {
+        let g = Geo { w: 1920.0, h: 1080.0, aspect: 16.0 / 9.0 };
+        let frac = (1.0, 0.75);
+        let s = g.carry((1.0, 1.0), (1.0, 1.0), frac);
+        let full = g.size((1.0, 1.0));
+        let c = g.size(frac);
+        assert!(close((c.0 * s.0, c.1 * s.1), (full.0 * frac.0, full.1 * frac.1)));
     }
 }

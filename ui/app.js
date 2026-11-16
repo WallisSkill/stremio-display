@@ -88,6 +88,7 @@ const ICON = {
   unlock: '<svg viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="10" rx="2.2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8.5 10.5V7.8a3.5 3.5 0 0 1 6.8-1.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   fill: '<svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M7 10.5V9h2M17 13.5V15h-2M17 10.5V9h-2M7 13.5V15h2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   fit: '<svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><rect x="7.5" y="9.5" width="9" height="5" rx="1" fill="currentColor"/></svg>',
+  more: '<svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="2" fill="currentColor"/><circle cx="12" cy="12" r="2" fill="currentColor"/><circle cx="19" cy="12" r="2" fill="currentColor"/></svg>',
   pip: '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><rect x="12" y="11.5" width="6.5" height="5" rx="1" fill="currentColor"/></svg>',
   full: '<svg viewBox="0 0 24 24"><path d="M4 9V5.5A1.5 1.5 0 0 1 5.5 4H9M15 4h3.5A1.5 1.5 0 0 1 20 5.5V9M20 15v3.5a1.5 1.5 0 0 1-1.5 1.5H15M9 20H5.5A1.5 1.5 0 0 1 4 18.5V15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   unfull: '<svg viewBox="0 0 24 24"><path d="M9 4v3.5A1.5 1.5 0 0 1 7.5 9H4M20 9h-3.5A1.5 1.5 0 0 1 15 7.5V4M15 20v-3.5a1.5 1.5 0 0 1 1.5-1.5H20M4 15h3.5A1.5 1.5 0 0 1 9 16.5V20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
@@ -1197,6 +1198,7 @@ function buildPlayer() {
   ui.room = iconBtn("people", tr("pl.together"), () => roomMenu(), "room-btn");
   ui.cast = iconBtn("cast", tr("cast.button"), () => castPick(), "cast-btn");
   ui.cast.hidden = true;
+  ui.more = iconBtn("more", tr("pl.more"), () => toggleMenu("more"), "more-btn");
   ui.roomCount = h("span", { class: "room-count", hidden: true });
   ui.room.append(ui.roomCount);
   ui.nextUp = h("button", { class: "pl-nextup", tabindex: "-1", hidden: true, onclick: (e) => { e.stopPropagation(); playNext(false); } });
@@ -1222,14 +1224,14 @@ function buildPlayer() {
   ui.clock = h("span", { class: "pl-clock" });
   ui.batt = h("span", { class: "pl-batt", hidden: true });
   if (TOUCH) ui.lock = iconBtn("lock", tr("pl.lockScreen"), () => setLock(true));
-  const top = h("div", { class: "pl-top" }, h("div", { class: "pl-lead" }, iconBtn("left", tr("pl.back"), () => closePlayer()), h("div", { class: "pl-titles" }, ui.title)), ui.sub, h("div", { class: "pl-status" }, ...(TOUCH ? [ui.mini, ui.cast] : []), ui.clock, ui.batt));
+  const top = h("div", { class: "pl-top" }, h("div", { class: "pl-lead" }, iconBtn("left", tr("pl.back"), () => closePlayer()), h("div", { class: "pl-titles" }, ui.title)), ui.sub, h("div", { class: "pl-status" }, ...(TOUCH ? [ui.mini, ui.more] : []), ui.clock, ui.batt));
   const back10 = iconBtn("back10", tr("pl.back10"), () => seekBy(-10));
   const fwd10 = iconBtn("fwd10", tr("pl.fwd10"), () => seekBy(10));
   const seekRow = h("div", { class: "pl-seekrow" }, ui.seek, ui.time);
   let center = null;
   let bottom;
   if (TOUCH) {
-    for (const [btn, text] of [[ui.lock, tr("pl.lock")], [ui.room, tr("nav.togetherShort")], [ui.eps, tr("ep.list")], [ui.src, tr("pl.src")], [ui.cc, tr("set.subs")], [ui.next, tr("pl.next")]]) {
+    for (const [btn, text] of [[ui.lock, tr("pl.lock")], [ui.eps, tr("ep.list")], [ui.next, tr("pl.next")]]) {
       btn.classList.add("act");
       btn.append(h("span", { class: "pl-label" }, text));
     }
@@ -1244,7 +1246,7 @@ function buildPlayer() {
     ui.lockbar = h("div", { class: "pl-lockbar" }, ui.lockRoom, ui.unlock);
     ui.play.classList.add("huge");
     center = h("div", { class: "pl-center" }, ui.play);
-    ui.actions = h("div", { class: "pl-actions" }, ui.lock, ui.stretch, ui.speed, ui.room, ui.eps, ui.src, ui.cc, ui.next);
+    ui.actions = h("div", { class: "pl-actions" }, ui.lock, ui.stretch, ui.eps, ui.next);
     bottom = h("div", { class: "pl-bottom" }, seekRow, ui.actions);
     window.addEventListener("resize", () => { ui.fitSig = ""; fitActions(); });
   } else {
@@ -1539,7 +1541,7 @@ let fillMode = TOUCH;
 function setFill(on, announce) {
   fillMode = on;
   setPref("fill", !!on);
-  const applied = pl.open ? applyFill(on) : Promise.resolve(null);
+  const applied = pl.open ? applyFill(on, announce) : Promise.resolve(null);
   if (pl.ui) {
     pl.ui.stretch.title = on ? tr("pl.fit") : tr("pl.fill");
     if (pl.ui.fillIcon) { pl.ui.fillIcon.innerHTML = ICON[on ? "fit" : "fill"]; pl.ui.fillLabel.textContent = on ? tr("pl.fitShort") : tr("pl.fillShort"); }
@@ -1550,7 +1552,7 @@ function setFill(on, announce) {
   if (!TAURI || !TOUCH || ANDROID) { toast(label); return; }
   applied.then((d) => toast(d ? `${label} · ${fillReport(d)}` : label));
 }
-const applyFill = (on) => call("player_fill", { on }).catch(() => null);
+const applyFill = (on, animate) => call("player_fill", { on, animate: !!animate }).catch(() => null);
 function fillReport(d) {
   const m = d.mpv || {};
   const l = d.layer || {};
@@ -2482,6 +2484,20 @@ function fillMenu(box) {
         ? tr("pl.iosStandalone")
         : tr("pl.iosSafari")),
       menuItem(tr("pl.iosNative"), false, nativeFullscreen, tr("pl.iosNativeNote")));
+    return;
+  }
+  if (pl.menu === "more") {
+    const ui = pl.ui;
+    const item = (icon, label, onclick, note) => h("button", { class: "pl-item pl-more-item", tabindex: "-1", onclick }, h("i", { html: ICON[icon] }), h("span", {}, label), note ? h("small", {}, note) : null);
+    const leave = (fn) => () => { toggleMenu(null); fn(); };
+    const members = inRoom() ? String(room.members.length || 1) : "";
+    box.className = "pl-menu narrow pl-more";
+    put(box, h("h4", {}, tr("pl.more")),
+      ui.speed.hidden ? null : item("speed", `${tr("pl.speed")} (${ui.speedVal.textContent})`, () => toggleMenu("speed")),
+      item("people", tr("nav.togetherShort"), leave(roomMenu), members ? tr("room.badgeHost", { code: room.code, n: members }) : ""),
+      ui.src.hidden ? null : item("source", tr("pl.src"), () => toggleMenu("sources")),
+      item("cc", tr("set.subs"), () => toggleMenu("tracks")),
+      castOk() ? item("cast", tr("cast.button"), leave(castPick)) : null);
     return;
   }
   if (pl.menu === "speed") {
@@ -3608,6 +3624,8 @@ function paintRoom() {
   paintNav();
   document.body.classList.toggle("in-room", inRoom());
   if (pl.ui) {
+    pl.ui.more.classList.toggle("unread", inRoom() && room.unread > 0);
+    if (pl.menu === "more") renderMenu();
     pl.ui.roomCount.hidden = !inRoom();
     pl.ui.roomCount.textContent = inRoom() ? String(room.unread || room.members.length || 1) : "";
     pl.ui.roomCount.classList.toggle("unread", room.unread > 0);
@@ -4122,6 +4140,7 @@ function paintCastPanel() {
 
 function paintCast() {
   if (pl.ui?.cast) pl.ui.cast.hidden = !castOk();
+  if (pl.menu === "more") renderMenu();
   castPickList();
   if (pl.ui?.actions && TOUCH) fitActions();
   paintCastPanel();
@@ -5315,7 +5334,7 @@ if (PHONE_APP) document.addEventListener("visibilitychange", async () => {
     call("player_background", { hidden: true }).catch(() => {});
   }
   else {
-    if (pl.mini && !ANDROID && pl.miniAuto) setMini(false);
+    if (!ANDROID && pl.miniAuto && pl.open) call("player_mini", { on: false }).then(() => { if (pl.mini) applyMini(false); }).catch(() => {});
     if (pl.bgVideo) { pl.bgVideo = false; call("player_background", { hidden: false }).catch(() => {}); }
   }
 });

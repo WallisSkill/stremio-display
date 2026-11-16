@@ -91,19 +91,20 @@ pub struct AutoCrop {
     frame: Option<(u32, u32)>,
     seen: Option<Rect>,
     samples: u32,
+    tries: u32,
     applied: Option<Rect>,
-    steady: u32,
     next: Instant,
     done: bool,
     idle: bool,
 }
 
-const STEADY_SAMPLES: u32 = 4;
-const STEADY_DELAY: Duration = Duration::from_secs(300);
+const SAMPLES: u32 = 2;
+const TRIES: u32 = 20;
+const GAP: Duration = Duration::from_millis(200);
 
 impl AutoCrop {
     pub fn new() -> Self {
-        Self { frame: None, seen: None, samples: 0, applied: None, steady: 0, next: Instant::now() + Duration::from_secs(1), done: false, idle: false }
+        Self { frame: None, seen: None, samples: 0, tries: 0, applied: None, next: Instant::now(), done: false, idle: false }
     }
 
     pub fn disable(&mut self) -> Option<Change> {
@@ -119,39 +120,48 @@ impl AutoCrop {
     pub fn due(&mut self) -> bool {
         if self.idle {
             *self = Self::new();
-            self.next = Instant::now();
         }
         !self.done && Instant::now() >= self.next
     }
 
+    pub fn finished(&self) -> bool {
+        self.done || self.idle
+    }
+
     pub fn skip(&mut self) {
-        self.next = Instant::now() + Duration::from_secs(1);
+        self.miss();
+    }
+
+    pub fn fraction(&self) -> (f64, f64) {
+        match (self.applied, self.frame) {
+            (Some(r), Some((fw, fh))) if fw > 0 && fh > 0 => (r.w as f64 / fw as f64, r.h as f64 / fh as f64),
+            _ => (1.0, 1.0),
+        }
+    }
+
+    fn miss(&mut self) {
+        self.next = Instant::now() + GAP;
+        self.tries += 1;
+        if self.tries >= TRIES {
+            self.done = true;
+        }
     }
 
     pub fn observe(&mut self, f: &Frame) -> Option<Change> {
-        let full = match self.applied {
-            Some(a) if (f.w, f.h) == (a.w, a.h) => self.frame,
-            _ => Some((f.w, f.h)),
-        };
-        let (fw, fh) = full?;
-        if self.frame != Some((fw, fh)) {
+        if self.frame != Some((f.w, f.h)) {
             let reset = self.applied.is_some();
             *self = Self::new();
-            self.frame = Some((fw, fh));
+            self.frame = Some((f.w, f.h));
             if reset {
                 return Some(Change::Clear);
             }
         }
-        let offset = match self.applied {
-            Some(a) if (f.w, f.h) == (a.w, a.h) => (a.x, a.y),
-            _ => (0, 0),
-        };
-        self.next = Instant::now() + self.delay();
-        let Some(mut r) = content(f) else {
+        let (fw, fh) = (f.w, f.h);
+        let Some(r) = content(f) else {
+            self.miss();
             return None;
         };
-        r.x += offset.0;
-        r.y += offset.1;
+        self.next = Instant::now() + GAP;
         self.samples += 1;
         let seen = self.seen.map_or(r, |s| s.union(r));
         self.seen = Some(seen);
@@ -159,28 +169,19 @@ impl AutoCrop {
             self.done = true;
             return self.applied.take().map(|_| Change::Clear);
         }
-        if self.samples < 3 {
+        if self.samples < SAMPLES {
             return None;
         }
+        self.done = true;
         let target = even(seen, fw, fh);
         if !plausible(target, fw, fh) {
             return self.applied.take().map(|_| Change::Clear);
         }
         if self.applied.is_some_and(|a| a.near(target)) {
-            self.steady += 1;
-            self.next = Instant::now() + self.delay();
             return None;
         }
-        self.steady = 0;
         self.applied = Some(target);
         Some(Change::Crop(target))
-    }
-
-    fn delay(&self) -> Duration {
-        if self.steady >= STEADY_SAMPLES {
-            return STEADY_DELAY;
-        }
-        Duration::from_secs([1, 1, 3, 4, 5, 6].get(self.samples as usize).copied().unwrap_or(20))
     }
 }
 
@@ -209,7 +210,6 @@ mod tests {
         assert_eq!(content(&f), Some(inner));
         let mut a = AutoCrop::new();
         assert!(a.observe(&f).is_none());
-        assert!(a.observe(&f).is_none());
         match a.observe(&f) {
             Some(Change::Crop(r)) => assert_eq!(r, inner),
             _ => panic!("expected crop"),
@@ -236,38 +236,25 @@ mod tests {
     }
 
     #[test]
-    fn widens_after_brighter_scene() {
-        let mut a = AutoCrop::new();
-        let dark = frame(1920, 1080, Rect { x: 0, y: 160, w: 1920, h: 760 });
-        let f = Frame { w: 1920, h: 1080, stride: 1920 * 4, data: &dark };
-        a.observe(&f);
-        a.observe(&f);
-        assert!(matches!(a.observe(&f), Some(Change::Crop(_))));
-        let bright = frame(1920, 1080, Rect { x: 0, y: 140, w: 1920, h: 800 });
-        let f2 = Frame { w: 1920, h: 1080, stride: 1920 * 4, data: &bright };
-        match a.observe(&f2) {
-            Some(Change::Crop(r)) => assert_eq!(r, Rect { x: 0, y: 140, w: 1920, h: 800 }),
-            _ => panic!("expected wider crop"),
-        }
-    }
-
-    #[test]
-    fn slows_down_once_crop_holds() {
+    fn stops_after_one_pass() {
         let mut a = AutoCrop::new();
         let d = frame(1920, 1080, Rect { x: 0, y: 140, w: 1920, h: 800 });
         let f = Frame { w: 1920, h: 1080, stride: 1920 * 4, data: &d };
         a.observe(&f);
-        a.observe(&f);
         assert!(matches!(a.observe(&f), Some(Change::Crop(_))));
-        for _ in 0..STEADY_SAMPLES {
+        assert!(!a.due());
+        assert_eq!(a.fraction(), (1.0, 800.0 / 1080.0));
+    }
+
+    #[test]
+    fn gives_up_on_dark_frames() {
+        let mut a = AutoCrop::new();
+        let d = vec![0u8; 640 * 360 * 4];
+        let f = Frame { w: 640, h: 360, stride: 640 * 4, data: &d };
+        for _ in 0..TRIES {
             assert!(a.observe(&f).is_none());
         }
-        assert!(a.next >= Instant::now() + STEADY_DELAY - Duration::from_secs(1));
-        let wider = frame(1920, 1080, Rect { x: 0, y: 100, w: 1920, h: 880 });
-        let f2 = Frame { w: 1920, h: 1080, stride: 1920 * 4, data: &wider };
-        assert!(matches!(a.observe(&f2), Some(Change::Crop(_))));
-        a.observe(&f2);
-        assert!(a.next < Instant::now() + Duration::from_secs(30));
+        assert!(a.done);
     }
 
     #[test]
@@ -276,26 +263,10 @@ mod tests {
         let d = frame(1920, 1080, Rect { x: 0, y: 140, w: 1920, h: 800 });
         let f = Frame { w: 1920, h: 1080, stride: 1920 * 4, data: &d };
         a.observe(&f);
-        a.observe(&f);
         assert!(matches!(a.observe(&f), Some(Change::Crop(_))));
         assert!(matches!(a.disable(), Some(Change::Clear)));
         assert!(a.disable().is_none());
         assert!(a.due());
         assert!(a.applied.is_none());
-    }
-
-    #[test]
-    fn maps_cropped_screenshots_back() {
-        let mut a = AutoCrop::new();
-        let inner = Rect { x: 0, y: 140, w: 1920, h: 800 };
-        let d = frame(1920, 1080, inner);
-        let f = Frame { w: 1920, h: 1080, stride: 1920 * 4, data: &d };
-        a.observe(&f);
-        a.observe(&f);
-        assert!(matches!(a.observe(&f), Some(Change::Crop(_))));
-        let c = frame(1920, 800, Rect { x: 0, y: 0, w: 1920, h: 800 });
-        let fc = Frame { w: 1920, h: 800, stride: 1920 * 4, data: &c };
-        assert!(a.observe(&fc).is_none());
-        assert_eq!(a.applied, Some(inner));
     }
 }

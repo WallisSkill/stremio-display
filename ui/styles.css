@@ -928,6 +928,10 @@ body.pip .toast, body.pip #room-pill, body.pip #room-feed, body.pip .room-float,
 .pl-btn.room-btn { position: relative; }
 .room-count { position: absolute; top: 1px; right: 1px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px; background: rgba(255,255,255,0.9); color: #000; font-size: 10px; font-weight: 800; line-height: 17px; text-align: center; pointer-events: none; }
 .room-count.unread { background: var(--accent); }
+.pl-btn.more-btn { position: relative; }
+.pl-btn.more-btn.unread::after { content: ""; position: absolute; top: 6px; right: 6px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.pl-more .pl-item i svg { width: 20px; height: 20px; }
+.pl-more .pl-item { grid-template-columns: 24px 1fr; padding: 12px 10px; font-size: 15px; }
 #player.touch .pl-btn.act > span.room-count { display: block; top: -4px; right: -2px; }
 #player.touch .pl-btn.act > span.room-count[hidden] { display: none; }
 #player.room-guest .pl-seek { cursor: default; }

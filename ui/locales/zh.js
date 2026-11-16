@@ -242,6 +242,7 @@ export default {
   "pl.episodes": "剧集（E）",
   "pl.sources": "片源（S）",
   "pl.speed": "倍速",
+  "pl.more": "更多",
   "pl.seekSecs": "{n} 秒",
   "pl.mini": "小窗播放 (I)",
   "pl.miniBack": "恢复大窗口",

@@ -242,6 +242,7 @@ export default {
   "pl.episodes": "Các tập (E)",
   "pl.sources": "Nguồn phát (S)",
   "pl.speed": "Tốc độ",
+  "pl.more": "Thêm",
   "pl.seekSecs": "{n} giây",
   "pl.mini": "Xem thu nhỏ (I)",
   "pl.miniBack": "Phóng to lại",

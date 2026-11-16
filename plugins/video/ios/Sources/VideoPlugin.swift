@@ -142,6 +142,8 @@ final class PipFrames {
     let view = PipView(frame: .zero)
     let display: AVSampleBufferDisplayLayer
     var paused = false
+    private(set) var duration: Double = 0
+    private var timebase: CMTimebase?
     private var pool: CVPixelBufferPool?
     private var width = 0
     private var height = 0
@@ -152,6 +154,14 @@ final class PipFrames {
         display = view.layer as! AVSampleBufferDisplayLayer
         display.videoGravity = .resizeAspect
         display.backgroundColor = UIColor.black.cgColor
+        var made: CMTimebase?
+        CMTimebaseCreateWithSourceClock(allocator: kCFAllocatorDefault, sourceClock: CMClockGetHostTimeClock(), timebaseOut: &made)
+        if let made {
+            CMTimebaseSetTime(made, time: .zero)
+            CMTimebaseSetRate(made, rate: 0)
+            display.controlTimebase = made
+            timebase = made
+        }
         view.isUserInteractionEnabled = false
         view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     }
@@ -180,6 +190,31 @@ final class PipFrames {
         return CVPixelBufferGetBaseAddress(buffer)
     }
 
+    private func now() -> CMTime {
+        guard let timebase else { return CMClockGetTime(CMClockGetHostTimeClock()) }
+        return CMTimebaseGetTime(timebase)
+    }
+
+    func timing(_ position: Double, _ length: Double, _ rate: Double) -> Bool {
+        if let timebase, position.isFinite, rate.isFinite {
+            let current = CMTimeGetSeconds(CMTimebaseGetTime(timebase))
+            if abs(current - position) > 1 || CMTimebaseGetRate(timebase) != rate {
+                CMTimebaseSetTime(timebase, time: CMTime(seconds: max(0, position), preferredTimescale: 1000))
+                CMTimebaseSetRate(timebase, rate: max(0, rate))
+            }
+        }
+        let next = length.isFinite && length > 0 ? length : 0
+        let changed = abs(next - duration) > 0.5
+        duration = next
+        return changed
+    }
+
+    func skip(_ seconds: Double) {
+        guard let timebase, seconds.isFinite else { return }
+        let target = max(0, CMTimeGetSeconds(CMTimebaseGetTime(timebase)) + seconds)
+        CMTimebaseSetTime(timebase, time: CMTime(seconds: duration > 0 ? min(target, duration) : target, preferredTimescale: 1000))
+    }
+
     func placeholder() {
         let attrs: [String: Any] = [kCVPixelBufferIOSurfacePropertiesKey as String: [String: Any]()]
         var made: CVPixelBuffer?
@@ -192,7 +227,7 @@ final class PipFrames {
         var described: CMVideoFormatDescription?
         CMVideoFormatDescriptionCreateForImageBuffer(allocator: nil, imageBuffer: buffer, formatDescriptionOut: &described)
         guard let described else { return }
-        var timing = CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: CMClockGetTime(CMClockGetHostTimeClock()), decodeTimeStamp: .invalid)
+        var timing = CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: now(), decodeTimeStamp: .invalid)
         var sample: CMSampleBuffer?
         CMSampleBufferCreateReadyWithImageBuffer(allocator: nil, imageBuffer: buffer, formatDescription: described, sampleTiming: &timing, sampleBufferOut: &sample)
         guard let sample else { return }
@@ -219,7 +254,7 @@ final class PipFrames {
             CMVideoFormatDescriptionCreateForImageBuffer(allocator: nil, imageBuffer: buffer, formatDescriptionOut: &format)
         }
         guard let format else { return }
-        var timing = CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: CMClockGetTime(CMClockGetHostTimeClock()), decodeTimeStamp: .invalid)
+        var timing = CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: now(), decodeTimeStamp: .invalid)
         var sample: CMSampleBuffer?
         CMSampleBufferCreateReadyWithImageBuffer(allocator: nil, imageBuffer: buffer, formatDescription: format, sampleTiming: &timing, sampleBufferOut: &sample)
         guard let sample else { return }
@@ -232,6 +267,7 @@ final class PipControl: NSObject, AVPictureInPictureControllerDelegate, AVPictur
     private var controller: AVPictureInPictureController?
     private var restored = false
     private var armed = false
+    var onActive: ((Bool) -> Void)?
 
     private func make() {
         guard controller == nil else { return }
@@ -288,6 +324,7 @@ final class PipControl: NSObject, AVPictureInPictureControllerDelegate, AVPictur
 
     func pictureInPictureControllerWillStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
         restored = false
+        onActive?(true)
         DispatchQueue.global(qos: .userInitiated).async { wistvPipAuto() }
     }
 
@@ -296,6 +333,7 @@ final class PipControl: NSObject, AVPictureInPictureControllerDelegate, AVPictur
     }
 
     func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, failedToStartPictureInPictureWithError error: Error) {
+        onActive?(false)
         wistvPipStarted(false)
     }
 
@@ -306,6 +344,7 @@ final class PipControl: NSObject, AVPictureInPictureControllerDelegate, AVPictur
 
     func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
         let back = restored
+        onActive?(false)
         PipFrames.shared.display.flushAndRemoveImage()
         if armed {
             PipFrames.shared.placeholder()
@@ -319,7 +358,11 @@ final class PipControl: NSObject, AVPictureInPictureControllerDelegate, AVPictur
     }
 
     func pictureInPictureControllerTimeRangeForPlayback(_ pictureInPictureController: AVPictureInPictureController) -> CMTimeRange {
-        CMTimeRange(start: .negativeInfinity, duration: .positiveInfinity)
+        let length = PipFrames.shared.duration
+        if length > 0 {
+            return CMTimeRange(start: .zero, duration: CMTime(seconds: length, preferredTimescale: 1000))
+        }
+        return CMTimeRange(start: .negativeInfinity, duration: .positiveInfinity)
     }
 
     func pictureInPictureControllerIsPlaybackPaused(_ pictureInPictureController: AVPictureInPictureController) -> Bool {
@@ -330,6 +373,7 @@ final class PipControl: NSObject, AVPictureInPictureControllerDelegate, AVPictur
 
     func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, skipByInterval skipInterval: CMTime, completion completionHandler: @escaping () -> Void) {
         let seconds = CMTimeGetSeconds(skipInterval)
+        PipFrames.shared.skip(seconds)
         DispatchQueue.global(qos: .userInitiated).async { wistvPipSkip(seconds) }
         completionHandler()
     }
@@ -356,6 +400,13 @@ public func wistvPipPaused(_ paused: Bool) {
     DispatchQueue.main.async { PipControl.shared.refresh() }
 }
 
+@_cdecl("wistv_pip_time")
+public func wistvPipTime(_ position: Double, _ length: Double, _ rate: Double) {
+    if PipFrames.shared.timing(position, length, rate) {
+        DispatchQueue.main.async { PipControl.shared.refresh() }
+    }
+}
+
 @_cdecl("wistv_pip_frame_begin")
 public func wistvPipFrameBegin(_ width: Int32, _ height: Int32, _ stride: UnsafeMutablePointer<Int>) -> UnsafeMutableRawPointer? {
     PipFrames.shared.begin(Int(width), Int(height), stride)
@@ -368,6 +419,7 @@ public func wistvPipFrameEnd(_ ok: Bool) {
 
 final class VideoPlugin: Plugin {
     private let video = VideoView(frame: .zero)
+    private let cover = UIView(frame: .zero)
     private var pointer = 0
     private var savedBrightness: CGFloat?
 
@@ -378,6 +430,14 @@ final class VideoPlugin: Plugin {
         video.backgroundColor = .black
         video.isUserInteractionEnabled = false
         video.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        cover.backgroundColor = .black
+        cover.isUserInteractionEnabled = false
+        cover.isHidden = true
+        cover.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        PipControl.shared.onActive = { [weak self] on in
+            self?.video.isHidden = on
+            self?.cover.isHidden = !on
+        }
         if let layer = video.layer as? CAMetalLayer {
             layer.contentsScale = UIScreen.main.nativeScale
             layer.framebufferOnly = true
@@ -413,6 +473,8 @@ final class VideoPlugin: Plugin {
         let pip = PipFrames.shared.view
         pip.frame = host.bounds
         host.insertSubview(pip, belowSubview: video)
+        cover.frame = host.bounds
+        host.addSubview(cover)
         Orientation.install(from: host)
         Orientation.apply(Orientation.mask)
     }

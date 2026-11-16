@@ -242,6 +242,7 @@ export default {
   "pl.episodes": "Episodes (E)",
   "pl.sources": "Sources (S)",
   "pl.speed": "Speed",
+  "pl.more": "More",
   "pl.seekSecs": "{n} seconds",
   "pl.mini": "Mini player (I)",
   "pl.miniBack": "Back to the full window",

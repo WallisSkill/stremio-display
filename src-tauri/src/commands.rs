@@ -637,7 +637,7 @@ pub async fn device_battery() -> R<Value> {
 }
 
 #[tauri::command]
-pub async fn player_fill(app: AppHandle, on: bool) -> R<Value> {
+pub async fn player_fill(app: AppHandle, on: bool, animate: Option<bool>) -> R<Value> {
     #[cfg(target_os = "ios")]
     let layer = {
         use tauri_plugin_wistv_video::VideoExt;
@@ -648,8 +648,7 @@ pub async fn player_fill(app: AppHandle, on: bool) -> R<Value> {
     #[cfg(not(target_os = "ios"))]
     let layer = Value::Null;
     off_main(app, move |st| {
-        st.player.set_crop(on);
-        st.player.set("keepaspect", if on { "no" } else { "yes" })?;
+        st.player.set_fill(on, animate.unwrap_or(false));
         Ok(json!({ "mpv": st.player.layout(), "layer": layer }))
     })
     .await
@@ -676,7 +675,14 @@ pub fn player_stop(app: AppHandle, st: State<'_, AppState>, keep: Option<bool>) 
     crate::torrent::release();
     if !keep {
         tauri::async_runtime::spawn_blocking(move || {
-            if !app.state::<AppState>().player.active() && !HOLD_LANDSCAPE.load(std::sync::atomic::Ordering::SeqCst) {
+            let st = app.state::<AppState>();
+            for _ in 0..60 {
+                if !st.player.active() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            if !st.player.active() && !HOLD_LANDSCAPE.load(std::sync::atomic::Ordering::SeqCst) {
                 keep_awake(&app, false);
             }
         });
