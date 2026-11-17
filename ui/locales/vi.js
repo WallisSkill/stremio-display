@@ -525,6 +525,7 @@ export default {
   "wk.badRequest": "Yêu cầu không hợp lệ",
   "wk.badHostKey": "Mã chủ phòng không đúng",
   "wk.roomFull": "Phòng đã đủ người",
+  "wk.update": "WiS TV trên máy này đã cũ, hãy cập nhật hoặc mở lại app để vào phòng xem chung",
   "wk.noMember": "Người này không còn trong phòng",
   "wk.hostClosed": "Chủ phòng đã đóng phòng",
   "wk.roomExpired": "Phòng đã mở quá {n} giờ",

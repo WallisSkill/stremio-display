@@ -2090,7 +2090,7 @@ let srcTimesMemo = null;
 
 function srcKey(c) {
   const s = c?.stream;
-  if (!s || !c.vid || String(c.vid).startsWith("local:")) return null;
+  if (!s || s.fromRoom || !c.vid || String(c.vid).startsWith("local:")) return null;
   const file = s.behaviorHints?.filename;
   const id = s.infoHash ? `${String(s.infoHash).toLowerCase()}:${s.fileIdx ?? ""}` : file ? `${c.addon || ""}:${file}` : s.url ? String(s.url).split(/[?#]/)[0] : null;
   return id ? `${c.vid}|${id}` : null;
@@ -2745,6 +2745,174 @@ const roomColor = (id) => PROFILE_COLORS[[...String(id)].reduce((a, c) => a + c.
 const sameMedia = (c, md) => !!c && !!md && c.m.id === md.id && c.vid === md.vid;
 const canHostRoom = () => !!app.user && pl.open && !!pl.ctx && !String(pl.ctx.vid).startsWith("local:");
 
+const ROOM_PROTO = 2;
+const b64u = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const unb64u = (s) => { const v = String(s); return Uint8Array.from(atob(v.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((v.length + 3) % 4)), (c) => c.charCodeAt(0)); };
+
+async function roomHkdf(bits, info, usage) {
+  const base = await crypto.subtle.importKey("raw", bits, "HKDF", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey({ name: "HKDF", hash: "SHA-256", salt: room.salt || new Uint8Array(0), info: new TextEncoder().encode(info) }, base, { name: "AES-GCM", length: 256 }, false, usage);
+}
+
+async function roomBox(key, data) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, data));
+  const out = new Uint8Array(12 + ct.length);
+  out.set(iv);
+  out.set(ct, 12);
+  return b64u(out);
+}
+
+async function roomUnbox(key, text) {
+  const all = unb64u(text);
+  return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: all.slice(0, 12) }, key, all.slice(12)));
+}
+
+function roomKeyLoad() {
+  try {
+    const v = JSON.parse(sessionStorage.getItem("wistv.roomKey"));
+    if (v?.code === room.code && typeof v.k === "string") { const k = unb64u(v.k); if (k.length === 32) return k; }
+  } catch (e) {}
+  return null;
+}
+
+function roomKeySet(rk) {
+  room.rk = rk;
+  room.ck = null;
+  try { sessionStorage.setItem("wistv.roomKey", JSON.stringify({ code: room.code, k: b64u(rk) })); } catch (e) {}
+  const wait = room.keyWait || [];
+  room.keyWait = [];
+  for (const f of wait) f(true);
+}
+
+function roomKeyEnsure() {
+  if (!room.rk) roomKeySet(roomKeyLoad() || crypto.getRandomValues(new Uint8Array(32)));
+  return room.rk;
+}
+
+async function roomContentKey() {
+  const rk = room.rk;
+  if (!rk) return null;
+  if (!room.ck || room.ckFor !== rk) { room.ck = await roomHkdf(rk, "wistv-room-media", ["encrypt", "decrypt"]); room.ckFor = rk; }
+  return room.ck;
+}
+
+async function roomKx() {
+  if (!room.kx) room.kx = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, false, ["deriveBits"]);
+  return room.kx;
+}
+
+async function roomPub() {
+  return b64u(await crypto.subtle.exportKey("raw", (await roomKx()).publicKey));
+}
+
+async function roomWrapKey(pub) {
+  const kx = await roomKx();
+  const peer = await crypto.subtle.importKey("raw", unb64u(pub), { name: "ECDH", namedCurve: "P-256" }, false, []);
+  const bits = await crypto.subtle.deriveBits({ name: "ECDH", public: peer }, kx.privateKey, 256);
+  return roomHkdf(bits, "wistv-room-wrap", ["encrypt", "decrypt"]);
+}
+
+async function roomAskKey() {
+  if (room.host || !room.online || !globalThis.crypto?.subtle) return;
+  const t = Date.now();
+  if (t - (room.keyAsked || 0) < 3000) return;
+  room.keyAsked = t;
+  try { roomSend({ t: "keyreq", pub: await roomPub() }); } catch (e) {}
+}
+
+async function roomGiveKey(m) {
+  if (!room.host || typeof m.pub !== "string" || typeof m.id !== "string") return;
+  try {
+    const rk = roomKeyEnsure();
+    const wrap = await roomWrapKey(m.pub);
+    roomSend({ t: "key", to: m.id, pub: await roomPub(), box: await roomBox(wrap, rk) });
+  } catch (e) {}
+}
+
+async function roomTakeKey(m) {
+  if (room.host || typeof m.pub !== "string" || typeof m.box !== "string") return;
+  try {
+    const rk = await roomUnbox(await roomWrapKey(m.pub), m.box);
+    if (rk.length === 32) roomKeySet(rk);
+  } catch (e) {}
+}
+
+function roomKeyWait(ms) {
+  if (room.rk) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const done = (ok) => { clearTimeout(timer); resolve(ok); };
+    const timer = setTimeout(() => { room.keyWait = (room.keyWait || []).filter((f) => f !== done); resolve(false); }, ms);
+    (room.keyWait ||= []).push(done);
+  });
+}
+
+async function roomSeal(obj) {
+  roomKeyEnsure();
+  return roomBox(await roomContentKey(), new TextEncoder().encode(JSON.stringify(obj)));
+}
+
+async function roomOpen(sealed) {
+  for (let i = 0; i < 2; i++) {
+    if (!room.rk) { roomAskKey(); if (!(await roomKeyWait(10000))) return null; }
+    try { return JSON.parse(new TextDecoder().decode(await roomUnbox(await roomContentKey(), sealed))); } catch (e) { room.rk = null; room.ck = null; room.keyAsked = 0; }
+  }
+  return null;
+}
+
+async function roomSealMedia(md) {
+  const { url, headers, ...hint } = md.hint || {};
+  if (!url && !headers) return { ...md, hint };
+  try { return { ...md, hint: { ...hint, sealed: await roomSeal({ url, headers }) } }; } catch (e) { return { ...md, hint }; }
+}
+
+async function roomSealTracks(t) {
+  if (!t.sub?.url) return t;
+  const { url, ...sub } = t.sub;
+  try { return { ...t, sub: { ...sub, sealed: await roomSeal({ url }) } }; } catch (e) { return { ...t, sub }; }
+}
+
+async function roomOpenMedia(md) {
+  const hint = md?.hint;
+  if (!hint?.sealed) return md;
+  const v = await roomOpen(hint.sealed);
+  const { sealed, ...rest } = hint;
+  if (!v) return { ...md, hint: rest };
+  return { ...md, hint: { ...rest, url: typeof v.url === "string" ? v.url : undefined, headers: v.headers && typeof v.headers === "object" && !Array.isArray(v.headers) ? v.headers : undefined } };
+}
+
+async function roomOpenTracks(t) {
+  if (!t?.sub?.sealed) return t;
+  const v = await roomOpen(t.sub.sealed);
+  const { sealed, ...sub } = t.sub;
+  const url = v ? subUrlSafe(v.url) : null;
+  return { ...t, sub: url ? { ...sub, url } : sub };
+}
+
+async function roomAccept(m) {
+  const seq = (room.mediaSeq = (room.mediaSeq || 0) + 1);
+  const ts = (room.trackSeq = (room.trackSeq || 0) + 1);
+  room.media = m.media || null;
+  room.play = m.play || null;
+  room.tracks = null;
+  const [md, tracks] = await Promise.all([roomOpenMedia(m.media || null), roomOpenTracks(m.tracks || null)]);
+  if (seq !== room.mediaSeq || !room.code || room.host) return;
+  room.media = md;
+  if (ts === room.trackSeq) room.tracks = tracks;
+  roomFollowMedia();
+  paintRoom();
+}
+
+async function roomAcceptTracks(t) {
+  const ts = (room.trackSeq = (room.trackSeq || 0) + 1);
+  const tracks = await roomOpenTracks(t || null);
+  if (ts !== room.trackSeq || !room.code || room.host) return;
+  room.tracks = tracks;
+  room.cool.track = 0;
+  roomSync();
+  if (pl.menu === "tracks") renderMenu();
+}
+
 function roomSend(msg) {
   const ws = room.ws;
   if (!ws || ws.readyState !== 1) return false;
@@ -2768,7 +2936,7 @@ function roomStart({ code, key, name, pw }) {
     code, key: key || null, host: !!key, name, online: false, leaving: false, tries: 0, members: [], hostOnline: true, media: null, play: null,
     offset: 0, rtt: Infinity, chat: [], unread: 0, hold: null, skip: new Set(), sent: null, bufSince: null, waiting: false, waitSince: null,
     rateSet: null, cool: { seek: 0, pause: 0, track: 0 }, joining: null, lastError: "", tracks: null, tracksSent: null, subTried: {}, subFell: null, reactions: ROOM_REACTIONS,
-    pw: roomPwOk(pw) ? pw : null, pwNext: null, locked: false, secretWanted: null,
+    pw: roomPwOk(pw) ? pw : null, pwNext: null, locked: false, secretWanted: null, rk: null, ck: null, kx: null, salt: null, keyAsked: 0,
   });
   roomSave();
   roomConnect();
@@ -2787,8 +2955,8 @@ function roomStop(close) {
   clearInterval(room.pingTimer);
   clearInterval(room.syncTimer);
   if (!room.host && pl.open && room.rateSet != null && room.rateSet !== 1) setProp("speed", 1);
-  Object.assign(room, { code: null, key: null, host: false, online: false, members: [], media: null, play: null, hold: null, rateSet: null, joining: null, waiting: false, unread: 0, tracks: null, tracksSent: null, subTried: {}, subFell: null, pw: null, pwNext: null, locked: false, secretWanted: null });
-  try { sessionStorage.removeItem("wistv.room"); } catch (e) {}
+  Object.assign(room, { code: null, key: null, host: false, online: false, members: [], media: null, play: null, hold: null, rateSet: null, joining: null, waiting: false, unread: 0, tracks: null, tracksSent: null, subTried: {}, subFell: null, pw: null, pwNext: null, locked: false, secretWanted: null, rk: null, ck: null, kx: null, salt: null, keyAsked: 0 });
+  try { sessionStorage.removeItem("wistv.room"); sessionStorage.removeItem("wistv.roomKey"); } catch (e) {}
   room.pwAsk?._close?.();
   room.panel?._close?.();
   paintRoom();
@@ -2796,7 +2964,7 @@ function roomStop(close) {
 
 function roomConnect() {
   clearTimeout(room.retryTimer);
-  const q = new URLSearchParams({ id: room.me, name: room.name });
+  const q = new URLSearchParams({ id: room.me, name: room.name, v: String(ROOM_PROTO) });
   if (room.key) q.set("key", room.key);
   let ws;
   try { ws = new WebSocket(`${ROOM_WS}${room.code}/ws?${q}`); } catch (e) { roomRetry(); return; }
@@ -2850,6 +3018,8 @@ function roomMessage(m) {
     return;
   }
   if (m.t === "chat") { roomChat(m); return; }
+  if (m.t === "keyreq") { roomGiveKey(m); return; }
+  if (m.t === "key") { roomTakeKey(m); return; }
   if (m.t === "react") { roomReact(m); return; }
   if (m.t === "auth") { roomAuth(m); return; }
   if (m.t === "secret") {
@@ -2875,6 +3045,11 @@ function roomMessage(m) {
     if (room.rtt === Infinity) room.offset = m.now - Date.now();
     room.members = Array.isArray(m.members) ? m.members : [];
     room.hostOnline = !!m.hostOnline;
+    try { room.salt = typeof m.salt === "string" ? unb64u(m.salt) : null; } catch (e) { room.salt = null; }
+    room.ck = null;
+    if (!room.rk) room.rk = roomKeyLoad();
+    if (room.host) roomKeyEnsure();
+    else if (!room.rk) roomAskKey();
     if (room.host) {
       room.sent = null;
       room.tracksSent = null;
@@ -2882,30 +3057,22 @@ function roomMessage(m) {
       if (pl.open && !sameMedia(pl.ctx, m.media)) roomShareMedia();
       else roomBeat(false);
     } else {
-      room.media = m.media || null;
-      room.play = m.play || null;
-      room.tracks = m.tracks || null;
-      roomFollowMedia();
+      roomAccept(m);
     }
   } else if (m.t === "members") {
     room.members = Array.isArray(m.members) ? m.members : [];
     room.hostOnline = !!m.hostOnline;
     if (room.host) roomHoldCheck();
+    else if (room.hostOnline && !room.rk) roomAskKey();
   } else if (m.t === "host") {
     roomBecome(m);
   } else if (m.t === "handover") {
     if (!m.ok) toast(serverText(m) || tr("room.reconnecting"), true);
     return;
   } else if (m.t === "media" && !room.host) {
-    room.media = m.media || null;
-    room.play = m.play || null;
-    room.tracks = m.tracks || null;
-    roomFollowMedia();
+    roomAccept(m);
   } else if (m.t === "tracks" && !room.host) {
-    room.tracks = m.tracks || null;
-    room.cool.track = 0;
-    roomSync();
-    if (pl.menu === "tracks") renderMenu();
+    roomAcceptTracks(m.tracks);
     return;
   } else if (m.t === "play" && !room.host) {
     room.play = m.play || null;
@@ -2918,6 +3085,7 @@ function roomBecome(m) {
   const key = typeof m.key === "string" && m.key ? m.key : null;
   if (key) {
     Object.assign(room, { key, host: true, hold: null, skip: new Set(), sent: null, tracksSent: null, waiting: false, waitSince: null, joining: null, pwNext: null, secretWanted: null });
+    roomKeyEnsure();
     if (pl.open && room.rateSet != null && room.rateSet !== 1) setProp("speed", 1);
     room.rateSet = null;
     roomSave();
@@ -2930,11 +3098,11 @@ function roomBecome(m) {
   Object.assign(room, { key: null, host: false, hold: null, pwNext: null, secretWanted: null, sent: null, tracksSent: null, joining: null, cool: { seek: 0, pause: 0, track: 0 } });
   room.media = m.media || null;
   room.play = m.play || null;
-  room.tracks = m.tracks || null;
+  room.tracks = null;
   roomSave();
   toast(tr("room.handed", { name: m.to || roomHostName() }));
   if (pl.open) { if (pl.menu === "sources" || pl.menu === "episodes") toggleMenu(null); paintState(); }
-  roomFollowMedia();
+  roomAccept(m);
 }
 
 function roomHandover(m) {
@@ -3023,11 +3191,14 @@ function roomMediaOf(c, start) {
   };
 }
 
-function roomShareMedia(start) {
+async function roomShareMedia(start) {
   if (!room.host || !room.online || !pl.open || !pl.ctx || String(pl.ctx.vid).startsWith("local:")) return;
   const at = start ?? curTime();
   room.hostPos = at;
-  if (roomSend({ t: "media", media: roomMediaOf(pl.ctx, at) })) { room.sent = null; room.tracksSent = null; roomBeat(false); }
+  const seq = (room.shareSeq = (room.shareSeq || 0) + 1);
+  const media = await roomSealMedia(roomMediaOf(pl.ctx, at));
+  if (seq !== room.shareSeq || !room.host) return;
+  if (roomSend({ t: "media", media })) { room.sent = null; room.tracksSent = null; roomBeat(false); }
 }
 
 function subUrlSafe(u) {
@@ -3050,7 +3221,9 @@ function hostShareTracks() {
   if (!pl.open || !pl.ctx || !pl.s.loaded || !pl.tracks.length) return;
   const tracks = { sub: trackPick("sub"), audio: trackPick("audio"), delay: Math.round((pl.s.subDelay || 0) * 10) / 10 };
   const sig = `${pl.ctx.vid}|${JSON.stringify(tracks)}`;
-  if (sig !== room.tracksSent && roomSend({ t: "tracks", ...tracks })) room.tracksSent = sig;
+  if (sig === room.tracksSent) return;
+  room.tracksSent = sig;
+  roomSealTracks(tracks).then((sealed) => { if (room.tracksSent === sig && !roomSend({ t: "tracks", ...sealed })) room.tracksSent = null; });
 }
 
 function matchTrack(list, want) {
@@ -3309,7 +3482,7 @@ function roomFindStream(md) {
   const hint = md.hint || {};
   const bh = { filename: hint.filename, bingeGroup: hint.bingeGroup };
   if (hint.url) {
-    const stream = { url: hint.url, name: hint.name, behaviorHints: { ...bh, notWebReady: hint.notWebReady || undefined, proxyHeaders: hint.headers ? { request: hint.headers } : undefined } };
+    const stream = { url: hint.url, name: hint.name, ...(roomGuest() ? { fromRoom: true } : {}), behaviorHints: { ...bh, notWebReady: hint.notWebReady || undefined, proxyHeaders: hint.headers ? { request: hint.headers } : undefined } };
     return Promise.resolve({ stream, addon: hint.addon || "" });
   }
   const torrent = hint.infoHash
@@ -3327,7 +3500,7 @@ function roomFindStream(md) {
 
 async function roomFollowMedia(asHost = false) {
   const md = room.media;
-  if (!md || (room.host && !asHost)) return;
+  if (!md || md.hint?.sealed || (room.host && !asHost)) return;
   if (pl.open && sameMedia(pl.ctx, md)) { roomSync(); return; }
   const token = `${md.id}|${md.vid}`;
   if (room.joining === token) return;
@@ -3910,7 +4083,7 @@ function castReport(force) {
 }
 
 function castOk() {
-  return CAST_REMOTE && pl.open && !!pl.ctx && !String(pl.ctx.vid).startsWith("local:");
+  return CAST_REMOTE && pl.open && !!pl.ctx && !String(pl.ctx.vid).startsWith("local:") && !roomGuest();
 }
 
 function castable() {

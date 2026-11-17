@@ -90,6 +90,7 @@ const SAID = {
   "wk.roomPwFormat": "Mật khẩu phòng cần từ 4 đến 32 ký tự",
   "wk.roomPwTries": "Nhập sai mật khẩu quá nhiều lần, hãy thử lại sau",
   "wk.noMember": "Người này không còn trong phòng",
+  "wk.update": "WiS TV trên máy này đã cũ, hãy cập nhật hoặc mở lại app để vào phòng xem chung",
 };
 const said = (key, params) => (SAID[key] || key).replace(/\{(\w+)\}/g, (m, k) => (params && params[k] != null ? String(params[k]) : m));
 const coded = (key, params) => (SAID[key] ? { message: said(key, params), key, ...(params ? { params } : {}) } : { message: key });
@@ -295,6 +296,13 @@ const CLIENT_ID = /^[a-z0-9]{8,32}$/;
 const HTTP_URL = /^https?:\/\/[^\s"'()\\<>]{1,500}$/;
 const SUB_URL = /^https?:\/\/[^\s"<>\\]{1,2000}$/;
 const STREAM_URL = /^(https?|magnet|rtmp|rtsp):[^\s"<>\\]{1,4000}$/;
+const ROOM_PROTO = 2;
+const SEALED = (n) => new RegExp(`^[A-Za-z0-9_-]{24,${n}}$`);
+const SEALED_MEDIA = SEALED(12000);
+const SEALED_SUB = SEALED(4000);
+const ROOM_PUB = /^[A-Za-z0-9_-]{60,200}$/;
+const ROOM_BOX = /^[A-Za-z0-9_-]{40,400}$/;
+const b64url = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 const HEADER_NAME = /^[A-Za-z0-9-]{1,64}$/;
 
 function cleanHeaders(h) {
@@ -335,10 +343,13 @@ function cleanMedia(m) {
     addon: clip(s.addon, 100) || undefined,
     name: clip(s.name, 200) || undefined,
     ytId: typeof s.ytId === "string" && /^[\w-]{6,20}$/.test(s.ytId) ? s.ytId : undefined,
-    url: typeof s.url === "string" && STREAM_URL.test(s.url) ? s.url : undefined,
-    headers: cleanHeaders(s.headers),
+    sealed: typeof s.sealed === "string" && SEALED_MEDIA.test(s.sealed) ? s.sealed : undefined,
     notWebReady: s.notWebReady === true || undefined,
   };
+  if (!hint.sealed) {
+    hint.url = typeof s.url === "string" && STREAM_URL.test(s.url) ? s.url : undefined;
+    hint.headers = cleanHeaders(s.headers);
+  }
   const start = Number.isFinite(m.start) && m.start >= 0 ? Math.min(m.start, 1e9) : 0;
   return { id, type, vid, name: clip(m.name, 200), label: clip(m.label, 200), poster: httpUrl(m.poster), background: httpUrl(m.background), start, hint };
 }
@@ -348,7 +359,8 @@ function cleanTrack(t, url) {
   if (t.off) return { off: true };
   const out = { lang: clip(t.lang, 20), title: clip(t.title, 200) };
   if (Number.isInteger(t.idx) && t.idx >= 0 && t.idx < 200) out.idx = t.idx;
-  if (url && typeof t.url === "string" && SUB_URL.test(t.url)) out.url = t.url;
+  if (url && typeof t.sealed === "string" && SEALED_SUB.test(t.sealed)) out.sealed = t.sealed;
+  else if (url && typeof t.url === "string" && SUB_URL.test(t.url)) out.url = t.url;
   return out;
 }
 
@@ -391,12 +403,23 @@ export class WatchRoom extends DurableObject {
 
   async init(hostKey, uid) {
     if (await this.load()) return false;
-    this.room = { hostKey, uid, created: Date.now(), media: null, hostGone: null };
+    this.room = { hostKey, uid, created: Date.now(), media: null, hostGone: null, salt: hex(crypto.getRandomValues(new Uint8Array(16))) };
     this.play = null;
     this.tracks = null;
     await this.save();
     await this.schedule();
     return true;
+  }
+
+  async salt() {
+    const room = this.room;
+    if (!room.salt) {
+      room.salt = hex(crypto.getRandomValues(new Uint8Array(16)));
+      await this.save();
+    }
+    const secret = typeof this.env.ROOM_SALT === "string" && this.env.ROOM_SALT ? this.env.ROOM_SALT : "wistv-room";
+    const key = await crypto.subtle.importKey("raw", enc(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    return b64url(await crypto.subtle.sign("HMAC", key, enc(room.salt)));
   }
 
   sockets(except) {
@@ -435,6 +458,7 @@ export class WatchRoom extends DurableObject {
       server.close(code, "refused");
       return new Response(null, { status: 101, webSocket: client });
     };
+    if (Number(url.searchParams.get("v")) !== ROOM_PROTO) return refuse(4426, "wk.update");
     const room = await this.load();
     if (!room) return refuse(4404, "wk.noRoom");
     const id = url.searchParams.get("id") || "";
@@ -478,7 +502,7 @@ export class WatchRoom extends DurableObject {
       await this.schedule();
     }
     const roster = this.roster();
-    this.send(ws, { t: "welcome", you: id, host, now: Date.now(), media: room.media, play: this.play, tracks: this.tracks, reactions: REACTIONS, locked: !!room.pw, handover: true, ...roster });
+    this.send(ws, { t: "welcome", you: id, host, now: Date.now(), media: room.media, play: this.play, tracks: this.tracks, reactions: REACTIONS, locked: !!room.pw, handover: true, salt: await this.salt(), proto: ROOM_PROTO, ...roster });
     const data = JSON.stringify({ t: "members", ...roster });
     for (const s of this.sockets()) if (s !== ws) try { s.send(data); } catch (e) {}
   }
@@ -536,7 +560,19 @@ export class WatchRoom extends DurableObject {
       this.broadcast(msg.t === "chat" ? { t: "chat", id: me.id, from: me.name, host: !!me.host, text, at: now } : { t: "react", id: me.id, from: me.name, e: msg.e });
       return;
     }
+    if (msg.t === "keyreq") {
+      if (me.host || typeof msg.pub !== "string" || !ROOM_PUB.test(msg.pub)) return;
+      const data = JSON.stringify({ t: "keyreq", id: me.id, pub: msg.pub });
+      for (const s of this.sockets(ws)) if (this.who(s).host) try { s.send(data); } catch (e) {}
+      return;
+    }
     if (!me.host) return;
+    if (msg.t === "key") {
+      if (typeof msg.to !== "string" || typeof msg.pub !== "string" || !ROOM_PUB.test(msg.pub) || typeof msg.box !== "string" || !ROOM_BOX.test(msg.box)) return;
+      const data = JSON.stringify({ t: "key", pub: msg.pub, box: msg.box });
+      for (const s of this.sockets(ws)) if (this.who(s).id === msg.to) try { s.send(data); } catch (e) {}
+      return;
+    }
     if (msg.t === "media") {
       let media;
       try { media = cleanMedia(msg.media); } catch (e) { return; }
