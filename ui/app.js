@@ -597,9 +597,17 @@ async function logout() {
   go("login", {}, true);
 }
 
+let profileGate = null;
+let startupDone = null;
+const startedUp = new Promise((resolve) => { startupDone = resolve; });
+
 async function startSignedIn() {
   await loadProfiles();
-  if (hasProfiles()) await openProfiles({ startup: true });
+  if (hasProfiles()) {
+    const gate = (profileGate = openProfiles({ startup: true }));
+    await gate;
+    if (profileGate === gate) profileGate = null;
+  }
   if (!app.user) return;
   syncPrefs();
   await boot();
@@ -2736,6 +2744,8 @@ function roomLinkFresh(code) {
 async function openRoomLinks(links) {
   const code = roomFromLinks(links);
   if (!roomLinkFresh(code)) return;
+  await startedUp;
+  while (profileGate) await profileGate;
   if (!app.user && !app.guest) { app.guest = true; loadPrefs(); await boot(); }
   for (const d of $$(".layer.room-dialog")) d._back?.();
   joinRoom(code);
@@ -6147,4 +6157,4 @@ function playIntro() {
   else go("login");
   startupOpen();
   if (app.user || app.guest) roomResume(invite);
-})();
+})().finally(() => startupDone());
