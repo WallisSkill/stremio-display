@@ -38,7 +38,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         run: |
           set -e
-          v=$(git log -1 --format=%ct -- ui)
+          v=$(git log -1 --format=%ct -- ui .github/scripts/ui_bundle.mjs)
           api=$(sed -E -n 's/^pub const API: u32 = ([0-9]+);$/\1/p' src-tauri/src/hotui.rs)
           test -n "$v" && test -n "$api"
           mkdir -p site/ui

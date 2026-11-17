@@ -19,6 +19,14 @@ const walk = (d) => {
   }
 };
 walk(dir);
+const tag = (spec) => `${spec}?v=${v}`;
+for (const [name, text] of Object.entries(files)) {
+  if (name.endsWith(".js")) {
+    files[name] = text.replace(/(\bfrom\s*|\bimport\s*\(?\s*)(["'])(\.\.?\/[^"'?#]+)\2/g, (m, lead, q, spec) => `${lead}${q}${tag(spec)}${q}`);
+  } else if (name.endsWith(".html")) {
+    files[name] = text.replace(/\b(src|href)="(?![a-z]+:|\/\/|#)([^"?#]+\.(?:js|css))"/g, (m, attr, spec) => `${attr}="${tag(spec)}"`);
+  }
+}
 if (!files["/index.html"]) {
   console.error("index.html is missing");
   process.exit(1);
