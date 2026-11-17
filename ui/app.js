@@ -2946,6 +2946,7 @@ function roomStart({ code, key, name, pw }) {
 
 function roomStop(close) {
   if (!room.code) return;
+  const kick = pl.open && !!pl.ctx?.stream?.fromRoom;
   room.leaving = true;
   if (close && room.host) roomSend({ t: "close" });
   const ws = room.ws;
@@ -2960,6 +2961,7 @@ function roomStop(close) {
   room.pwAsk?._close?.();
   room.panel?._close?.();
   paintRoom();
+  if (kick) closePlayer();
 }
 
 function roomConnect() {
