@@ -5,6 +5,7 @@ const API: &str = "https://api.strem.io/api/";
 const PROFILE_API: &str = "https://film.wis237.online/api/profile/";
 const ROOM_API: &str = "https://film.wis237.online/api/room/";
 const CAST_API: &str = "https://film.wis237.online/api/cast/";
+const LINK_API: &str = "https://film.wis237.online/api/link/";
 const INTRO_API: &str = "https://api.introdb.app/segments";
 pub const MAIN_PROFILE: &str = "main";
 
@@ -102,6 +103,10 @@ pub async fn intro_times(http: &reqwest::Client, imdb: &str, episode: Option<(u3
         return Err(format!("IntroDB {}", resp.status()));
     }
     resp.json().await.map_err(|e| e.to_string())
+}
+
+pub async fn link_approve(http: &reqwest::Client, auth_key: &str, code: &str) -> Result<Value, String> {
+    call_at(http, LINK_API, "who.rooms", &format!("{code}/approve"), json!({ "authKey": auth_key })).await
 }
 
 pub async fn cast_token(http: &reqwest::Client, auth_key: &str) -> Result<Value, String> {

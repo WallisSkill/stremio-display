@@ -37,3 +37,11 @@ class_name = "CastHub"
 [[migrations]]
 tag = "v3"
 new_sqlite_classes = ["CastHub"]
+
+[[durable_objects.bindings]]
+name = "LINKS"
+class_name = "LinkPair"
+
+[[migrations]]
+tag = "v4"
+new_sqlite_classes = ["LinkPair"]

@@ -186,6 +186,8 @@
         "room.open": "Mở trong app",
         "room.copy": "Sao chép mã",
         "room.copied": "Đã chép mã",
+        "link.title": "Đăng nhập WiS TV trên máy khác",
+        "link.desc": "Mở WiS TV trên điện thoại đã đăng nhập rồi bấm Cho phép. Hoặc vào Cài đặt trong app, chọn Đăng nhập cho máy khác và nhập mã này.",
       },
       en: {
         title: "Download WiS TV",
@@ -225,6 +227,8 @@
         "room.open": "Open in the app",
         "room.copy": "Copy code",
         "room.copied": "Code copied",
+        "link.title": "Sign in to WiS TV on another device",
+        "link.desc": "Open WiS TV on a phone that is signed in and tap Allow. Or open Settings in the app, choose Sign in another device and type this code.",
       },
       zh: {
         title: "下载 WiS TV",
@@ -264,6 +268,8 @@
         "room.open": "在应用中打开",
         "room.copy": "复制房间码",
         "room.copied": "已复制",
+        "link.title": "在其他设备上登录 WiS TV",
+        "link.desc": "在已登录的手机上打开 WiS TV 并点按允许。也可以在应用的设置里选择为其他设备登录，输入这个代码。",
       },
     };
     const LOCALE = { vi: "vi-VN", en: "en-US", zh: "zh-CN" };
@@ -364,14 +370,24 @@
     apply(lang);
 
     const ROOM_CODE = /^[A-HJ-NP-Z2-9]{6}$/;
-    const asked = String(new URLSearchParams(location.search).get("room") || "").trim().toUpperCase();
-    if (ROOM_CODE.test(asked)) {
+    const LINK_CODE = /^[A-HJ-NP-Z2-9]{8}$/;
+    const params = new URLSearchParams(location.search);
+    const roomAsked = String(params.get("room") || "").trim().toUpperCase();
+    const linkAsked = String(params.get("link") || "").trim().toUpperCase();
+    const kind = ROOM_CODE.test(roomAsked) ? "room" : LINK_CODE.test(linkAsked) ? "link" : null;
+    const asked = kind === "room" ? roomAsked : linkAsked;
+    if (kind) {
       const box = document.querySelector(".invite");
-      box.querySelector(".code").textContent = asked;
+      if (kind === "link") {
+        box.querySelector("h2").dataset.i18n = "link.title";
+        box.querySelector("p").dataset.i18n = "link.desc";
+        apply(lang);
+      }
+      box.querySelector(".code").textContent = kind === "link" ? `${asked.slice(0, 4)}-${asked.slice(4)}` : asked;
       const page = location.origin + location.pathname;
       document.getElementById("open-app").href = /Android/i.test(navigator.userAgent)
-        ? `intent://room/${asked}#Intent;scheme=wistv;package=tv.wis.app;S.browser_fallback_url=${encodeURIComponent(page)};end`
-        : `wistv://room/${asked}`;
+        ? `intent://${kind}/${asked}#Intent;scheme=wistv;package=tv.wis.app;S.browser_fallback_url=${encodeURIComponent(page)};end`
+        : `wistv://${kind}/${asked}`;
       const copy = document.getElementById("copy-code");
       copy.addEventListener("click", async () => {
         try { await navigator.clipboard.writeText(asked); } catch (e) {

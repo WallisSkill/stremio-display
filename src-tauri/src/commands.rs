@@ -228,6 +228,16 @@ pub async fn room_create(st: State<'_, AppState>) -> R<Value> {
 }
 
 #[tauri::command]
+pub async fn link_approve(st: State<'_, AppState>, code: String) -> R<Value> {
+    let code = code.trim().to_ascii_uppercase();
+    if code.len() != 8 || !code.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        return Err(crate::util::msg("link.badCode"));
+    }
+    let key = st.auth_key().ok_or_else(|| crate::util::msg("link.needLogin"))?;
+    api::link_approve(&st.http, &key, &code).await
+}
+
+#[tauri::command]
 pub async fn cast_token(st: State<'_, AppState>) -> R<Value> {
     let key = st.auth_key().ok_or_else(|| crate::util::msg("room.needLogin"))?;
     api::cast_token(&st.http, &key).await

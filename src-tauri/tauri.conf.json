@@ -55,7 +55,8 @@
           ],
           "host": "film.wis237.online",
           "pathPrefix": [
-            "/join"
+            "/join",
+            "/link"
           ],
           "appLink": true
         },

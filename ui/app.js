@@ -2742,6 +2742,14 @@ function roomLinkFresh(code) {
 }
 
 async function openRoomLinks(links) {
+  const pairing = linkFromLinks(links);
+  if (pairing) {
+    if (!roomLinkFresh(`link:${pairing}`)) return;
+    await startedUp;
+    while (profileGate) await profileGate;
+    linkApprove(pairing);
+    return;
+  }
   const code = roomFromLinks(links);
   if (!roomLinkFresh(code)) return;
   await startedUp;
@@ -4963,7 +4971,7 @@ async function renderSettings(view) {
       h("div", { class: "avatar" }, initial()),
       h("div", { class: "who" }, h("b", {}, name), h("span", {}, app.user ? tr("set.synced") : tr("set.guestMode"))),
       app.user
-        ? h("button", { class: "btn focusable", onclick: () => logout() }, tr("set.logout"))
+        ? h("div", { class: "row" }, h("button", { class: "btn focusable", onclick: () => linkEnter() }, tr("link.enter")), h("button", { class: "btn focusable", onclick: () => logout() }, tr("set.logout")))
         : h("button", { class: "btn primary focusable", onclick: () => go("login", {}, true) }, tr("set.login"))));
   const me = currentProfile();
   const people = app.user ? h("div", { class: "panel" }, h("h3", {}, tr("set.profiles")),
@@ -5066,54 +5074,313 @@ async function loginUpdate(...fields) {
   offerUpdate();
 }
 
-const LINK_API = "https://link.stremio.com/api/v2/";
-const LINK_POLL_MS = 3000;
-const LINK_RENEW_MS = 5 * 60 * 1000;
+const QR_RAW = [0, 26, 44, 70, 100, 134, 172, 196, 242, 292, 346];
+const QR_ECC = [0, 10, 16, 26, 18, 24, 16, 18, 22, 22, 26];
+const QR_BLOCKS = [0, 1, 1, 1, 2, 2, 4, 4, 4, 5, 5];
+const QR_ALIGN = [[], [], [6, 18], [6, 22], [6, 26], [6, 30], [6, 34], [6, 22, 38], [6, 24, 42], [6, 26, 46], [6, 28, 50]];
+
+function qrMul(x, y) {
+  let z = 0;
+  for (let i = 7; i >= 0; i--) {
+    z = (z << 1) ^ ((z >>> 7) * 0x11d);
+    z ^= ((y >>> i) & 1) * x;
+  }
+  return z & 0xff;
+}
+
+function qrDivisor(degree) {
+  const out = new Array(degree).fill(0);
+  out[degree - 1] = 1;
+  let root = 1;
+  for (let i = 0; i < degree; i++) {
+    for (let j = 0; j < degree; j++) {
+      out[j] = qrMul(out[j], root);
+      if (j + 1 < degree) out[j] ^= out[j + 1];
+    }
+    root = qrMul(root, 2);
+  }
+  return out;
+}
+
+function qrRemainder(data, divisor) {
+  const out = new Array(divisor.length).fill(0);
+  for (const b of data) {
+    const factor = b ^ out.shift();
+    out.push(0);
+    divisor.forEach((c, i) => { out[i] ^= qrMul(c, factor); });
+  }
+  return out;
+}
+
+function qrMatrix(text) {
+  const bytes = [...new TextEncoder().encode(text)];
+  let ver = 1;
+  for (; ver <= 10; ver++) {
+    const cap = (QR_RAW[ver] - QR_BLOCKS[ver] * QR_ECC[ver]) * 8;
+    if (4 + (ver < 10 ? 8 : 16) + bytes.length * 8 <= cap) break;
+  }
+  if (ver > 10) throw new Error("qr: text too long");
+  const cap = (QR_RAW[ver] - QR_BLOCKS[ver] * QR_ECC[ver]) * 8;
+  const bits = [];
+  const put = (v, n) => { for (let i = n - 1; i >= 0; i--) bits.push((v >>> i) & 1); };
+  put(4, 4);
+  put(bytes.length, ver < 10 ? 8 : 16);
+  for (const b of bytes) put(b, 8);
+  put(0, Math.min(4, cap - bits.length));
+  put(0, (8 - (bits.length % 8)) % 8);
+  for (let pad = 0xec; bits.length < cap; pad ^= 0xec ^ 0x11) put(pad, 8);
+  const data = [];
+  for (let i = 0; i < bits.length; i += 8) data.push(bits.slice(i, i + 8).reduce((a, b) => (a << 1) | b, 0));
+  const raw = QR_RAW[ver], nb = QR_BLOCKS[ver], ecl = QR_ECC[ver];
+  const shortN = nb - (raw % nb), shortLen = Math.floor(raw / nb);
+  const div = qrDivisor(ecl);
+  const blocks = [];
+  for (let i = 0, k = 0; i < nb; i++) {
+    const dat = data.slice(k, k + shortLen - ecl + (i < shortN ? 0 : 1));
+    k += dat.length;
+    const ecc = qrRemainder(dat, div);
+    if (i < shortN) dat.push(0);
+    blocks.push(dat.concat(ecc));
+  }
+  const words = [];
+  for (let i = 0; i < blocks[0].length; i++) blocks.forEach((b, j) => { if (i !== shortLen - ecl || j >= shortN) words.push(b[i]); });
+  const size = ver * 4 + 17;
+  const mod = Array.from({ length: size }, () => new Array(size).fill(false));
+  const fn = Array.from({ length: size }, () => new Array(size).fill(false));
+  const set = (x, y, dark) => { mod[y][x] = dark; fn[y][x] = true; };
+  for (let i = 0; i < size; i++) { set(6, i, i % 2 === 0); set(i, 6, i % 2 === 0); }
+  const finder = (cx, cy) => {
+    for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) {
+      const x = cx + dx, y = cy + dy;
+      if (x >= 0 && x < size && y >= 0 && y < size) { const d = Math.max(Math.abs(dx), Math.abs(dy)); set(x, y, d !== 2 && d !== 4); }
+    }
+  };
+  finder(3, 3); finder(size - 4, 3); finder(3, size - 4);
+  const al = QR_ALIGN[ver], last = al.length - 1;
+  al.forEach((ax, i) => al.forEach((ay, j) => {
+    if ((i === 0 && j === 0) || (i === 0 && j === last) || (i === last && j === 0)) return;
+    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) set(ax + dx, ay + dy, Math.max(Math.abs(dx), Math.abs(dy)) !== 1);
+  }));
+  const format = (mask) => {
+    const d = mask;
+    let rem = d;
+    for (let i = 0; i < 10; i++) rem = (rem << 1) ^ ((rem >>> 9) * 0x537);
+    const f = ((d << 10) | rem) ^ 0x5412;
+    const bit = (i) => ((f >>> i) & 1) === 1;
+    for (let i = 0; i <= 5; i++) set(8, i, bit(i));
+    set(8, 7, bit(6)); set(8, 8, bit(7)); set(7, 8, bit(8));
+    for (let i = 9; i < 15; i++) set(14 - i, 8, bit(i));
+    for (let i = 0; i < 8; i++) set(size - 1 - i, 8, bit(i));
+    for (let i = 8; i < 15; i++) set(8, size - 15 + i, bit(i));
+    set(8, size - 8, true);
+  };
+  format(0);
+  if (ver >= 7) {
+    let rem = ver;
+    for (let i = 0; i < 12; i++) rem = (rem << 1) ^ ((rem >>> 11) * 0x1f25);
+    const v = (ver << 12) | rem;
+    for (let i = 0; i < 18; i++) { const b = ((v >>> i) & 1) === 1; const a = size - 11 + (i % 3), c = Math.floor(i / 3); set(a, c, b); set(c, a, b); }
+  }
+  let bi = 0;
+  for (let right = size - 1; right >= 1; right -= 2) {
+    if (right === 6) right = 5;
+    for (let vert = 0; vert < size; vert++) for (let j = 0; j < 2; j++) {
+      const x = right - j, up = ((right + 1) & 2) === 0, y = up ? size - 1 - vert : vert;
+      if (!fn[y][x] && bi < words.length * 8) { mod[y][x] = ((words[bi >>> 3] >>> (7 - (bi & 7))) & 1) === 1; bi++; }
+    }
+  }
+  const masks = [
+    (x, y) => (x + y) % 2 === 0, (x, y) => y % 2 === 0, (x) => x % 3 === 0, (x, y) => (x + y) % 3 === 0,
+    (x, y) => (Math.floor(x / 3) + Math.floor(y / 2)) % 2 === 0, (x, y) => ((x * y) % 2) + ((x * y) % 3) === 0,
+    (x, y) => (((x * y) % 2) + ((x * y) % 3)) % 2 === 0, (x, y) => (((x + y) % 2) + ((x * y) % 3)) % 2 === 0,
+  ];
+  const flip = (m) => { for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) if (!fn[y][x] && masks[m](x, y)) mod[y][x] = !mod[y][x]; };
+  const score = () => {
+    let p = 0, dark = 0;
+    const lines = [];
+    for (let i = 0; i < size; i++) { lines.push(mod[i]); lines.push(mod.map((r) => r[i])); }
+    const fin = [true, false, true, true, true, false, true];
+    for (const line of lines) {
+      let run = 1;
+      for (let i = 1; i <= size; i++) {
+        if (i < size && line[i] === line[i - 1]) run++;
+        else { if (run >= 5) p += run - 2; run = 1; }
+      }
+      for (let i = 0; i + 7 <= size; i++) {
+        if (!fin.every((v, k) => line[i + k] === v)) continue;
+        const before = i >= 4 && [1, 2, 3, 4].every((k) => !line[i - k]);
+        const after = i + 11 <= size && [7, 8, 9, 10].every((k) => !line[i + k]);
+        if (before || after) p += 40;
+      }
+    }
+    for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+      if (mod[y][x]) dark++;
+      if (x + 1 < size && y + 1 < size && mod[y][x] === mod[y][x + 1] && mod[y][x] === mod[y + 1][x] && mod[y][x] === mod[y + 1][x + 1]) p += 3;
+    }
+    const total = size * size;
+    p += (Math.ceil(Math.abs(dark * 20 - total * 10) / total) - 1) * 10;
+    return p;
+  };
+  let best = 0, bestScore = Infinity;
+  for (let m = 0; m < 8; m++) {
+    flip(m); format(m);
+    const s = score();
+    if (s < bestScore) { bestScore = s; best = m; }
+    flip(m);
+  }
+  flip(best); format(best);
+  return mod;
+}
+
+function qrSvg(text) {
+  const m = qrMatrix(text);
+  const n = m.length, q = 4, all = n + q * 2;
+  let d = "";
+  m.forEach((row, y) => row.forEach((on, x) => { if (on) d += `M${x + q} ${y + q}h1v1h-1z`; }));
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${all} ${all}" shape-rendering="crispEdges"><rect width="${all}" height="${all}" fill="#fff"/><path d="${d}" fill="#000"/></svg>`;
+}
+
+const LINK_API = ROOM_API.replace(/room\/$/, "link/");
+const LINK_WS = LINK_API.replace(/^http/, "ws");
+const LINK_RE = /^[A-HJ-NP-Z2-9]{8}$/;
+const linkShow = (c) => `${c.slice(0, 4)}-${c.slice(4)}`;
+
+function deviceLabel() {
+  const ua = navigator.userAgent;
+  const os = /Android/.test(ua) ? (TV_APP ? "Android TV" : "Android") : /iPhone|iPad|iPod/.test(ua) ? "iPhone" : /Windows/.test(ua) ? "Windows" : /Mac OS/.test(ua) ? "Mac" : /Linux/.test(ua) ? "Linux" : "";
+  return [TAURI ? "WiS TV" : tr("link.browser"), os].filter(Boolean).join(" · ");
+}
+
+function linkCodeFromLink(link) {
+  let u;
+  try { u = new URL(String(link)); } catch (e) { return null; }
+  let code = null;
+  if (u.protocol === "wistv:") {
+    const parts = `${u.host}${u.pathname}`.split("/").filter(Boolean);
+    if (parts[0] === "link") code = parts[1];
+  } else if (u.protocol === "https:" && u.host === "film.wis237.online") {
+    code = /^\/link\/([^/]+)\/?$/.exec(u.pathname)?.[1] ?? u.searchParams.get("link");
+  }
+  code = String(code || "").trim().toUpperCase();
+  return LINK_RE.test(code) ? code : null;
+}
+
+const linkFromLinks = (links) => (Array.isArray(links) ? links : []).map(linkCodeFromLink).find(Boolean) || null;
+
+function linkAsk(device) {
+  return new Promise((resolve) => {
+    const done = (v) => { box.remove(); resolve(v); };
+    const box = layer("edit room-dialog", () => done(false));
+    box._back = () => done(false);
+    put(box, h("div", { class: "pf-card" },
+      h("h2", {}, tr("link.ask", { device })),
+      h("p", { class: "hint" }, tr("link.askHint", { name: app.user?.email || app.user?.fullname || "" })),
+      h("div", { class: "pf-row end" },
+        h("button", { class: "btn focusable", onclick: () => done(false) }, tr("common.cancel")),
+        h("button", { class: "btn primary focusable", onclick: () => done(true) }, tr("link.allow")))));
+    $(".btn.primary", box).focus({ preventScroll: true });
+  });
+}
+
+async function linkApprove(raw) {
+  const code = String(raw || "").replace(/[\s-]/g, "").toUpperCase();
+  if (!LINK_RE.test(code)) { toast(tr("link.badCode"), true); return false; }
+  if (!app.user) { toast(tr("link.needLogin"), true); return false; }
+  let info;
+  try {
+    const j = await (await fetch(`${LINK_API}${code}`)).json();
+    if (j.error) { toast(serverText(j.error), true); return false; }
+    info = j.result;
+  } catch (e) { toast(tr("link.offline"), true); return false; }
+  if (!(await linkAsk(info.device))) return false;
+  try {
+    const r = await call("link_approve", { code });
+    toast(tr("link.done", { device: r?.device || info.device }));
+    return true;
+  } catch (e) {
+    toast(/link_approve|not found|unknown/i.test(String(e)) ? tr("link.updateApp") : String(e), true);
+    return false;
+  }
+}
+
+function linkEnter() {
+  const done = () => box.remove();
+  const box = layer("edit room-dialog", done);
+  box._back = done;
+  const input = h("input", { class: "field room-code-in", maxlength: "9", autocomplete: "off", autocapitalize: "characters", spellcheck: "false", placeholder: "ABCD-EFGH" });
+  const go = async () => { if (await linkApprove(input.value)) done(); };
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); go(); } });
+  put(box, h("div", { class: "pf-card" },
+    h("h2", {}, tr("link.enter")),
+    h("p", { class: "hint" }, tr("link.enterHint")),
+    input,
+    h("div", { class: "pf-row end" },
+      h("button", { class: "btn focusable", onclick: done }, tr("common.cancel")),
+      h("button", { class: "btn primary focusable", onclick: go }, tr("common.next")))));
+  input.focus({ preventScroll: true });
+}
 
 function qrLogin(onKey) {
-  const img = h("img", { class: "qr-img", alt: "", width: "180", height: "180" });
+  const img = h("div", { class: "qr-img", role: "img", "aria-label": tr("login.qrTitle") });
   const code = h("b", { class: "qr-code" });
   const note = h("p", { class: "qr-note" });
   const box = h("div", { class: "qr-login", hidden: true }, h("h3", {}, tr("login.qrTitle")), img, h("p", {}, tr("login.qrStep")), h("p", { class: "qr-alt" }, tr("login.qrAlt"), " ", code), note);
-  let made = 0;
-  let current = null;
-  let busy = false;
-  const linkApi = async (path) => {
-    const r = await fetch(`${LINK_API}${path}`);
-    return r.json();
+  let gen = 0, ws = null, timer = 0, ping = 0, pair = null, busy = false;
+  const stop = () => { clearTimeout(timer); clearInterval(ping); const s = ws; ws = null; try { s?.close(); } catch (e) {} };
+  const gone = () => gen > 0 && !box.isConnected;
+  const connect = (my) => {
+    if (my !== gen || gone()) { stop(); return; }
+    clearInterval(ping);
+    const sock = new WebSocket(`${LINK_WS}${pair.code}/ws?secret=${pair.secret}`);
+    ws = sock;
+    ping = setInterval(() => { if (gone()) { stop(); return; } try { sock.send("ping"); } catch (e) {} }, 25000);
+    sock.onmessage = async (e) => {
+      let m;
+      try { m = JSON.parse(e.data); } catch (x) { return; }
+      if (m?.t !== "key" || typeof m.authKey !== "string" || my !== gen || busy) return;
+      busy = true;
+      note.textContent = tr("login.busy");
+      try {
+        await onKey(m.authKey);
+        try { sock.send(JSON.stringify({ t: "got" })); } catch (x) {}
+        gen++;
+        stop();
+      } catch (x) {
+        note.textContent = String(x);
+        busy = false;
+        clearTimeout(timer);
+        timer = setTimeout(() => fresh(), 3000);
+      }
+    };
+    sock.onclose = (e) => {
+      if (ws !== sock || my !== gen || busy) return;
+      clearInterval(ping);
+      if (gone()) return;
+      clearTimeout(timer);
+      if (e.code === 4404 || e.code === 4410 || Date.now() > pair.until) timer = setTimeout(() => fresh(), 0);
+      else timer = setTimeout(() => connect(my), 2000);
+    };
   };
-  const renew = async () => {
-    const res = await linkApi("create?type=Create");
-    const c = res?.result;
-    if (!c?.code) throw new Error(tr("login.qrFail"));
-    current = c.code;
-    made = Date.now();
-    img.src = c.qrcode || `https://link.stremio.com/qr?data=${encodeURIComponent(c.link)}`;
-    code.textContent = c.code;
+  const fresh = async () => {
+    stop();
+    if (gone()) return;
+    const my = ++gen;
+    let c = null;
+    try {
+      const r = await fetch(`${LINK_API}create`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ device: deviceLabel() }) });
+      c = (await r.json())?.result || null;
+    } catch (e) {}
+    if (my !== gen || gone()) return;
+    if (!c?.code || !c.secret || !LINK_RE.test(c.code)) { box.hidden = true; timer = setTimeout(() => fresh(), 15000); return; }
+    pair = { code: c.code, secret: c.secret, until: Date.now() + Math.max(30000, (c.ttl || 600000) - 15000) };
+    img.innerHTML = qrSvg(c.url || `https://film.wis237.online/link/${c.code}`);
+    code.textContent = linkShow(c.code);
     note.textContent = "";
     box.hidden = false;
+    timer = setTimeout(() => fresh(), pair.until - Date.now());
+    connect(my);
   };
-  const tick = async () => {
-    if (!box.isConnected && made) return;
-    if (busy) { setTimeout(tick, LINK_POLL_MS); return; }
-    busy = true;
-    try {
-      if (!current || Date.now() - made > LINK_RENEW_MS) await renew();
-      else {
-        const res = await linkApi(`read?type=Read&code=${encodeURIComponent(current)}`);
-        const key = res?.result?.authKey;
-        if (key) {
-          note.textContent = tr("login.busy");
-          try { await onKey(key); busy = false; return; } catch (e) { note.textContent = String(e); current = null; }
-        }
-      }
-    } catch (e) {
-      if (!current) { box.hidden = true; }
-    }
-    busy = false;
-    setTimeout(tick, LINK_POLL_MS);
-  };
-  tick();
+  fresh();
   return box;
 }
 
@@ -6146,10 +6413,15 @@ function playIntro() {
   if (TAURI || STANDALONE) playIntro();
   try { app.user = await call("session"); } catch (e) { app.user = null; }
   let linked = null;
+  let pairing = null;
   if (TAURI) {
     listen("deep-link", ({ payload }) => openRoomLinks(payload));
-    try { linked = roomFromLinks(await call("startup_links")); } catch (e) { linked = null; }
+    let links = [];
+    try { links = await call("startup_links"); } catch (e) { links = []; }
+    linked = roomFromLinks(links);
+    pairing = linkFromLinks(links);
     roomLinkFresh(linked);
+    if (pairing) roomLinkFresh(`link:${pairing}`);
   }
   const invite = roomFromUrl() ?? linked;
   if (app.user) await startSignedIn();
@@ -6157,4 +6429,5 @@ function playIntro() {
   else go("login");
   startupOpen();
   if (app.user || app.guest) roomResume(invite);
+  if (pairing) linkApprove(pairing);
 })().finally(() => startupDone());

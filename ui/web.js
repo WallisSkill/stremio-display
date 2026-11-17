@@ -46,6 +46,7 @@ const authKey = () => session()?.authKey || null;
 
 const MAIN_PROFILE = "main";
 const PROFILE_API = document.querySelector('meta[name="wistv-profile-api"]')?.content || "https://film.wis237.online/api/profile/";
+const LINK_API = PROFILE_API.replace(/profile\/$/, "link/");
 
 function activeProfile() {
   const saved = store.get("wistv.profile");
@@ -900,6 +901,10 @@ export const web = {
   },
   async intro_times() {
     return null;
+  },
+  async link_approve({ code }) {
+    const key = needKey(tr("link.needLogin"));
+    return workerApi(LINK_API, tr("who.rooms"), `${encodeURIComponent(code)}/approve`, { authKey: key });
   },
   async cast_token() {
     const key = needKey(tr("room.needLogin"));

@@ -91,6 +91,8 @@ const SAID = {
   "wk.roomPwTries": "Nhập sai mật khẩu quá nhiều lần, hãy thử lại sau",
   "wk.noMember": "Người này không còn trong phòng",
   "wk.update": "WiS TV trên máy này đã cũ, hãy cập nhật hoặc mở lại app để vào phòng xem chung",
+  "wk.linkGone": "Mã đăng nhập đã hết hạn hoặc đã dùng, hãy tạo mã mới trên máy cần đăng nhập",
+  "wk.linkCreateFail": "Chưa tạo được mã đăng nhập, hãy thử lại",
 };
 const said = (key, params) => (SAID[key] || key).replace(/\{(\w+)\}/g, (m, k) => (params && params[k] != null ? String(params[k]) : m));
 const coded = (key, params) => (SAID[key] ? { message: said(key, params), key, ...(params ? { params } : {}) } : { message: key });
@@ -670,6 +672,116 @@ const CAST_CMDS = new Set(["pause", "play", "seek", "stop", "volume", "opts", "s
 const CAST_ROLES = new Set(["screen", "remote"]);
 const CAST_NAME = 40;
 
+const LINK_TTL_MS = 10 * 60e3;
+const LINK_CODE = /^[A-HJ-NP-Z2-9]{8}$/;
+const LINK_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const linkCode = () => [...crypto.getRandomValues(new Uint8Array(8))].map((b) => LINK_ALPHABET[b & 31]).join("");
+const sha256 = async (s) => hex(await crypto.subtle.digest("SHA-256", enc(String(s))));
+
+export class LinkPair extends DurableObject {
+  async init(hash, device) {
+    if (await this.ctx.storage.get("pair")) return false;
+    const created = Date.now();
+    await this.ctx.storage.put("pair", { hash, device, created, key: null });
+    await this.ctx.storage.setAlarm(created + LINK_TTL_MS);
+    return true;
+  }
+
+  async pair() {
+    const p = await this.ctx.storage.get("pair");
+    return p && Date.now() - p.created < LINK_TTL_MS ? p : null;
+  }
+
+  async info() {
+    const p = await this.pair();
+    return p && !p.key ? { device: p.device, left: Math.max(0, p.created + LINK_TTL_MS - Date.now()) } : null;
+  }
+
+  deliver(p) {
+    const data = JSON.stringify({ t: "key", authKey: p.key });
+    for (const ws of this.ctx.getWebSockets()) try { ws.send(data); } catch (e) {}
+  }
+
+  async approve(authKey) {
+    const p = await this.pair();
+    if (!p || p.key) return null;
+    p.key = authKey;
+    await this.ctx.storage.put("pair", p);
+    this.deliver(p);
+    return { device: p.device };
+  }
+
+  async fetch(request) {
+    const url = new URL(request.url);
+    const [client, server] = Object.values(new WebSocketPair());
+    const p = await this.pair();
+    const secret = url.searchParams.get("secret") || "";
+    if (!p || !/^[0-9a-f]{64}$/.test(secret) || !same(await sha256(secret), p.hash)) {
+      server.accept();
+      server.send(JSON.stringify({ t: "error", ...coded("wk.linkGone") }));
+      server.close(4404, "gone");
+      return new Response(null, { status: 101, webSocket: client });
+    }
+    this.ctx.acceptWebSocket(server);
+    if (p.key) this.deliver(p);
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  async webSocketMessage(ws, data) {
+    if (data === "ping") { try { ws.send("pong"); } catch (e) {} return; }
+    let msg;
+    try { msg = JSON.parse(data); } catch (e) { return; }
+    if (msg?.t !== "got") return;
+    for (const s of this.ctx.getWebSockets()) try { s.close(1000, "done"); } catch (e) {}
+    await this.ctx.storage.deleteAlarm();
+    await this.ctx.storage.deleteAll();
+  }
+
+  async webSocketClose(ws) {
+    try { ws.close(1000, "bye"); } catch (e) {}
+  }
+
+  async alarm() {
+    for (const ws of this.ctx.getWebSockets()) {
+      try { ws.send(JSON.stringify({ t: "error", ...coded("wk.linkGone") })); ws.close(4410, "expired"); } catch (e) {}
+    }
+    await this.ctx.storage.deleteAll();
+  }
+}
+
+async function linkCreate(request, env) {
+  const body = await request.json().catch(() => null);
+  const device = clip(body && body.device, 60) || "WiS TV";
+  for (let i = 0; i < 6; i++) {
+    const code = linkCode();
+    const secret = hex(crypto.getRandomValues(new Uint8Array(32)));
+    if (await env.LINKS.get(env.LINKS.idFromName(code)).init(await sha256(secret), device)) {
+      return reply({ result: { code, secret, url: `https://film.wis237.online/link/${code}`, ttl: LINK_TTL_MS } });
+    }
+  }
+  return fail("wk.linkCreateFail", 503);
+}
+
+async function linkApi(request, env, code, action) {
+  if (!LINK_CODE.test(code)) return fail("wk.linkGone", 404);
+  const stub = env.LINKS.get(env.LINKS.idFromName(code));
+  if (action === "/ws") {
+    if ((request.headers.get("upgrade") || "").toLowerCase() !== "websocket") return fail("wk.needWebSocket", 426);
+    return stub.fetch(request);
+  }
+  if (action === "/approve") {
+    if (request.method !== "POST") return fail("method not allowed", 405);
+    const body = await request.json().catch(() => null);
+    const authKey = body && typeof body.authKey === "string" ? body.authKey.trim() : "";
+    if (!authKey || !(await cachedUserId(authKey, env))) return fail("wk.sessionExpired", 401);
+    const done = await stub.approve(authKey);
+    return done ? reply({ result: done }) : fail("wk.linkGone", 404);
+  }
+  if (request.method !== "GET") return fail("method not allowed", 405);
+  const info = await stub.info();
+  return info ? reply({ result: info }) : fail("wk.linkGone", 404);
+}
+
 export class CastHub extends DurableObject {
   async issue() {
     const now = Date.now();
@@ -885,6 +997,12 @@ export default {
       if (request.method !== "POST") return fail("method not allowed", 405);
       return roomCreate(request, env);
     }
+    if (pathname === "/api/link/create") {
+      if (request.method !== "POST") return fail("method not allowed", 405);
+      return linkCreate(request, env);
+    }
+    const link = /^\/api\/link\/([A-Za-z0-9]{8})(\/ws|\/approve)?$/.exec(pathname);
+    if (link) return linkApi(request, env, link[1].toUpperCase(), link[2] || "");
     if (pathname === "/api/cast/token") {
       if (request.method !== "POST") return fail("method not allowed", 405);
       return castToken(request, env);
