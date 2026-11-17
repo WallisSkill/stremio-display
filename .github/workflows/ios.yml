@@ -70,6 +70,7 @@ jobs:
             props["NSAppTransportSecurity"] = { "NSAllowsArbitraryLoads" => true }
             props["UISupportedInterfaceOrientations"] = ["UIInterfaceOrientationPortrait", "UIInterfaceOrientationLandscapeLeft", "UIInterfaceOrientationLandscapeRight"]
             props["UIRequiresFullScreen"] = true
+            props["CFBundleURLTypes"] = [{ "CFBundleURLName" => "tv.wis.app", "CFBundleURLSchemes" => ["wistv"] }]
             File.write(f, y.to_yaml)
             puts y["targets"][t].to_yaml
           '
@@ -126,6 +127,7 @@ jobs:
             rmdir "$app/Frameworks" 2>/dev/null || true
           fi
           /usr/libexec/PlistBuddy -c 'Print' "$app/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleURLTypes:0:CFBundleURLSchemes:0' "$app/Info.plist" | grep -qx wistv || { echo "::error::Info.plist has no wistv:// URL scheme"; exit 1; }
           otool -L "$exe" | grep -i -E "mpv|framework/" | head -20 || true
           rm -f out/WiSTV.ipa
           zip -qry out/WiSTV.ipa Payload
