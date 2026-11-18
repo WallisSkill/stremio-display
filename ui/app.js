@@ -1239,7 +1239,7 @@ function buildPlayer() {
   let center = null;
   let bottom;
   if (TOUCH) {
-    for (const [btn, text] of [[ui.lock, tr("pl.lock")], [ui.eps, tr("ep.list")], [ui.next, tr("pl.next")]]) {
+    for (const [btn, text] of [[ui.lock, tr("pl.lock")], [ui.eps, tr("ep.list")], [ui.cc, tr("set.subs")], [ui.next, tr("pl.next")]]) {
       btn.classList.add("act");
       btn.append(h("span", { class: "pl-label" }, text));
     }
@@ -1254,7 +1254,7 @@ function buildPlayer() {
     ui.lockbar = h("div", { class: "pl-lockbar" }, ui.lockRoom, ui.unlock);
     ui.play.classList.add("huge");
     center = h("div", { class: "pl-center" }, ui.play);
-    ui.actions = h("div", { class: "pl-actions" }, ui.lock, ui.stretch, ui.eps, ui.next);
+    ui.actions = h("div", { class: "pl-actions" }, ui.lock, ui.stretch, ui.eps, ui.cc, ui.next);
     bottom = h("div", { class: "pl-bottom" }, seekRow, ui.actions);
     window.addEventListener("resize", () => { ui.fitSig = ""; fitActions(); });
   } else {
@@ -2504,7 +2504,6 @@ function fillMenu(box) {
       ui.speed.hidden ? null : item("speed", `${tr("pl.speed")} (${ui.speedVal.textContent})`, () => toggleMenu("speed")),
       item("people", tr("nav.togetherShort"), leave(roomMenu), members ? tr("room.badgeHost", { code: room.code, n: members }) : ""),
       ui.src.hidden ? null : item("source", tr("pl.src"), () => toggleMenu("sources")),
-      item("cc", tr("set.subs"), () => toggleMenu("tracks")),
       castOk() ? item("cast", tr("cast.button"), leave(castPick)) : null);
     return;
   }
