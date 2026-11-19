@@ -75,6 +75,7 @@ pub fn run() {
             commands::room_create,
             commands::cast_token,
             commands::link_approve,
+            commands::player_thumb,
             commands::intro_times,
             commands::play,
             commands::player_command,

@@ -665,6 +665,11 @@ pub async fn player_fill(app: AppHandle, on: bool, animate: Option<bool>) -> R<V
 }
 
 #[tauri::command]
+pub async fn player_thumb(app: AppHandle, at: f64) -> R<Value> {
+    off_main(app, move |st| st.player.thumb(at)).await
+}
+
+#[tauri::command]
 pub async fn player_background(app: AppHandle, hidden: bool) -> R<()> {
     off_main(app, move |st| {
         if hidden && st.player.paused() {

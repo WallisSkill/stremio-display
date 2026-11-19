@@ -1174,6 +1174,71 @@ function iconBtn(icon, title, onclick, cls = "") {
   return h("button", { class: `pl-btn ${cls}`, tabindex: "-1", title, "aria-label": title, html: ICON[icon], onclick: (e) => { e.stopPropagation(); onclick(e); } });
 }
 
+const THUMB_STEP = 5;
+const THUMB_KEEP = 160;
+
+function thumbWanted() {
+  const c = pl.ctx;
+  return pl.thumbOk !== false && !!c && !!pl.s.loaded && pl.s.duration > 0 && !c.stream?.infoHash && !isTvCtx();
+}
+
+function thumbPaint(entry) {
+  const cv = pl.ui?.tipImg;
+  if (!cv || !entry) return;
+  if (cv.width !== entry.w || cv.height !== entry.h) { cv.width = entry.w; cv.height = entry.h; }
+  cv.getContext("2d").drawImage(entry.bitmap, 0, 0, entry.w, entry.h);
+  cv.hidden = false;
+}
+
+function thumbAt(sec) {
+  if (pl.thumbFor !== pl.session) {
+    pl.thumbFor = pl.session;
+    pl.thumbCache = new Map();
+    pl.thumbWant = null;
+    if (pl.ui?.tipImg) pl.ui.tipImg.hidden = true;
+  }
+  if (!thumbWanted()) return;
+  const key = Math.max(0, Math.round(sec / THUMB_STEP) * THUMB_STEP);
+  pl.thumbWant = key;
+  const hit = pl.thumbCache.get(key);
+  if (hit) { thumbPaint(hit); return; }
+  clearTimeout(pl.thumbTimer);
+  pl.thumbTimer = setTimeout(thumbRun, 120);
+}
+
+async function thumbBitmap(r) {
+  if (r?.bitmap) return { bitmap: r.bitmap, w: r.w, h: r.h };
+  if (!r?.data || !(r.w > 0) || !(r.h > 0)) return null;
+  const raw = Uint8ClampedArray.from(atob(r.data), (c) => c.charCodeAt(0));
+  return { bitmap: await createImageBitmap(new ImageData(raw, r.w, r.h)), w: r.w, h: r.h };
+}
+
+async function thumbRun() {
+  const key = pl.thumbWant;
+  const session = pl.session;
+  if (pl.thumbBusy || key == null || !thumbWanted()) return;
+  pl.thumbBusy = true;
+  try {
+    const entry = await thumbBitmap(await call("player_thumb", { at: key }));
+    if (session !== pl.session || !entry) return;
+    pl.thumbCache.set(key, entry);
+    if (pl.thumbCache.size > THUMB_KEEP) pl.thumbCache.delete(pl.thumbCache.keys().next().value);
+    if (pl.thumbWant === key) thumbPaint(entry);
+  } catch (e) {
+    if (/player_thumb|not found|unknown command/i.test(String(e))) pl.thumbOk = false;
+  } finally {
+    pl.thumbBusy = false;
+    if (session === pl.session && pl.thumbWant != null && pl.thumbWant !== key && !pl.thumbCache.has(pl.thumbWant)) thumbRun();
+  }
+}
+
+function placeTip(f) {
+  const ui = pl.ui;
+  const w = ui.seek.getBoundingClientRect().width || 1;
+  const half = (ui.tip.offsetWidth || 0) / 2;
+  ui.tip.style.left = `${Math.min(w - half, Math.max(half, f * w))}px`;
+}
+
 function buildPlayer() {
   const ui = {};
   ui.bgImg = h("img", { alt: "", decoding: "async" });
@@ -1191,7 +1256,9 @@ function buildPlayer() {
   ui.fill = h("div", { class: "pl-fill" });
   ui.knob = h("div", { class: "pl-knob" });
   ui.hover = h("div", { class: "pl-hover" });
-  ui.tip = h("div", { class: "pl-tip" });
+  ui.tipImg = h("canvas", { class: "pl-tip-img", width: "192", height: "108", hidden: true });
+  ui.tipText = h("span");
+  ui.tip = h("div", { class: "pl-tip" }, ui.tipImg, ui.tipText);
   ui.seek = h("div", { class: "pl-seek" }, h("div", { class: "pl-track" }, ui.buf, ui.hover, ui.fill), ui.knob, ui.tip);
   ui.play = iconBtn("pause", tr("pl.pause"), togglePause, "big");
   ui.next = iconBtn("next", tr("pl.nextEp"), () => playNext(false));
@@ -1281,8 +1348,9 @@ function buildPlayer() {
   const swipeTip = () => {
     const d = pl.s.duration || 0;
     const delta = (pl.drag - swipe.from) * d;
-    ui.tip.textContent = `${secs(pl.drag * d)} · ${delta < 0 ? "−" : "+"}${secs(Math.abs(delta))}`;
-    ui.tip.style.left = `${Math.min(92, Math.max(8, pl.drag * 100))}%`;
+    ui.tipText.textContent = `${secs(pl.drag * d)} · ${delta < 0 ? "−" : "+"}${secs(Math.abs(delta))}`;
+    thumbAt(pl.drag * d);
+    placeTip(pl.drag);
   };
   let pinch = null;
   let tapSeek = null;
@@ -1469,8 +1537,9 @@ function buildPlayer() {
   ui.seek.addEventListener("pointermove", (e) => {
     const f = frac(e);
     const d = pl.s.duration || 0;
-    ui.tip.textContent = secs(f * d);
-    ui.tip.style.left = `${f * 100}%`;
+    ui.tipText.textContent = secs(f * d);
+    thumbAt(f * d);
+    placeTip(f);
     ui.hover.style.width = `${f * 100}%`;
     if (pl.drag != null) { pl.drag = f; paintTime(); }
   });

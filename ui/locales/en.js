@@ -483,6 +483,7 @@ export default {
   "err.noLibmpv": "libmpv wasn't found; install the libmpv2 (or libmpv1) package and reopen WiS TV: {e}",
   "err.mpvCode": "mpv error {code}",
   "err.pipFail": "Couldn't start the mini player",
+  "err.thumb": "Couldn't get a preview image",
   "err.playerIdle": "The player isn't running",
   "err.mpvCreate": "Couldn't create the mpv player",
   "err.mpvInit": "mpv couldn't start: {e}",

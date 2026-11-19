@@ -531,6 +531,8 @@ function destroyMedia() {
   cancelAnimationFrame(P.raf);
   clearInterval(P.timer);
   if (P.hls) { try { P.hls.destroy(); } catch (e) {} P.hls = null; }
+  thumbClose();
+  P.thumbSrc = null;
   const v = P.video;
   if (v) { v.pause(); v.removeAttribute("src"); try { v.load(); } catch (e) {} }
   if (P.base && P.hlsId) fetch(`${P.base}/hlsv2/${P.hlsId}/destroy`).catch(() => {});
@@ -604,6 +606,8 @@ function useFallback() {
   if (!src) return false;
   P.fallback = null;
   if (P.hls) { try { P.hls.destroy(); } catch (e) {} P.hls = null; }
+  thumbClose();
+  P.thumbSrc = null;
   if (P.base && P.hlsId) fetch(`${P.base}/hlsv2/${P.hlsId}/destroy`).catch(() => {});
   P.hlsId = null;
   P.loaded = false;
@@ -617,7 +621,17 @@ function useFallback() {
   return true;
 }
 
+function thumbClose() {
+  const th = P.thumb;
+  P.thumb = null;
+  if (!th) return;
+  clearTimeout(th.timer);
+  if (th.hls) { try { th.hls.destroy(); } catch (e) {} }
+  try { th.v.removeAttribute("src"); th.v.load(); } catch (e) {}
+}
+
 async function attach(src, isHls) {
+  P.thumbSrc = P.base && String(src).startsWith(P.base) ? null : { src, isHls };
   const v = P.video;
   if (isHls) {
     let Hls = null;
@@ -1004,6 +1018,46 @@ export const web = {
     return u && /^https?:\/\//.test(u) ? u : null;
   },
   play,
+  async player_thumb({ at }) {
+    const t = P.thumbSrc;
+    if (!t || P.finished || !Number.isFinite(at)) throw tr("web.cantPlay");
+    if (!P.thumb || P.thumb.src !== t.src) {
+      thumbClose();
+      const v = document.createElement("video");
+      v.muted = true;
+      v.preload = "auto";
+      v.playsInline = true;
+      let hls = null;
+      if (t.isHls && window.Hls && window.Hls.isSupported()) {
+        hls = new window.Hls({ maxBufferLength: 1, maxMaxBufferLength: 2, startPosition: at, autoStartLoad: true });
+        hls.loadSource(t.src);
+        hls.attachMedia(v);
+      } else {
+        v.src = t.src;
+      }
+      P.thumb = { src: t.src, v, hls, timer: 0 };
+    }
+    const th = P.thumb;
+    clearTimeout(th.timer);
+    th.timer = setTimeout(thumbClose, 30000);
+    const v = th.v;
+    const once = (name) => new Promise((resolve, reject) => {
+      const done = () => { clearTimeout(timer); v.removeEventListener("error", fail); resolve(); };
+      const fail = () => { clearTimeout(timer); v.removeEventListener(name, done); reject(tr("web.cantPlay")); };
+      const timer = setTimeout(() => { v.removeEventListener(name, done); v.removeEventListener("error", fail); reject(tr("web.cantPlay")); }, 8000);
+      v.addEventListener(name, done, { once: true });
+      v.addEventListener("error", fail, { once: true });
+    });
+    if (v.readyState < 1) await once("loadedmetadata");
+    const seeked = once("seeked");
+    v.currentTime = Math.min(at, Math.max(0, (v.duration || at) - 0.5));
+    await seeked;
+    if (v.readyState < 2) await once("loadeddata");
+    const w = 192;
+    const h = Math.max(1, Math.round((w * (v.videoHeight || 9)) / (v.videoWidth || 16)));
+    const bitmap = await createImageBitmap(v, { resizeWidth: w, resizeHeight: h, resizeQuality: "medium" });
+    return { bitmap, w, h };
+  },
   async player_command(args) { return command(args); },
   async player_set(args) { return setProp(args); },
   async player_stop() { if (!P.finished) finish({}); },

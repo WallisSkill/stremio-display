@@ -511,6 +511,10 @@ body.ext-video #player::before { content: "Video đang phát trong cửa sổ mp
 .pl-seek:hover .pl-knob, .pl-seek.dragging .pl-knob { transform: scale(1); }
 .pl-tip { position: absolute; bottom: 26px; transform: translateX(-50%); padding: 5px 9px; border-radius: 8px; background: rgba(20,20,24,0.9); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; opacity: 0; pointer-events: none; transition: opacity 120ms; white-space: nowrap; }
 .pl-seek:hover .pl-tip, .pl-seek.dragging .pl-tip { opacity: 1; }
+.pl-tip { text-align: center; }
+.pl-tip-img { display: block; width: 192px; height: auto; margin: -1px -4px 5px; border-radius: 6px; background: #000; }
+.pl-tip-img[hidden] { display: none; }
+#player.touch .pl-tip-img { width: 160px; }
 
 .pl-volwrap { display: flex; align-items: center; }
 .pl-vol { width: 0; opacity: 0; transition: width 220ms var(--ease), opacity 220ms, margin 220ms; margin: 0; -webkit-appearance: none; appearance: none; height: 4px; border-radius: 2px; background: linear-gradient(90deg, #fff var(--v, 66%), rgba(255,255,255,0.25) var(--v, 66%)); cursor: pointer; outline: none; }

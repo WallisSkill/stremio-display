@@ -444,6 +444,147 @@ pub extern "C" fn wistv_audio_interrupted() {
     interrupt();
 }
 
+const EVENT_PLAYBACK_RESTART: c_int = 21;
+const THUMB_WIDTH: usize = 192;
+const THUMB_IDLE: Duration = Duration::from_secs(30);
+
+struct Thumbs {
+    ctx: usize,
+    url: String,
+    used: Instant,
+    ready: bool,
+    id: u64,
+}
+
+static THUMBS: Mutex<Option<Thumbs>> = Mutex::new(None);
+static THUMB_SOURCE: Mutex<Option<(String, Vec<String>)>> = Mutex::new(None);
+static THUMB_ID: AtomicU64 = AtomicU64::new(0);
+
+fn thumb_source(source: Option<(String, Vec<String>)>) {
+    if let Ok(mut s) = THUMB_SOURCE.lock() {
+        *s = source;
+    }
+}
+
+unsafe fn thumbs_open(lib: &Mpv, url: &str, headers: &[String]) -> Result<usize, String> {
+    let ctx = (lib.create)();
+    if ctx.is_null() {
+        return Err(crate::util::msg("err.mpvCreate"));
+    }
+    for (k, v) in [
+        ("vo", "null"),
+        ("ao", "null"),
+        ("audio", "no"),
+        ("sid", "no"),
+        ("pause", "yes"),
+        ("idle", "yes"),
+        ("keep-open", "yes"),
+        ("hr-seek", "no"),
+        ("cache", "no"),
+        ("demuxer-readahead-secs", "0"),
+        ("demuxer-max-bytes", "8MiB"),
+        ("demuxer-max-back-bytes", "0"),
+        ("hwdec", "auto-copy"),
+        ("vd-lavc-skiploopfilter", "all"),
+        ("vd-lavc-fast", "yes"),
+        ("ytdl", "no"),
+        ("terminal", "no"),
+        ("config", "no"),
+    ] {
+        lib.set_option(ctx, k, v);
+    }
+    if !headers.is_empty() {
+        lib.set_option(ctx, "http-header-fields", &headers.join(","));
+    }
+    let rc = (lib.initialize)(ctx);
+    if rc < 0 || lib.cmd(ctx, &["loadfile", url]) < 0 {
+        (lib.terminate_destroy)(ctx);
+        return Err(crate::util::msg("err.thumb"));
+    }
+    Ok(ctx as usize)
+}
+
+unsafe fn thumb_wait(lib: &Mpv, ctx: Handle, want: c_int, limit: Duration) -> bool {
+    let end = Instant::now() + limit;
+    while Instant::now() < end {
+        let ev = (lib.wait_event)(ctx, 0.2);
+        if ev.is_null() {
+            continue;
+        }
+        match (*ev).event_id {
+            id if id == want => return true,
+            EVENT_END_FILE | EVENT_SHUTDOWN => return false,
+            _ => {}
+        }
+    }
+    false
+}
+
+fn thumbs_reaper(id: u64) {
+    loop {
+        std::thread::sleep(Duration::from_secs(5));
+        let Ok(mut slot) = THUMBS.lock() else { return };
+        let Some(t) = slot.as_ref() else { return };
+        if t.id != id {
+            return;
+        }
+        let stale = THUMB_SOURCE.lock().map(|s| s.as_ref().map(|s| s.0.as_str()) != Some(t.url.as_str())).unwrap_or(true);
+        if stale || t.used.elapsed() > THUMB_IDLE {
+            let ctx = slot.take().map(|t| t.ctx);
+            drop(slot);
+            if let (Some(ctx), Ok(lib)) = (ctx, mpv()) {
+                unsafe { (lib.terminate_destroy)(ctx as Handle) };
+            }
+            return;
+        }
+    }
+}
+
+fn shrink(f: &crate::autocrop::Frame) -> Option<(usize, usize, Vec<u8>)> {
+    let (sw, sh) = (f.w as usize, f.h as usize);
+    if sw == 0 || sh == 0 {
+        return None;
+    }
+    let w = THUMB_WIDTH.min(sw);
+    let h = ((sh * w + sw / 2) / sw).max(1);
+    let mut out = vec![0u8; w * h * 4];
+    for y in 0..h {
+        let y0 = y * sh / h;
+        let y1 = ((y + 1) * sh / h).max(y0 + 1);
+        let sy = ((y1 - y0) / 4).max(1);
+        for x in 0..w {
+            let x0 = x * sw / w;
+            let x1 = ((x + 1) * sw / w).max(x0 + 1);
+            let sx = ((x1 - x0) / 4).max(1);
+            let (mut r, mut g, mut b, mut n) = (0u32, 0u32, 0u32, 0u32);
+            let mut yy = y0;
+            while yy < y1 {
+                let row = yy * f.stride;
+                let mut xx = x0;
+                while xx < x1 {
+                    let i = row + xx * 4;
+                    if i + 2 < f.data.len() {
+                        b += f.data[i] as u32;
+                        g += f.data[i + 1] as u32;
+                        r += f.data[i + 2] as u32;
+                        n += 1;
+                    }
+                    xx += sx;
+                }
+                yy += sy;
+            }
+            let o = (y * w + x) * 4;
+            if n > 0 {
+                out[o] = (r / n) as u8;
+                out[o + 1] = (g / n) as u8;
+                out[o + 2] = (b / n) as u8;
+            }
+            out[o + 3] = 255;
+        }
+    }
+    Some((w, h, out))
+}
+
 pub struct Player {
     live: Arc<Mutex<Option<Live>>>,
     generation: AtomicU64,
@@ -499,6 +640,49 @@ impl Player {
 
     pub fn active(&self) -> bool {
         self.switching.load(Ordering::SeqCst) || self.live.lock().unwrap().is_some()
+    }
+
+    pub fn thumb(&self, at: f64) -> Result<Value, String> {
+        use base64::Engine;
+        if !at.is_finite() || at < 0.0 || !self.active() {
+            return Err(crate::util::msg("err.thumb"));
+        }
+        let lib = mpv()?;
+        let (url, headers) = THUMB_SOURCE.lock().ok().and_then(|s| s.clone()).ok_or_else(|| crate::util::msg("err.thumb"))?;
+        let mut slot = THUMBS.lock().map_err(|e| e.to_string())?;
+        if slot.as_ref().is_none_or(|t| t.url != url) {
+            if let Some(old) = slot.take() {
+                let ctx = old.ctx;
+                std::thread::spawn(move || unsafe { (lib.terminate_destroy)(ctx as Handle) });
+            }
+            let ctx = unsafe { thumbs_open(lib, &url, &headers)? };
+            let id = THUMB_ID.fetch_add(1, Ordering::SeqCst) + 1;
+            *slot = Some(Thumbs { ctx, url, used: Instant::now(), ready: false, id });
+            std::thread::spawn(move || thumbs_reaper(id));
+        }
+        let t = slot.as_mut().ok_or_else(|| crate::util::msg("err.thumb"))?;
+        t.used = Instant::now();
+        let ctx = t.ctx as Handle;
+        unsafe {
+            if !t.ready {
+                if !thumb_wait(lib, ctx, EVENT_FILE_LOADED, Duration::from_secs(10)) {
+                    return Err(crate::util::msg("err.thumb"));
+                }
+                t.ready = true;
+            }
+            loop {
+                let ev = (lib.wait_event)(ctx, 0.0);
+                if ev.is_null() || (*ev).event_id == 0 {
+                    break;
+                }
+            }
+            lib.cmd(ctx, &["seek", &format!("{at:.3}"), "absolute+keyframes"]);
+            if !thumb_wait(lib, ctx, EVENT_PLAYBACK_RESTART, Duration::from_secs(8)) {
+                return Err(crate::util::msg("err.thumb"));
+            }
+            let (w, h, data) = lib.with_frame(ctx, shrink).flatten().ok_or_else(|| crate::util::msg("err.thumb"))?;
+            Ok(json!({ "w": w, "h": h, "data": base64::engine::general_purpose::STANDARD.encode(data) }))
+        }
     }
 
     pub fn paused(&self) -> bool {
@@ -703,6 +887,7 @@ impl Player {
                 return Err(crate::util::msg_with("err.mpvOpen", &[("e", e.to_string())]));
             }
         }
+        thumb_source(Some((req.url.clone(), req.headers.clone())));
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         *self.live.lock().unwrap() = Some(Live {
             ctx: ctx as usize,
@@ -723,6 +908,7 @@ impl Player {
                 let mut live = shared.lock().unwrap();
                 if live.as_ref().map(|l| l.generation) == Some(generation) {
                     *live = None;
+                    thumb_source(None);
                 }
             }
             #[cfg(target_os = "ios")]
