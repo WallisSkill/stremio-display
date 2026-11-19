@@ -2405,7 +2405,7 @@ function pumpSubInfo() {
     subInfoBusy++;
     call("subtitle_info", { url })
       .then((v) => subInfo.set(url, v || { credits: [] }), () => subInfo.set(url, { credits: [] }))
-      .finally(() => { subInfoBusy--; paintSubCredit(url); pumpSubInfo(); });
+      .finally(() => { subInfoBusy--; paintSubCredit(url); paintSubMatch(url); pumpSubInfo(); });
   }
 }
 
@@ -2417,6 +2417,75 @@ function paintSubCredit(url) {
     if (el.dataset.url !== url) continue;
     el.textContent = text ? tr("sub.credit", { name: text }) : "";
     el.hidden = !text;
+  }
+}
+
+const srcKind = (x) => {
+  const v = String(x || "").toLowerCase();
+  return /blu|bdrip|brrip|bdremux|remux/.test(v) ? "BluRay" : /web/.test(v) ? "WEB" : /hdtv/.test(v) ? "HDTV" : /dvd/.test(v) ? "DVD" : "";
+};
+const SRC_RE = /\b(WEB-?DL|WEBRip|WEB|BluRay|BDRip|BRRip|BDRemux|Remux|HDTV|DVDRip)\b/i;
+
+function streamRelease() {
+  const s = pl.ctx?.stream || {};
+  const file = String(s.behaviorHints?.filename || "").trim();
+  const text = [file, s.title, s.description, s.name].filter(Boolean).join("\n");
+  const group = (file || text).match(/-([A-Za-z0-9]+)(?:\.(?:mkv|mp4|avi|ts|m2ts|webm))?\s*$/m)?.[1] || "";
+  return { group: group.toLowerCase(), label: group, source: srcKind(text.match(SRC_RE)?.[1]) };
+}
+
+function subRelease(s) {
+  const names = [...String(s?.movieReleaseName || "").split(/\r?\n/), s?.subtitleFileName || ""].map((x) => String(x).trim()).filter(Boolean);
+  const groups = new Set();
+  for (const n of names) {
+    const tail = n.replace(/\.(srt|ass|ssa|vtt|sub|zip)$/i, "").match(/-([A-Za-z0-9]+)$/)?.[1];
+    if (tail) groups.add(tail.toLowerCase());
+  }
+  if (s?.releaseGroup) groups.add(String(s.releaseGroup).replace(/\.[a-z]{2,3}$/, "").toLowerCase());
+  return { groups, source: srcKind(s?.releaseFormat || names.join(" ").match(SRC_RE)?.[1]) };
+}
+
+function subMatch(s, info) {
+  const notes = [];
+  let level = null;
+  const d = pl.s.duration || 0;
+  const e = info?.end > 0 ? info.end / 1000 : 0;
+  if (d > 0 && e > 0) {
+    const gap = d - e;
+    const ratio = e / d;
+    const fps = Math.abs(ratio - 25 / 23.976) < 0.006 || Math.abs(ratio - 23.976 / 25) < 0.006;
+    if (gap < -20) { level = "bad"; notes.push(tr("sub.matchLong", { sub: secs(e), film: secs(d), d: secs(-gap) })); }
+    else if (gap <= Math.max(180, d * 0.12)) { level = "ok"; notes.push(tr("sub.matchOk", { sub: secs(e), film: secs(d) })); }
+    else { level = "warn"; notes.push(tr("sub.matchShort", { sub: secs(e), film: secs(d), d: secs(gap) })); }
+    if (fps && level !== "ok") notes.push(tr("sub.matchFps"));
+  }
+  if (s) {
+    const st = streamRelease();
+    const sr = subRelease(s);
+    if (st.group && sr.groups.has(st.group)) notes.push(tr("sub.sameGroup", { name: st.label }));
+    else if (st.source && sr.source && st.source !== sr.source) {
+      notes.push(tr("sub.otherSource", { sub: sr.source, film: st.source }));
+      if (!level) level = "warn";
+    }
+  }
+  if (!notes.length && info === null) return { level: "wait", text: tr("sub.matchWait") };
+  return { level, text: notes.join(" · ") };
+}
+
+function matchNote(url, s) {
+  const m = subMatch(s, subInfo.get(url));
+  const el = h("small", { class: `pl-match ${m.level || ""}`, "data-url": url, hidden: !m.text }, m.text);
+  el._sub = s;
+  return el;
+}
+
+function paintSubMatch(url) {
+  for (const el of $$(".pl-match", pl.ui?.menu || document)) {
+    if (el.dataset.url !== url) continue;
+    const m = subMatch(el._sub, subInfo.get(url));
+    el.className = `pl-match ${m.level || ""}`;
+    el.textContent = m.text;
+    el.hidden = !m.text;
   }
 }
 
@@ -2604,7 +2673,12 @@ function fillMenu(box) {
   pl.ui.delayVal = h("b", {}, delayText(pl.s.subDelay));
   const subCol = h("div", { class: "pl-col" }, h("h4", {}, tr("set.subs")),
     menuItem(tr("set.subsOff"), !sid || sid === "no" || sid === "false", () => chooseSub(null)),
-    subs.map((t) => menuItem(trackLabel(t), t.selected, () => chooseSub(t))),
+    subs.map((t) => {
+      const url = t.external && t.file ? t.file : null;
+      if (url) wantSubInfo(url);
+      const from = url && Array.isArray(pl.subs) ? pl.subs.find((x) => x.url === url) : null;
+      return menuItem(trackLabel(t), t.selected, () => chooseSub(t), url ? [matchNote(url, from)] : null);
+    }),
     h("div", { class: "pl-delay" }, h("span", {}, tr("sub.delay")),
       h("button", { class: "pl-mini", tabindex: "-1", onclick: () => nudgeDelay(-0.1) }, "−0.1s"),
       pl.ui.delayVal,
@@ -2615,13 +2689,13 @@ function fillMenu(box) {
   else if (!pl.subs || !pl.subs.length) addonCol.append(h("p", { class: "pl-none" }, tr("sub.none")));
   else {
     const list = addonSubList();
-    list.slice(0, 12).forEach((s) => wantSubInfo(s.url));
+    list.forEach((s) => wantSubInfo(s.url));
     addonCol.append(...list.map((s) => {
       const done = pl.added.has(s.url);
       const credit = subCredit(s.url);
       const creditEl = h("small", { class: "pl-credit", "data-url": s.url, hidden: !credit }, credit ? tr("sub.credit", { name: credit }) : "");
       const file = subFileName(s);
-      return menuItem(langName(s.lang) || tr("common.unknown"), done, () => chooseAddonSub(s), [creditEl, subLabel(s) ? h("small", { class: "pl-label-note" }, subLabel(s)) : null, [releaseSummary(s), s.addon].filter(Boolean).join(" · "), file ? h("small", { class: "pl-file" }, file) : null]);
+      return menuItem(langName(s.lang) || tr("common.unknown"), done, () => chooseAddonSub(s), [matchNote(s.url, s), creditEl, subLabel(s) ? h("small", { class: "pl-label-note" }, subLabel(s)) : null, [releaseSummary(s), s.addon].filter(Boolean).join(" · "), file ? h("small", { class: "pl-file" }, file) : null]);
     }));
   }
   put(box, audioCol, subCol, addonCol);
