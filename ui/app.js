@@ -1175,35 +1175,87 @@ function iconBtn(icon, title, onclick, cls = "") {
 }
 
 const THUMB_STEP = 5;
-const THUMB_KEEP = 160;
+const THUMB_KEEP = 200;
+const THUMB_GRID = 40;
 
 function thumbWanted() {
   const c = pl.ctx;
   return pl.thumbOk !== false && !!c && !!pl.s.loaded && pl.s.duration > 0 && !c.stream?.infoHash && !isTvCtx();
 }
 
-function thumbPaint(entry) {
+function thumbPaint(entry, stale = false) {
   const cv = pl.ui?.tipImg;
-  if (!cv || !entry) return;
+  if (!cv) return;
+  cv.classList.toggle("stale", stale || !entry);
+  if (!entry) return;
   if (cv.width !== entry.w || cv.height !== entry.h) { cv.width = entry.w; cv.height = entry.h; }
   cv.getContext("2d").drawImage(entry.bitmap, 0, 0, entry.w, entry.h);
   cv.hidden = false;
+}
+
+function thumbNote(text) {
+  const el = pl.ui?.tipNote;
+  if (!el) return;
+  el.textContent = text || "";
+  el.hidden = !text;
+}
+
+function thumbClose(key) {
+  const near = Math.max(10, (pl.s.duration || 0) * 0.004);
+  let best = null;
+  let gap = Infinity;
+  for (const [k, v] of pl.thumbCache) {
+    const d = Math.abs(k - key);
+    if (d < gap && d <= near) { gap = d; best = v; }
+  }
+  return best;
+}
+
+function thumbNearest(key) {
+  const reach = Math.max(30, (pl.s.duration || 0) * 0.03);
+  let best = null;
+  let gap = Infinity;
+  for (const [k, v] of pl.thumbCache) {
+    const d = Math.abs(k - key);
+    if (d < gap && d <= reach) { gap = d; best = v; }
+  }
+  return best;
+}
+
+const THUMB_PARALLEL = 3;
+
+function thumbNext() {
+  const busy = pl.thumbInflight || new Set();
+  const free = (k) => !pl.thumbCache.has(k) && !pl.thumbFailed?.has(k) && !busy.has(k);
+  if (pl.thumbWant != null && free(pl.thumbWant)) return pl.thumbWant;
+  const d = pl.s.duration || 0;
+  if (!pl.thumbWarm || !(d > 0) || Date.now() - pl.thumbWarm > 20000) return null;
+  const step = d / (THUMB_GRID + 1);
+  const from = pl.thumbWant ?? d / 2;
+  const grid = Array.from({ length: THUMB_GRID }, (_, i) => Math.round(((i + 1) * step) / THUMB_STEP) * THUMB_STEP);
+  grid.sort((a, b) => Math.abs(a - from) - Math.abs(b - from));
+  return grid.find(free) ?? null;
 }
 
 function thumbAt(sec) {
   if (pl.thumbFor !== pl.session) {
     pl.thumbFor = pl.session;
     pl.thumbCache = new Map();
+    pl.thumbFailed = new Set();
+    pl.thumbInflight = new Set();
     pl.thumbWant = null;
     if (pl.ui?.tipImg) pl.ui.tipImg.hidden = true;
+    thumbNote("");
   }
   if (!thumbWanted()) return;
   const key = Math.max(0, Math.round(sec / THUMB_STEP) * THUMB_STEP);
   pl.thumbWant = key;
-  const hit = pl.thumbCache.get(key);
-  if (hit) { thumbPaint(hit); return; }
+  pl.thumbWarm = Date.now();
+  const exact = pl.thumbCache.get(key) || thumbClose(key);
+  thumbPaint(exact || thumbNearest(key), !exact);
+  if (pl.thumbCache.has(key)) return;
   clearTimeout(pl.thumbTimer);
-  pl.thumbTimer = setTimeout(thumbRun, 120);
+  pl.thumbTimer = setTimeout(thumbRun, 60);
 }
 
 async function thumbBitmap(r) {
@@ -1213,23 +1265,41 @@ async function thumbBitmap(r) {
   return { bitmap: await createImageBitmap(new ImageData(raw, r.w, r.h)), w: r.w, h: r.h };
 }
 
-async function thumbRun() {
-  const key = pl.thumbWant;
+function thumbRun() {
+  if (!thumbWanted()) return;
+  pl.thumbInflight ||= new Set();
+  while (pl.thumbInflight.size < THUMB_PARALLEL) {
+    const key = thumbNext();
+    if (key == null) return;
+    thumbFetch(key);
+  }
+}
+
+async function thumbFetch(key) {
   const session = pl.session;
-  if (pl.thumbBusy || key == null || !thumbWanted()) return;
-  pl.thumbBusy = true;
+  const inflight = pl.thumbInflight;
+  inflight.add(key);
   try {
     const entry = await thumbBitmap(await call("player_thumb", { at: key }));
     if (session !== pl.session || !entry) return;
     pl.thumbCache.set(key, entry);
     if (pl.thumbCache.size > THUMB_KEEP) pl.thumbCache.delete(pl.thumbCache.keys().next().value);
-    if (pl.thumbWant === key) thumbPaint(entry);
+    thumbNote("");
+    const want = pl.thumbWant ?? key;
+    const exact = pl.thumbCache.get(want) || thumbClose(want);
+    thumbPaint(exact || thumbNearest(want), !exact);
   } catch (e) {
     if (/player_thumb|not found|unknown command/i.test(String(e))) pl.thumbOk = false;
+    else if (session === pl.session && !/"busy"/.test(String(e))) { pl.thumbFailed?.add(key); thumbNote(errText(e)); }
   } finally {
-    pl.thumbBusy = false;
-    if (session === pl.session && pl.thumbWant != null && pl.thumbWant !== key && !pl.thumbCache.has(pl.thumbWant)) thumbRun();
+    inflight.delete(key);
+    if (session === pl.session && pl.thumbOk !== false) setTimeout(thumbRun, 0);
   }
+}
+
+function thumbWarmUp() {
+  if (pl.thumbFor !== pl.session || !thumbWanted() || pl.thumbCache?.size || pl.thumbInflight?.size) return;
+  thumbAt((pl.s.duration || 0) / 2);
 }
 
 function placeTip(f) {
@@ -1258,7 +1328,8 @@ function buildPlayer() {
   ui.hover = h("div", { class: "pl-hover" });
   ui.tipImg = h("canvas", { class: "pl-tip-img", width: "192", height: "108", hidden: true });
   ui.tipText = h("span");
-  ui.tip = h("div", { class: "pl-tip" }, ui.tipImg, ui.tipText);
+  ui.tipNote = h("small", { class: "pl-tip-note", hidden: true });
+  ui.tip = h("div", { class: "pl-tip" }, ui.tipImg, ui.tipText, ui.tipNote);
   ui.seek = h("div", { class: "pl-seek" }, h("div", { class: "pl-track" }, ui.buf, ui.hover, ui.fill), ui.knob, ui.tip);
   ui.play = iconBtn("pause", tr("pl.pause"), togglePause, "big");
   ui.next = iconBtn("next", tr("pl.nextEp"), () => playNext(false));
@@ -1534,6 +1605,7 @@ function buildPlayer() {
   });
   ui.root.addEventListener("wheel", (e) => { if (!e.target.closest(".pl-menu")) setVolume(Math.round((pl.s.volume ?? 100) - Math.sign(e.deltaY) * 5)); }, { passive: true });
   const frac = (e) => { const r = ui.seek.getBoundingClientRect(); return Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)); };
+  ui.seek.addEventListener("pointerenter", () => { if (pl.thumbFor !== pl.session) thumbAt(curTime()); else thumbWarmUp(); });
   ui.seek.addEventListener("pointermove", (e) => {
     const f = frac(e);
     const d = pl.s.duration || 0;

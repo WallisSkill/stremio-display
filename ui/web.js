@@ -621,6 +621,47 @@ function useFallback() {
   return true;
 }
 
+async function thumbOnce(at) {
+  const t = P.thumbSrc;
+  if (!t || P.finished || !Number.isFinite(at)) throw tr("web.cantPlay");
+  if (!P.thumb || P.thumb.src !== t.src) {
+    thumbClose();
+    const v = document.createElement("video");
+    v.muted = true;
+    v.preload = "auto";
+    v.playsInline = true;
+    let hls = null;
+    if (t.isHls && window.Hls && window.Hls.isSupported()) {
+      hls = new window.Hls({ maxBufferLength: 1, maxMaxBufferLength: 2, startPosition: at, autoStartLoad: true });
+      hls.loadSource(t.src);
+      hls.attachMedia(v);
+    } else {
+      v.src = t.src;
+    }
+    P.thumb = { src: t.src, v, hls, timer: 0 };
+  }
+  const th = P.thumb;
+  clearTimeout(th.timer);
+  th.timer = setTimeout(thumbClose, 30000);
+  const v = th.v;
+  const once = (name) => new Promise((resolve, reject) => {
+    const done = () => { clearTimeout(timer); v.removeEventListener("error", fail); resolve(); };
+    const fail = () => { clearTimeout(timer); v.removeEventListener(name, done); reject(tr("web.cantPlay")); };
+    const timer = setTimeout(() => { v.removeEventListener(name, done); v.removeEventListener("error", fail); reject(tr("web.cantPlay")); }, 8000);
+    v.addEventListener(name, done, { once: true });
+    v.addEventListener("error", fail, { once: true });
+  });
+  if (v.readyState < 1) await once("loadedmetadata");
+  const seeked = once("seeked");
+  v.currentTime = Math.min(at, Math.max(0, (v.duration || at) - 0.5));
+  await seeked;
+  if (v.readyState < 2) await once("loadeddata");
+  const w = 320;
+  const h = Math.max(1, Math.round((w * (v.videoHeight || 9)) / (v.videoWidth || 16)));
+  const bitmap = await createImageBitmap(v, { resizeWidth: w, resizeHeight: h, resizeQuality: "medium" });
+  return { bitmap, w, h };
+}
+
 function thumbClose() {
   const th = P.thumb;
   P.thumb = null;
@@ -1019,44 +1060,11 @@ export const web = {
   },
   play,
   async player_thumb({ at }) {
-    const t = P.thumbSrc;
-    if (!t || P.finished || !Number.isFinite(at)) throw tr("web.cantPlay");
-    if (!P.thumb || P.thumb.src !== t.src) {
-      thumbClose();
-      const v = document.createElement("video");
-      v.muted = true;
-      v.preload = "auto";
-      v.playsInline = true;
-      let hls = null;
-      if (t.isHls && window.Hls && window.Hls.isSupported()) {
-        hls = new window.Hls({ maxBufferLength: 1, maxMaxBufferLength: 2, startPosition: at, autoStartLoad: true });
-        hls.loadSource(t.src);
-        hls.attachMedia(v);
-      } else {
-        v.src = t.src;
-      }
-      P.thumb = { src: t.src, v, hls, timer: 0 };
-    }
-    const th = P.thumb;
-    clearTimeout(th.timer);
-    th.timer = setTimeout(thumbClose, 30000);
-    const v = th.v;
-    const once = (name) => new Promise((resolve, reject) => {
-      const done = () => { clearTimeout(timer); v.removeEventListener("error", fail); resolve(); };
-      const fail = () => { clearTimeout(timer); v.removeEventListener(name, done); reject(tr("web.cantPlay")); };
-      const timer = setTimeout(() => { v.removeEventListener(name, done); v.removeEventListener("error", fail); reject(tr("web.cantPlay")); }, 8000);
-      v.addEventListener(name, done, { once: true });
-      v.addEventListener("error", fail, { once: true });
-    });
-    if (v.readyState < 1) await once("loadedmetadata");
-    const seeked = once("seeked");
-    v.currentTime = Math.min(at, Math.max(0, (v.duration || at) - 0.5));
-    await seeked;
-    if (v.readyState < 2) await once("loadeddata");
-    const w = 192;
-    const h = Math.max(1, Math.round((w * (v.videoHeight || 9)) / (v.videoWidth || 16)));
-    const bitmap = await createImageBitmap(v, { resizeWidth: w, resizeHeight: h, resizeQuality: "medium" });
-    return { bitmap, w, h };
+    const prev = P.thumbChain;
+    let release;
+    P.thumbChain = new Promise((r) => { release = r; });
+    await prev;
+    try { return await thumbOnce(at); } finally { release(); }
   },
   async player_command(args) { return command(args); },
   async player_set(args) { return setProp(args); },

@@ -445,18 +445,21 @@ pub extern "C" fn wistv_audio_interrupted() {
 }
 
 const EVENT_PLAYBACK_RESTART: c_int = 21;
-const THUMB_WIDTH: usize = 192;
+const THUMB_WIDTH: usize = 320;
 const THUMB_IDLE: Duration = Duration::from_secs(30);
+
+const THUMB_POOL: usize = 3;
 
 struct Thumbs {
     ctx: usize,
     url: String,
     used: Instant,
     ready: bool,
+    busy: bool,
     id: u64,
 }
 
-static THUMBS: Mutex<Option<Thumbs>> = Mutex::new(None);
+static THUMBS: Mutex<Vec<Thumbs>> = Mutex::new(Vec::new());
 static THUMB_SOURCE: Mutex<Option<(String, Vec<String>)>> = Mutex::new(None);
 static THUMB_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -482,7 +485,8 @@ unsafe fn thumbs_open(lib: &Mpv, url: &str, headers: &[String]) -> Result<usize,
         ("hr-seek", "no"),
         ("cache", "no"),
         ("demuxer-readahead-secs", "0"),
-        ("demuxer-max-bytes", "8MiB"),
+        ("demuxer-max-bytes", "1MiB"),
+        ("stream-buffer-size", "32KiB"),
         ("demuxer-max-back-bytes", "0"),
         ("hwdec", "auto-copy"),
         ("vd-lavc-skiploopfilter", "all"),
@@ -499,7 +503,7 @@ unsafe fn thumbs_open(lib: &Mpv, url: &str, headers: &[String]) -> Result<usize,
     let rc = (lib.initialize)(ctx);
     if rc < 0 || lib.cmd(ctx, &["loadfile", url]) < 0 {
         (lib.terminate_destroy)(ctx);
-        return Err(crate::util::msg("err.thumb"));
+        return Err(thumb_err("open"));
     }
     Ok(ctx as usize)
 }
@@ -520,19 +524,24 @@ unsafe fn thumb_wait(lib: &Mpv, ctx: Handle, want: c_int, limit: Duration) -> bo
     false
 }
 
+fn thumb_err(stage: &str) -> String {
+    crate::util::msg_with("err.thumbAt", &[("stage", stage.to_string())])
+}
+
 fn thumbs_reaper(id: u64) {
     loop {
         std::thread::sleep(Duration::from_secs(5));
-        let Ok(mut slot) = THUMBS.lock() else { return };
-        let Some(t) = slot.as_ref() else { return };
-        if t.id != id {
-            return;
+        let Ok(mut pool) = THUMBS.lock() else { return };
+        let Some(i) = pool.iter().position(|t| t.id == id) else { return };
+        if pool[i].busy {
+            continue;
         }
-        let stale = THUMB_SOURCE.lock().map(|s| s.as_ref().map(|s| s.0.as_str()) != Some(t.url.as_str())).unwrap_or(true);
-        if stale || t.used.elapsed() > THUMB_IDLE {
-            let ctx = slot.take().map(|t| t.ctx);
-            drop(slot);
-            if let (Some(ctx), Ok(lib)) = (ctx, mpv()) {
+        let url = pool[i].url.clone();
+        let stale = THUMB_SOURCE.lock().map(|s| s.as_ref().map(|s| s.0.as_str()) != Some(url.as_str())).unwrap_or(true);
+        if stale || pool[i].used.elapsed() > THUMB_IDLE {
+            let ctx = pool.remove(i).ctx;
+            drop(pool);
+            if let Ok(lib) = mpv() {
                 unsafe { (lib.terminate_destroy)(ctx as Handle) };
             }
             return;
@@ -551,11 +560,11 @@ fn shrink(f: &crate::autocrop::Frame) -> Option<(usize, usize, Vec<u8>)> {
     for y in 0..h {
         let y0 = y * sh / h;
         let y1 = ((y + 1) * sh / h).max(y0 + 1);
-        let sy = ((y1 - y0) / 4).max(1);
+        let sy = ((y1 - y0) / 8).max(1);
         for x in 0..w {
             let x0 = x * sw / w;
             let x1 = ((x + 1) * sw / w).max(x0 + 1);
-            let sx = ((x1 - x0) / 4).max(1);
+            let sx = ((x1 - x0) / 8).max(1);
             let (mut r, mut g, mut b, mut n) = (0u32, 0u32, 0u32, 0u32);
             let mut yy = y0;
             while yy < y1 {
@@ -649,40 +658,69 @@ impl Player {
         }
         let lib = mpv()?;
         let (url, headers) = THUMB_SOURCE.lock().ok().and_then(|s| s.clone()).ok_or_else(|| crate::util::msg("err.thumb"))?;
-        let mut slot = THUMBS.lock().map_err(|e| e.to_string())?;
-        if slot.as_ref().is_none_or(|t| t.url != url) {
-            if let Some(old) = slot.take() {
-                let ctx = old.ctx;
-                std::thread::spawn(move || unsafe { (lib.terminate_destroy)(ctx as Handle) });
-            }
-            let ctx = unsafe { thumbs_open(lib, &url, &headers)? };
-            let id = THUMB_ID.fetch_add(1, Ordering::SeqCst) + 1;
-            *slot = Some(Thumbs { ctx, url, used: Instant::now(), ready: false, id });
-            std::thread::spawn(move || thumbs_reaper(id));
-        }
-        let t = slot.as_mut().ok_or_else(|| crate::util::msg("err.thumb"))?;
-        t.used = Instant::now();
-        let ctx = t.ctx as Handle;
-        unsafe {
-            if !t.ready {
-                if !thumb_wait(lib, ctx, EVENT_FILE_LOADED, Duration::from_secs(10)) {
-                    return Err(crate::util::msg("err.thumb"));
-                }
-                t.ready = true;
-            }
-            loop {
-                let ev = (lib.wait_event)(ctx, 0.0);
-                if ev.is_null() || (*ev).event_id == 0 {
-                    break;
+        let (ctx, ready, id) = {
+            let mut pool = THUMBS.lock().map_err(|e| e.to_string())?;
+            let mut i = 0;
+            while i < pool.len() {
+                if pool[i].url != url && !pool[i].busy {
+                    let ctx = pool.remove(i).ctx;
+                    std::thread::spawn(move || unsafe { (lib.terminate_destroy)(ctx as Handle) });
+                } else {
+                    i += 1;
                 }
             }
-            lib.cmd(ctx, &["seek", &format!("{at:.3}"), "absolute+keyframes"]);
-            if !thumb_wait(lib, ctx, EVENT_PLAYBACK_RESTART, Duration::from_secs(8)) {
-                return Err(crate::util::msg("err.thumb"));
+            match pool.iter_mut().find(|t| t.url == url && !t.busy) {
+                Some(t) => {
+                    t.busy = true;
+                    (t.ctx, t.ready, t.id)
+                }
+                None => {
+                    if pool.iter().filter(|t| t.url == url).count() >= THUMB_POOL {
+                        return Err(thumb_err("busy"));
+                    }
+                    let ctx = unsafe { thumbs_open(lib, &url, &headers)? };
+                    let id = THUMB_ID.fetch_add(1, Ordering::SeqCst) + 1;
+                    pool.push(Thumbs { ctx, url: url.clone(), used: Instant::now(), ready: false, busy: true, id });
+                    std::thread::spawn(move || thumbs_reaper(id));
+                    (ctx, false, id)
+                }
             }
-            let (w, h, data) = lib.with_frame(ctx, shrink).flatten().ok_or_else(|| crate::util::msg("err.thumb"))?;
-            Ok(json!({ "w": w, "h": h, "data": base64::engine::general_purpose::STANDARD.encode(data) }))
+        };
+        let handle = ctx as Handle;
+        let out = unsafe {
+            (|| {
+                if !ready && !thumb_wait(lib, handle, EVENT_FILE_LOADED, Duration::from_secs(15)) {
+                    return Err(thumb_err("load"));
+                }
+                loop {
+                    let ev = (lib.wait_event)(handle, 0.0);
+                    if ev.is_null() || (*ev).event_id == 0 {
+                        break;
+                    }
+                }
+                lib.cmd(handle, &["seek", &format!("{at:.3}"), "absolute+keyframes"]);
+                if !thumb_wait(lib, handle, EVENT_PLAYBACK_RESTART, Duration::from_secs(8)) {
+                    return Err(thumb_err("seek"));
+                }
+                lib.with_frame(handle, shrink).flatten().ok_or_else(|| thumb_err("frame"))
+            })()
+        };
+        if let Ok(mut pool) = THUMBS.lock() {
+            if let Some(i) = pool.iter().position(|t| t.id == id) {
+                let loaded = ready || !matches!(&out, Err(e) if e.contains("\"load\""));
+                if loaded {
+                    let t = &mut pool[i];
+                    t.busy = false;
+                    t.ready = true;
+                    t.used = Instant::now();
+                } else {
+                    let ctx = pool.remove(i).ctx;
+                    std::thread::spawn(move || unsafe { (lib.terminate_destroy)(ctx as Handle) });
+                }
+            }
         }
+        let (w, h, data) = out?;
+        Ok(json!({ "w": w, "h": h, "data": base64::engine::general_purpose::STANDARD.encode(data) }))
     }
 
     pub fn paused(&self) -> bool {

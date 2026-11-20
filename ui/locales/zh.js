@@ -490,6 +490,7 @@ export default {
   "err.noLibmpv": "找不到 libmpv，请安装 libmpv2（或 libmpv1）软件包后重新打开 WiS TV：{e}",
   "err.mpvCode": "mpv 错误 {code}",
   "err.pipFail": "无法开启小窗播放",
+  "err.thumbAt": "无法获取预览图（{stage} 步骤）",
   "err.thumb": "无法获取预览图",
   "err.playerIdle": "播放器未运行",
   "err.mpvCreate": "无法创建 mpv 播放器",
