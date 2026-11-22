@@ -4,6 +4,12 @@ export const DISCORD_CLIENT_ID = document.querySelector('meta[name="wistv-discor
 const WIS = "/.proxy/wis";
 const RD = /^([a-z0-9-]+)\.download\.real-debrid\.com$/i;
 
+const pack = (text) => {
+  let bin = "";
+  for (const b of new TextEncoder().encode(text)) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+};
+
 export function proxify(raw, media = false) {
   if (!ACTIVITY || raw == null) return raw;
   const text = String(raw);
@@ -18,7 +24,7 @@ export function proxify(raw, media = false) {
   const rd = RD.exec(u.host);
   if (rd) return `/.proxy/rd/${rd[1]}${u.pathname}${u.search}`;
   if (!/^https?:$/.test(u.protocol)) return raw;
-  return `${WIS}/api/fetch?u=${encodeURIComponent(u.href)}${media ? "&media=1" : ""}`;
+  return `${WIS}/api/fetch?b=${pack(u.href)}${media ? "&media=1" : ""}`;
 }
 
 function patchProp(proto, name, media = false) {

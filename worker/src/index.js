@@ -1013,7 +1013,11 @@ async function fetchProxy(request, env) {
   if (!["GET", "HEAD", "POST"].includes(request.method)) return fail("method not allowed", 405);
   let target;
   const params = new URL(request.url).searchParams;
-  try { target = new URL(params.get("u") || ""); } catch (e) { return fail("bad url", 400); }
+  try {
+    const packed = params.get("b");
+    const raw = packed ? new TextDecoder().decode(Uint8Array.from(atob(packed.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0))) : params.get("u");
+    target = new URL(raw || "");
+  } catch (e) { return fail("bad url", 400); }
   if (!/^https?:$/.test(target.protocol) || (privateHost(target.hostname) && env.ALLOW_PRIVATE_FETCH !== "1")) return fail("bad url", 400);
   if (params.get("media") === "1" && request.method !== "POST") return mediaRedirect(target, env);
   const headers = new Headers();
