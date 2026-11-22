@@ -966,84 +966,6 @@ async function lookup(request, env) {
   return value ? reply(value) : reply({ error: "offline" }, 404);
 }
 
-const FETCH_MAX = 8 << 20;
-const FETCH_MEDIA = /^(video\/|audio\/|application\/(vnd\.apple\.mpegurl|x-mpegurl|dash\+xml))/i;
-const privateHost = (h) =>
-  /^(localhost|.*\.localhost|.*\.local|.*\.internal)$/i.test(h) ||
-  /^(0|10|127)\.|^192\.168\.|^172\.(1[6-9]|2\d|3[01])\.|^169\.254\.|^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(h) ||
-  /^\[?(::1?|f[cd][0-9a-f]{2}:|fe80:)/i.test(h);
-
-function capped(body, max) {
-  let seen = 0;
-  return body.pipeThrough(new TransformStream({
-    transform(chunk, controller) {
-      seen += chunk.byteLength;
-      if (seen > max) controller.error(new Error("too big"));
-      else controller.enqueue(chunk);
-    },
-  }));
-}
-
-const ACTIVITY_RD = /^([a-z0-9-]+)\.download\.real-debrid\.com$/i;
-
-function activityPath(u) {
-  const rd = ACTIVITY_RD.exec(u.hostname);
-  if (rd && u.protocol === "https:") return `/.proxy/rd/${rd[1]}${u.pathname}${u.search}`;
-  if (u.hostname === "film.wis237.online") return `/.proxy/wis${u.pathname}${u.search}`;
-  return null;
-}
-
-async function mediaRedirect(target, env) {
-  let at = target;
-  for (let hop = 0; hop < 6; hop++) {
-    if (!/^https?:$/.test(at.protocol) || (privateHost(at.hostname) && env.ALLOW_PRIVATE_FETCH !== "1")) return fail("bad url", 400);
-    const path = activityPath(at);
-    if (path) return new Response(null, { status: 302, headers: { ...CORS, location: path, "cache-control": "no-store" } });
-    let res;
-    try { res = await fetch(at.href, { method: "GET", redirect: "manual", headers: { range: "bytes=0-0" } }); } catch (e) { return fail("upstream failed", 502); }
-    const next = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
-    res.body?.cancel();
-    if (!next) return reply({ error: "media host is not mapped", host: at.hostname }, res.ok ? 415 : res.status);
-    try { at = new URL(next, at); } catch (e) { return fail("bad url", 400); }
-  }
-  return fail("too many redirects", 508);
-}
-
-async function fetchProxy(request, env) {
-  if (!["GET", "HEAD", "POST"].includes(request.method)) return fail("method not allowed", 405);
-  let target;
-  const params = new URL(request.url).searchParams;
-  try {
-    const packed = params.get("b");
-    const raw = packed ? new TextDecoder().decode(Uint8Array.from(atob(packed.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0))) : params.get("u");
-    target = new URL(raw || "");
-  } catch (e) { return fail("bad url", 400); }
-  if (!/^https?:$/.test(target.protocol) || (privateHost(target.hostname) && env.ALLOW_PRIVATE_FETCH !== "1")) return fail("bad url", 400);
-  if (params.get("media") === "1" && request.method !== "POST") return mediaRedirect(target, env);
-  const headers = new Headers();
-  for (const k of ["content-type", "accept", "accept-language"]) {
-    const v = request.headers.get(k);
-    if (v) headers.set(k, v);
-  }
-  const init = { method: request.method, headers, redirect: "follow" };
-  if (request.method === "POST") {
-    const body = await request.arrayBuffer();
-    if (body.byteLength > 1 << 20) return fail("too big", 413);
-    init.body = body;
-  } else {
-    init.cf = { cacheTtl: 600 };
-  }
-  let res;
-  try { res = await fetch(target.href, init); } catch (e) { return fail("upstream failed", 502); }
-  const type = res.headers.get("content-type") || "";
-  if (FETCH_MEDIA.test(type)) return fail("media is not proxied", 415);
-  if (Number(res.headers.get("content-length") || 0) > FETCH_MAX) return fail("too big", 413);
-  const out = new Headers(CORS);
-  if (type) out.set("content-type", type);
-  out.set("cache-control", request.method === "GET" && res.ok ? "public, max-age=600" : "no-store");
-  return new Response(res.body && request.method !== "HEAD" ? capped(res.body, FETCH_MAX) : null, { status: res.status, headers: out });
-}
-
 async function site(request, env) {
   if (request.method !== "GET" && request.method !== "HEAD") return reply({ error: "method not allowed" }, 405);
   const { pathname, search } = new URL(request.url);
@@ -1075,7 +997,6 @@ export default {
       if (request.method !== "POST") return fail("method not allowed", 405);
       return roomCreate(request, env);
     }
-    if (pathname === "/api/fetch") return fetchProxy(request, env);
     if (pathname === "/api/link/create") {
       if (request.method !== "POST") return fail("method not allowed", 405);
       return linkCreate(request, env);
