@@ -63,6 +63,16 @@ jobs:
           printf 'export { DiscordSDK, patchUrlMappings } from "@discord/embedded-app-sdk";\n' > entry.js
           npx esbuild entry.js --bundle --format=esm --minify --outfile="$GITHUB_WORKSPACE/site/activity/discord-sdk.js"
           test -s "$GITHUB_WORKSPACE/site/activity/discord-sdk.js"
+          cd "$GITHUB_WORKSPACE/site/activity"
+          V="${GITHUB_SHA::12}" node -e '
+            const fs = require("fs");
+            const tag = (spec) => `${spec}?v=${process.env.V}`;
+            for (const name of fs.readdirSync(".")) {
+              if (name.endsWith(".js")) fs.writeFileSync(name, fs.readFileSync(name, "utf8").replace(/(\bfrom\s*|\bimport\s*\(?\s*)(["\x27])(\.\.?\/[^"\x27?#]+)\2/g, (m, lead, q, spec) => `${lead}${q}${tag(spec)}${q}`));
+            }
+            fs.writeFileSync("index.html", fs.readFileSync("index.html", "utf8").replace(/\b(src|href)="(?![a-z]+:|\/\/|#)([^"?#]+\.(?:js|css))"/g, (m, attr, spec) => `${attr}="${tag(spec)}"`));
+          '
+          grep -q "activity.js?v=${GITHUB_SHA::12}" app.js
       - name: Snapshot the app releases
         env:
           GH_TOKEN: ${{ github.token }}
