@@ -984,11 +984,38 @@ function capped(body, max) {
   }));
 }
 
+const ACTIVITY_RD = /^([a-z0-9-]+)\.download\.real-debrid\.com$/i;
+
+function activityPath(u) {
+  const rd = ACTIVITY_RD.exec(u.hostname);
+  if (rd && u.protocol === "https:") return `/.proxy/rd/${rd[1]}${u.pathname}${u.search}`;
+  if (u.hostname === "film.wis237.online") return `/.proxy/wis${u.pathname}${u.search}`;
+  return null;
+}
+
+async function mediaRedirect(target, env) {
+  let at = target;
+  for (let hop = 0; hop < 6; hop++) {
+    if (!/^https?:$/.test(at.protocol) || (privateHost(at.hostname) && env.ALLOW_PRIVATE_FETCH !== "1")) return fail("bad url", 400);
+    const path = activityPath(at);
+    if (path) return new Response(null, { status: 302, headers: { ...CORS, location: path, "cache-control": "no-store" } });
+    let res;
+    try { res = await fetch(at.href, { method: "GET", redirect: "manual", headers: { range: "bytes=0-0" } }); } catch (e) { return fail("upstream failed", 502); }
+    const next = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
+    res.body?.cancel();
+    if (!next) return reply({ error: "media host is not mapped", host: at.hostname }, res.ok ? 415 : res.status);
+    try { at = new URL(next, at); } catch (e) { return fail("bad url", 400); }
+  }
+  return fail("too many redirects", 508);
+}
+
 async function fetchProxy(request, env) {
   if (!["GET", "HEAD", "POST"].includes(request.method)) return fail("method not allowed", 405);
   let target;
-  try { target = new URL(new URL(request.url).searchParams.get("u") || ""); } catch (e) { return fail("bad url", 400); }
+  const params = new URL(request.url).searchParams;
+  try { target = new URL(params.get("u") || ""); } catch (e) { return fail("bad url", 400); }
   if (!/^https?:$/.test(target.protocol) || (privateHost(target.hostname) && env.ALLOW_PRIVATE_FETCH !== "1")) return fail("bad url", 400);
+  if (params.get("media") === "1" && request.method !== "POST") return mediaRedirect(target, env);
   const headers = new Headers();
   for (const k of ["content-type", "accept", "accept-language"]) {
     const v = request.headers.get(k);

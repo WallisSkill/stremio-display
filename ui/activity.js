@@ -4,7 +4,7 @@ export const DISCORD_CLIENT_ID = document.querySelector('meta[name="wistv-discor
 const WIS = "/.proxy/wis";
 const RD = /^([a-z0-9-]+)\.download\.real-debrid\.com$/i;
 
-export function proxify(raw) {
+export function proxify(raw, media = false) {
   if (!ACTIVITY || raw == null) return raw;
   const text = String(raw);
   if (!/^(https?|wss?):/i.test(text) && !text.startsWith("//")) return raw;
@@ -18,17 +18,17 @@ export function proxify(raw) {
   const rd = RD.exec(u.host);
   if (rd) return `/.proxy/rd/${rd[1]}${u.pathname}${u.search}`;
   if (!/^https?:$/.test(u.protocol)) return raw;
-  return `${WIS}/api/fetch?u=${encodeURIComponent(u.href)}`;
+  return `${WIS}/api/fetch?u=${encodeURIComponent(u.href)}${media ? "&media=1" : ""}`;
 }
 
-function patchProp(proto, name) {
+function patchProp(proto, name, media = false) {
   const d = proto && Object.getOwnPropertyDescriptor(proto, name);
   if (!d || !d.set) return;
-  Object.defineProperty(proto, name, { ...d, set(v) { d.set.call(this, proxify(v)); } });
+  Object.defineProperty(proto, name, { ...d, set(v) { d.set.call(this, proxify(v, media)); } });
 }
 
 if (ACTIVITY) {
-  for (const [name, path] of [["wistv-room-api", "/api/room/"], ["wistv-profile-api", "/api/profile/"]]) {
+  for (const [name, path] of [["wistv-room-api", "/api/room/"], ["wistv-profile-api", "/api/profile/"], ["wistv-relay-api", "/api/relay"]]) {
     let m = document.querySelector(`meta[name="${name}"]`);
     if (!m) {
       m = document.createElement("meta");
@@ -63,14 +63,14 @@ if (ACTIVITY) {
   window.WebSocket = Socket;
 
   patchProp(HTMLImageElement.prototype, "src");
-  patchProp(HTMLMediaElement.prototype, "src");
+  patchProp(HTMLMediaElement.prototype, "src", true);
   patchProp(HTMLScriptElement.prototype, "src");
-  patchProp(HTMLSourceElement.prototype, "src");
+  patchProp(HTMLSourceElement.prototype, "src", true);
   patchProp(HTMLTrackElement.prototype, "src");
 
   const setAttr = Element.prototype.setAttribute;
   Element.prototype.setAttribute = function (name, value) {
-    return setAttr.call(this, name, String(name).toLowerCase() === "src" ? proxify(value) : value);
+    return setAttr.call(this, name, String(name).toLowerCase() === "src" ? proxify(value, this instanceof HTMLMediaElement || this instanceof HTMLSourceElement) : value);
   };
 
   const fixStyle = (el) => {
