@@ -3,6 +3,7 @@ export const DISCORD_CLIENT_ID = document.querySelector('meta[name="wistv-discor
 
 const WIS = "/.proxy/wis";
 const RD = /^([a-z0-9-]+)\.download\.real-debrid\.com$/i;
+const MAPPED = { "torrentio.strem.fun": "torrentio" };
 
 const pack = (text) => {
   let bin = "";
@@ -46,8 +47,16 @@ if (ACTIVITY) {
   document.documentElement.classList.add("activity");
 
   const realFetch = window.fetch.bind(window);
+  const viaMapping = (text, init) => {
+    let u;
+    try { u = new URL(text, location.href); } catch (e) { return null; }
+    const prefix = MAPPED[u.host];
+    if (!prefix || (init?.method && init.method.toUpperCase() !== "GET")) return null;
+    const fallback = () => realFetch(proxify(text), init);
+    return realFetch(`/.proxy/${prefix}${u.pathname}${u.search}`, init).then((r) => (r.ok ? r : fallback()), fallback);
+  };
   window.fetch = (input, init) => {
-    if (typeof input === "string" || input instanceof URL) return realFetch(proxify(String(input)), init);
+    if (typeof input === "string" || input instanceof URL) return viaMapping(String(input), init) || realFetch(proxify(String(input)), init);
     if (input instanceof Request) {
       const to = proxify(input.url);
       return realFetch(to === input.url ? input : new Request(to, input), init);
