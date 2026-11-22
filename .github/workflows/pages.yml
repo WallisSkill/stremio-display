@@ -47,6 +47,22 @@ jobs:
           test -s site/ui/bundle.json.sig
           jq -cn --argjson v "$v" --argjson api "$api" '{v: $v, api: $api}' > site/ui/version.json
           cat site/ui/version.json
+      - name: Build the Discord Activity
+        env:
+          DISCORD_CLIENT_ID: "1574131469826134136"
+        run: |
+          set -e
+          mkdir -p site/activity
+          cp -R ui/. site/activity/
+          sed -i "s#<head>#<head>\n  <meta name=\"wistv-discord-client\" content=\"${DISCORD_CLIENT_ID}\">#" site/activity/index.html
+          sdk="$RUNNER_TEMP/discord-sdk"
+          mkdir -p "$sdk"
+          cd "$sdk"
+          npm init -y > /dev/null
+          npm install --no-save --no-audit --no-fund @discord/embedded-app-sdk@2.5.0 esbuild@0.28.2
+          printf 'export { DiscordSDK, patchUrlMappings } from "@discord/embedded-app-sdk";\n' > entry.js
+          npx esbuild entry.js --bundle --format=esm --minify --outfile="$GITHUB_WORKSPACE/site/activity/discord-sdk.js"
+          test -s "$GITHUB_WORKSPACE/site/activity/discord-sdk.js"
       - name: Snapshot the app releases
         env:
           GH_TOKEN: ${{ github.token }}

@@ -1,3 +1,4 @@
+import "./activity.js";
 import { web, onWebEvent } from "./web.js";
 import { t as tr, setLang, savedLang, getLang, formatDate, LANGS, errText, serverText, locale, hasKey } from "./i18n.js";
 
