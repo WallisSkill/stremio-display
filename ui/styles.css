@@ -282,6 +282,15 @@ a.btn { text-decoration: none; }
 .empty { padding: 60px 20px; text-align: center; color: var(--muted); font-size: 15px; line-height: 1.6; }
 .spinner { width: 30px; height: 30px; margin: 50px auto; border-radius: 50%; border: 3px solid rgba(255,255,255,0.15); border-top-color: #fff; animation: spin 800ms linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+.spinner:not(.small):not(.tiny) { display: flex; justify-content: center; align-items: baseline; gap: 0.24em; width: auto; height: auto; border: 0; border-radius: 0; font-size: 34px; line-height: 1; letter-spacing: -0.01em; white-space: nowrap; user-select: none; -webkit-user-select: none; animation: none; }
+.spinner:not(.small):not(.tiny)::before { content: "WiS"; font-weight: 800; color: transparent; background: linear-gradient(100deg, #8a8a98 0%, #8a8a98 38%, #ffffff 50%, #8a8a98 62%, #8a8a98 100%); background-size: 300% 100%; -webkit-background-clip: text; background-clip: text; animation: wis-shine 1.6s ease-in-out infinite; }
+.spinner:not(.small):not(.tiny)::after { content: "TV"; font-weight: 400; color: #fff; opacity: 0.6; animation: wis-breathe 1.6s ease-in-out infinite; }
+@keyframes wis-shine { from { background-position: 100% 0; } to { background-position: 0 0; } }
+@keyframes wis-breathe { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.75; } }
+@media (prefers-reduced-motion: reduce) {
+  .spinner:not(.small):not(.tiny)::before { animation: none; background-position: 50% 0; }
+  .spinner:not(.small):not(.tiny)::after { animation: none; }
+}
 
 .plain { padding: 110px var(--gutter) 80px; }
 .plain h1 { font-size: 40px; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 26px; }
@@ -525,7 +534,7 @@ body.ext-video #player::before { content: "Video đang phát trong cửa sổ mp
 .pl-vol::-webkit-slider-thumb { -webkit-appearance: none; width: 13px; height: 13px; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.5); }
 
 .pl-spin { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; pointer-events: none; }
-.pl-spin .spinner { width: 46px; height: 46px; margin: 0; border-width: 3.5px; }
+.pl-spin .spinner { margin: 0; font-size: 46px; }
 .pl-spin span { font-size: 14px; color: rgba(255,255,255,0.75); min-height: 20px; margin-top: 12px; text-shadow: 0 1px 6px rgba(0,0,0,0.7); }
 .pl-flash { position: absolute; left: 50%; top: 50%; width: 88px; height: 88px; margin: -44px 0 0 -44px; border-radius: 50%; display: grid; place-items: center; background: rgba(0,0,0,0.45); backdrop-filter: blur(10px); opacity: 0; pointer-events: none; }
 .pl-flash svg { width: 40px; height: 40px; }
@@ -847,6 +856,7 @@ body.mini #player .pl-minibar .pl-btn svg { width: 18px; height: 18px; }
 body.mini #player .pl-minibar .pl-btn.big { width: 54px; height: 54px; border-radius: 50%; background: rgba(0,0,0,0.45); }
 body.mini #player .pl-minibar .pl-btn.big svg { width: 26px; height: 26px; }
 body.mini #player .pl-spin span { font-size: 12px; }
+body.mini #player .pl-spin .spinner { font-size: 24px; }
 body.mini #room-pill, body.mini #room-feed { display: none !important; }
 body.pip #player > :not(.pl-loading-bg) { display: none !important; }
 body.pip-dark #player { background: #000; }
