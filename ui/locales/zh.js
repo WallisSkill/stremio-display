@@ -548,7 +548,7 @@ export default {
   "wk.noRoom": "房间不存在或已关闭",
   "wk.badRequest": "请求无效",
   "wk.badHostKey": "房主密钥不正确",
-  "wk.roomFull": "房间已满",
+  "wk.roomFull": "房间已满（最多 {n} 人）",
   "wk.update": "此设备上的 WiS TV 版本过旧，请更新或重新打开应用后再加入一起看房间",
   "wk.noMember": "此人已不在房间中",
   "wk.hostClosed": "房主已关闭房间",

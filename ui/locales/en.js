@@ -548,7 +548,7 @@ export default {
   "wk.noRoom": "This room doesn't exist or has closed",
   "wk.badRequest": "Invalid request",
   "wk.badHostKey": "Wrong host key",
-  "wk.roomFull": "The room is full",
+  "wk.roomFull": "The room is full ({n} people max)",
   "wk.update": "This copy of WiS TV is out of date. Update or reopen the app to join watch-together rooms",
   "wk.noMember": "That person is no longer in the room",
   "wk.hostClosed": "The host closed the room",

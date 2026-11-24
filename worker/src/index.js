@@ -79,7 +79,7 @@ const SAID = {
   "wk.noRoom": "Không có phòng này hoặc phòng đã đóng",
   "wk.badRequest": "Yêu cầu không hợp lệ",
   "wk.badHostKey": "Mã chủ phòng không đúng",
-  "wk.roomFull": "Phòng đã đủ người",
+  "wk.roomFull": "Phòng đã đủ {n} người",
   "wk.hostClosed": "Chủ phòng đã đóng phòng",
   "wk.roomExpired": "Phòng đã mở quá {n} giờ",
   "wk.hostLeft": "Chủ phòng đã rời phòng",
@@ -313,7 +313,7 @@ function cleanHeaders(h) {
   for (const [k, v] of Object.entries(h).slice(0, 20)) if (HEADER_NAME.test(k) && typeof v === "string" && v.length <= 1000) out[k] = v;
   return Object.keys(out).length ? out : undefined;
 }
-const MAX_MEMBERS = 12;
+const MAX_MEMBERS = 5;
 const ROOM_LIFE_MS = 12 * 3600e3;
 const HOST_GRACE_MS = 3 * 60e3;
 const MAX_FRAME = 32 * 1024;
@@ -454,9 +454,9 @@ export class WatchRoom extends DurableObject {
   async fetch(request) {
     const url = new URL(request.url);
     const [client, server] = Object.values(new WebSocketPair());
-    const refuse = (code, key) => {
+    const refuse = (code, key, params) => {
       server.accept();
-      server.send(JSON.stringify({ t: "error", ...coded(key) }));
+      server.send(JSON.stringify({ t: "error", ...coded(key, params) }));
       server.close(code, "refused");
       return new Response(null, { status: 101, webSocket: client });
     };
@@ -469,6 +469,7 @@ export class WatchRoom extends DurableObject {
     const host = !!key && same(key, room.hostKey);
     if (key && !host) return refuse(4403, "wk.badHostKey");
     const name = memberName(url.searchParams.get("name"));
+    if (!host && this.full(null, id)) return refuse(4409, "wk.roomFull", { n: MAX_MEMBERS });
     this.ctx.acceptWebSocket(server);
     if (!host && room.pw) {
       server.serializeAttachment({ pending: true, id, name, tries: 0 });
@@ -479,17 +480,19 @@ export class WatchRoom extends DurableObject {
     return new Response(null, { status: 101, webSocket: client });
   }
 
+  full(except, id) {
+    return this.sockets(except).filter((s) => { const w = this.who(s); return w.id !== id && !w.host; }).length >= MAX_MEMBERS - 1;
+  }
+
   async admit(ws, id, name, host) {
     const room = this.room;
     for (const s of this.ctx.getWebSockets()) {
       const w = this.who(s);
       if (s !== ws && w.pending && w.id === id) try { s.close(4001, "replaced"); } catch (e) {}
     }
-    const others = this.sockets(ws);
-    const stale = others.filter((s) => { const w = this.who(s); return w.id === id || (host && w.host); });
-    const guests = others.filter((s) => !stale.includes(s) && !this.who(s).host);
-    if (!host && guests.length >= MAX_MEMBERS - 1) {
-      this.send(ws, { t: "error", ...coded("wk.roomFull") });
+    const stale = this.sockets(ws).filter((s) => { const w = this.who(s); return w.id === id || (host && w.host); });
+    if (!host && this.full(ws, id)) {
+      this.send(ws, { t: "error", ...coded("wk.roomFull", { n: MAX_MEMBERS }) });
       try { ws.close(4409, "refused"); } catch (e) {}
       return;
     }
