@@ -1902,6 +1902,7 @@ async function autoSub(session) {
 
 async function applySubStyle(keys) {
   const all = !keys;
+  if (all) quietSet("sub-ass-override", "force");
   if (all || keys.includes("scale")) quietSet("sub-scale", subPrefs.scale.toFixed(2));
   if (all || keys.includes("height")) {
     const p = subPlacement(subPrefs.height);
