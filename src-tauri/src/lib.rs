@@ -14,6 +14,7 @@ mod subinfo;
 mod torrent;
 #[cfg(desktop)]
 mod update;
+mod upscale;
 mod util;
 
 use tauri::{Emitter, Manager};
@@ -80,6 +81,8 @@ pub fn run() {
             commands::play,
             commands::player_command,
             commands::player_set,
+            commands::player_upscale,
+            commands::upscale_modes,
             commands::player_background,
             commands::player_fill,
             commands::device_battery,

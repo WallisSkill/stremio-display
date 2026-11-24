@@ -631,6 +631,20 @@ pub async fn player_set(app: AppHandle, name: String, value: String) -> R<()> {
     off_main(app, move |st| st.player.set(&name, &value)).await
 }
 
+#[tauri::command]
+pub fn upscale_modes() -> Vec<&'static str> {
+    crate::upscale::MODES.to_vec()
+}
+
+#[tauri::command]
+pub async fn player_upscale(app: AppHandle, mode: String) -> R<()> {
+    off_main(app, move |st| {
+        let list = crate::upscale::chain(&st.cache_dir, &mode)?;
+        st.player.set("glsl-shaders", &list)
+    })
+    .await
+}
+
 #[cfg(mobile)]
 #[tauri::command]
 pub async fn device_battery(app: AppHandle) -> R<Value> {

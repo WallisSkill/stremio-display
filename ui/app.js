@@ -2005,6 +2005,14 @@ function applyAudioLayout() {
   call("player_set", { name: "audio-channels", value: surroundOn() ? "auto-safe" : "stereo" }).catch(() => {});
 }
 
+const UPSCALE_MODES = ["off", "fast", "best"];
+const upscaleMode = () => { const m = pref("upscale", "off"); return UPSCALE_MODES.includes(m) ? m : "off"; };
+
+function applyUpscale() {
+  if (!TAURI || !pl.open) return;
+  call("player_upscale", { mode: upscaleMode() }).catch(() => {});
+}
+
 function curTime() {
   if (pl.drag != null) return pl.drag * (pl.s.duration || 0);
   if (Date.now() < pl.seekUntil) return pl.seekTarget;
@@ -2208,6 +2216,7 @@ function onPlayerState(s) {
     const session = pl.session;
     applyFill(fillMode);
     applyAudioLayout();
+    applyUpscale();
     setTimeout(() => autoSub(session), 600);
     pl.reveal = { at: Date.now(), t0: s.time || 0 };
     clearTimeout(pl.revealTimer);
@@ -5253,6 +5262,12 @@ async function renderSettings(view) {
     h("div", { class: "pl-pick", style: "display:flex;gap:8px;flex-wrap:wrap;margin-top:12px" },
       [[false, tr("set.audioStereo")], [true, tr("set.audioSurround")]].map(([on, label]) => h("button", { class: `btn focusable ${surroundOn() === on ? "primary" : ""}`, onclick: () => { setPref("surround", on); applyAudioLayout(); paintAudio(); } }, label))));
   paintAudio();
+  const sharp = TAURI ? h("div", { class: "panel", hidden: true }) : null;
+  const paintSharp = () => sharp && put(sharp, h("h3", {}, tr("set.sharp")),
+    h("p", { class: "hint" }, tr("set.sharpHint")),
+    h("div", { class: "pl-pick", style: "display:flex;gap:8px;flex-wrap:wrap;margin-top:12px" },
+      UPSCALE_MODES.map((mode) => h("button", { class: `btn focusable ${upscaleMode() === mode ? "primary" : ""}`, onclick: () => { setPref("upscale", mode); applyUpscale(); paintSharp(); } }, tr(`set.sharp.${mode}`)))));
+  if (sharp) call("upscale_modes").then(() => { sharp.hidden = false; paintSharp(); }, () => sharp.remove());
   const look = h("div", { class: "panel sub-look" });
   const preview = subPreview();
   const lookBody = h("div", { class: "sub-look-body" });
@@ -5271,7 +5286,7 @@ async function renderSettings(view) {
       LANGS.map(([code, label]) => h("button", { class: `btn focusable ${getLang() === code ? "primary" : ""}`, lang: code, onclick: () => chooseLang(code) }, label))));
   const version = h("p", { class: "hint", style: "margin-top:18px" });
   if (TAURI?.app?.getVersion) TAURI.app.getVersion().then((v) => { version.textContent = tr("set.version", { v }); }).catch(() => {});
-  view.append(h("div", { class: "page plain" }, h("h1", {}, tr("set.title")), account, people, language, together, own, subs, audio, look, updates, ios, pc, list, TOUCH ? h("div", { class: "panel" }, h("h3", {}, tr("set.controls")), touchHelp) : help, version));
+  view.append(h("div", { class: "page plain" }, h("h1", {}, tr("set.title")), account, people, language, together, own, subs, audio, sharp, look, updates, ios, pc, list, TOUCH ? h("div", { class: "panel" }, h("h3", {}, tr("set.controls")), touchHelp) : help, version));
   $(".panel .btn")?.focus({ preventScroll: true });
 }
 
